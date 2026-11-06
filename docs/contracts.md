@@ -3593,13 +3593,16 @@ PR integration (never main CI) shares that one allowance with **known flakes**
 (cp-a0gs): `defaults/ci-flakes.json` lists, per project, a test (file + exact
 name, optional literal failure text) or a gate job's aggregating step, each with
 its evidence run. A red first attempt qualifies only when every failed job is a
-listed gate or every entry of its `✖ failing tests:` block (node's spec reporter)
-is listed, read by `gh run view <id> -R <repo> --attempt <attempt> --log-failed`;
-an errored, empty, expired or cut log refuses. Workers add entries only from a
+listed gate or, with its test-suite step as its only failed step, every entry of
+its `✖ failing tests:` block (node's spec reporter) is listed and their number
+equals the reporter's `ℹ fail N`, read by `gh run view <id> -R <repo> --attempt
+<attempt> --log-failed`; an errored, empty, expired, cut or miscounted log
+refuses. Workers add entries only from a
 confirmed failed-attempt log. A claim records `attempt` and `outcome`
 (`uncertain` → `accepted`/`refused`; absent is a legacy, spent claim): the next
 call on that head settles an `uncertain` one from the run's attempts and never
-reruns, and an accepted rerun whose attempt still reads red waits.
+reruns, and an accepted rerun whose attempt still reads red waits. Main CI's
+claims keep the legacy shape and its original path.
 
 **Serial per project.** Every continuation step and every manual `cp_integrate`
 share one lane per project, so a second PR's step reads the base the first merge

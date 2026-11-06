@@ -875,7 +875,8 @@ test(
 		const shard = { id: 1, name: "shard 1", status: "completed", conclusion: "failure", steps: [{ name: "Checkout", status: "completed", conclusion: "success" }, { name: "Run suite shard", status: "completed", conclusion: "failure" }] };
 		const gate = { id: 2, name: "gate", status: "completed", conclusion: "failure", steps: [{ name: "Require every shard", status: "completed", conclusion: "failure" }] };
 		const at = "2026-11-06T10:00:00.0000000Z";
-		const log = (failures: Array<[string, string, string]>, lines: string[] = []) => [`✔ passes (1ms)`, "✖ failing tests:", "",
+		const log = (failures: Array<[string, string, string]>, lines: string[] = [], fail: number | null = failures.length) => [`✔ passes (1ms)`,
+			...(fail === null ? [] : [`ℹ fail ${fail}`]), "✖ failing tests:", "",
 			...failures.flatMap(([file, name, body]) => [`test at ${file}:12:1`, `✖ ${name} (5.1ms)`, `  ${body}`, ""]), ...lines].map((text) => `shard 1\tRun suite shard\t${at} ${text}`).join("\n");
 		const known: [string, string, string] = ["/home/runner/work/demo/demo/tests/flaky.test.ts", "flaky case", "Error: connect ECONNREFUSED 127.0.0.1:4100"];
 		const view = (id: number, attempt = 1) => `run view ${id} -R example/demo --attempt ${attempt} --log-failed`;
@@ -896,6 +897,12 @@ test(
 			[{ stdout: "" }, /job shard 1's failed log has no complete "✖ failing tests:" block/],
 			[{ stdout: log([], [`test at tests/flaky.test.ts:12:1`]) }, /no complete "✖ failing tests:" block/],
 			[{ stdout: log([known]) }, /no failed job lists a failing test \(a gate job alone never qualifies\)/, [gate]],
+			// The block cleanly omits one (unknown) failure: the reporter's count disagrees, or is missing.
+			[{ stdout: log([known], [], 2) }, /lists 1 failing test\(s\) but reports ℹ fail 2 \(a partial log never matches\)/],
+			[{ stdout: log([known], [], null) }, /lists 1 failing test\(s\) but reports no ℹ fail count/],
+			// Any failed step besides the test-suite step (an `if: always()` one included) disqualifies the run.
+			[{ stdout: log([known]) }, /job shard 1 failed in "Run suite shard", "Resource sampler tail", not in its one test-suite step alone/,
+				[{ ...shard, steps: [...shard.steps, { name: "Resource sampler tail", status: "completed", conclusion: "failure" }] }, gate]],
 		];
 		for (const [reply, reason, jobs] of refusals) {
 			const refused = await advance(c.jobId, red61, { 61: jobs ?? [shard, gate] }, [{ match: view(61), replies: [reply] }]);

@@ -1,21 +1,6 @@
 /**
- * One automatic rerun of an infra-only or known-flake CI failure (unload-parent PR2, cp-a0gs).
- *
- * A red head whose every failed job died in a setup step — checkout, toolchain,
- * `npm ci`, the treehouse install that 403'd — says nothing about the change, and
- * used to cost a parent turn and an implementer promote. `Integrator.advance`
- * calls `maybeRerunInfra` where it would otherwise resolve a failed head: when
- * the failure is infra-only, or (PR integration only, `flakesFile`) every failed
- * test in every failed job is a `defaults/ci-flakes.json` entry for the project,
- * and this job + head has never been rerun, the claim is written to
- * `state/ci-reruns.json` **first** (outcome `uncertain`), then `gh run rerun <id>
- * --failed` runs and the outcome is recorded; the step waits for the new attempt.
- *
- * An `uncertain` claim (a crash between claim and outcome) is settled by the next
- * call on that head from the forge's run attempts — rerun-started or not-started —
- * and never earns a second rerun. An accepted claim whose run still shows the
- * rerun attempt red is stale evidence: the step waits, no repair is spent.
- * Everything else goes to the parent unchanged (`ciFailedMessage` resolve).
+ * One automatic rerun per job + head of an infra-only, or (PR integration only) known-flake, CI failure; the claim
+ * in `state/ci-reruns.json` is written before `gh run rerun`. Everything else resolves as before.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -101,15 +86,28 @@ function testName(text: string): string {
 	return open > 0 && name.endsWith("ms)") ? name.slice(0, open) : name;
 }
 
-/** Each job's listed failures; `cut` when a `test at` line has no name line after it (a truncated log). */
-function listedFailures(log: string): Map<string, { failures: ListedFailure[]; cut: boolean }> {
-	const jobs = new Map<string, { failures: ListedFailure[]; cut: boolean; open: boolean }>();
+interface JobFailures {
+	failures: ListedFailure[];
+	/** A `test at` line with no name line after it (a truncated log). */
+	cut: boolean;
+	/** The sum of the reporter's `ℹ fail N` lines; undefined when the log has none. */
+	failCount?: number;
+}
+
+/** Each job's listed failures and reported fail count, from gh `--log-failed` output. */
+function listedFailures(log: string): Map<string, JobFailures> {
+	const jobs = new Map<string, JobFailures & { open: boolean }>();
 	for (const line of log.split("\n")) {
 		const [job, , ...rest] = line.replace(/\r$/, "").split("\t");
 		if (!job || rest.length === 0) continue;
 		const text = logText(rest.join("\t"));
 		const state = jobs.get(job.trim()) ?? { failures: [], cut: false, open: false };
 		jobs.set(job.trim(), state);
+		const count = /^ℹ fail (\d+)$/.exec(text.trim())?.[1];
+		if (count !== undefined) {
+			state.failCount = (state.failCount ?? 0) + Number(count);
+			continue;
+		}
 		if (text.trim() === "✖ failing tests:") {
 			state.open = true;
 			continue;
@@ -125,7 +123,7 @@ function listedFailures(log: string): Map<string, { failures: ListedFailure[]; c
 		} else if (last) last.body += `${text}\n`;
 	}
 	for (const state of jobs.values()) if (state.failures.some((failure) => !failure.name)) state.cut = true;
-	return new Map([...jobs].map(([job, { failures, cut }]) => [job, { failures, cut }]));
+	return new Map([...jobs].map(([job, { open: _open, ...found }]) => [job, found]));
 }
 
 type FlakeTest = Extract<CiFlakeEntry, { file: string }>;
@@ -165,8 +163,14 @@ async function classifyFlake(input: InfraRerunInput, run: { id: number; attempt:
 	const listed = listedFailures(read.stdout);
 	const names = new Set<string>();
 	for (const job of failed) {
+		const stepped = failedSteps(job);
+		if (stepped.length !== 1 || !TEST_STEP.test(stepped[0] ?? "")) return { ok: false, reason: `job ${job.name} failed in ${stepped.map((name) => `"${name}"`).join(", ") || "no step"}, not in its one test-suite step alone` };
 		const found = listed.get(job.name.trim());
 		if (!found || found.cut || found.failures.length === 0) return { ok: false, reason: `job ${job.name}'s failed log has no complete "✖ failing tests:" block (empty, expired or cut logs never match)` };
+		if (found.failCount !== found.failures.length) {
+			const reported = found.failCount === undefined ? "no ℹ fail count" : `ℹ fail ${found.failCount}`;
+			return { ok: false, reason: `job ${job.name}'s log lists ${found.failures.length} failing test(s) but reports ${reported} (a partial log never matches)` };
+		}
 		const unknown = found.failures.find((failure) => !tests.some((entry) => covers(entry, failure)));
 		if (unknown) return { ok: false, reason: `job ${job.name} failed "${unknown.name}" (${unknown.file}), which no entry covers` };
 		for (const failure of found.failures) names.add(failure.name);
@@ -247,7 +251,7 @@ export interface InfraRerunOutcome {
 export interface InfraRerunPorts {
 	home: string;
 	store: CiRerunStore;
-	/** The known-flake registry; only PR integration passes it (main CI stays infra-only). */
+	/** The known-flake registry; passed by PR integration only, it also selects outcome claims and the stale wait. */
 	flakesFile?: string;
 	now?: () => Date;
 }
@@ -285,12 +289,17 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
 	} catch {
 		return skip("the drain record is unreadable (fail closed)");
 	}
-	let claims: CiRerunEntry[];
-	try {
-		claims = input.store.claims(input.jobId, input.head);
-	} catch (error) {
-		return skip(firstLine((error as Error).message));
-	}
+	// Main CI passes no `flakesFile` and keeps its original path: legacy claims, no outcome settle, no stale wait.
+	const pr = input.flakesFile !== undefined;
+	const readClaims = (): CiRerunEntry[] | string => {
+		try {
+			return input.store.claims(input.jobId, input.head);
+		} catch (error) {
+			return firstLine((error as Error).message);
+		}
+	};
+	let claims = pr ? readClaims() : [];
+	if (typeof claims === "string") return skip(claims);
 	const uncertain = claims.filter((entry) => entry.outcome === "uncertain");
 	if (uncertain.length > 0) {
 		const started = (entry: CiRerunEntry) => input.runs.some((run) => run.databaseId === entry.run_id && shaMatches(run.headSha, input.head) && (run.attempt ?? 0) > (entry.attempt ?? 1));
@@ -314,8 +323,10 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
 	if (unidentified) return skip("a failed run has no id or attempt to rerun by");
 	const repeated = failed.find((run) => (run.attempt ?? 0) >= 2);
 	if (repeated) return skip(`run ${repeated.databaseId} is on attempt ${repeated.attempt}: a second failure is the parent's`);
+	if (!pr) claims = readClaims();
+	if (typeof claims === "string") return skip(claims);
 	const claimed = claims[0];
-	if (claimed) return skip(`the one automatic rerun for ${input.head.slice(0, 12)} was spent at ${claimed.at} (run ${claimed.run_id})`);
+	if (claimed) return skip(`the one ${pr ? "automatic" : "infra"} rerun for ${input.head.slice(0, 12)} was spent at ${claimed.at} (run ${claimed.run_id})`);
 	const policy = flakePolicy(input);
 	const steps: Array<{ id: number; attempt: number; step: string; flake: boolean }> = [];
 	for (const run of failed) {
@@ -340,7 +351,7 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
 	const at = isoTimestamp((input.now ?? (() => new Date()))());
 	try {
 		// Claim first: a crash or a gh fault after this line never earns a second rerun.
-		input.store.claim(steps.map(({ id, attempt, step }) => ({ job_id: input.jobId, head_sha: input.head, run_id: id, step, at, attempt, outcome: "uncertain" as const })));
+		input.store.claim(steps.map(({ id, attempt, step }) => ({ job_id: input.jobId, head_sha: input.head, run_id: id, step, at, ...(pr ? { attempt, outcome: "uncertain" as const } : {}) })));
 	} catch (error) {
 		return skip(`the claim could not be written: ${firstLine((error as Error).message)}`);
 	}
@@ -354,7 +365,7 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
 		else refused.push(`${id}: ${firstLine(rerun.stderr || rerun.stdout)}`);
 	}
 	try {
-		input.store.settle(input.jobId, input.head, outcomes);
+		if (pr) input.store.settle(input.jobId, input.head, outcomes);
 	} catch (error) {
 		facts.push(`outcome not recorded (${firstLine((error as Error).message)}); the next call settles the uncertain claim from the run's attempts`);
 	}

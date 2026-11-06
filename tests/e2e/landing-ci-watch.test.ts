@@ -766,12 +766,15 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		assert.ok(claimAtRerun.includes("main-demo") && claimAtRerun.includes(tip), "main claim is durable before gh reruns");
 		await waitFor(s.parentMessages, (body) => body.includes("MAIN CI RERUN") && body.includes("attempt 2: a second failure"), { timeoutMs: 30_000, what: "main rerun and second-attempt notice reach parent" });
 		const claimsFile = join(s.home, LAYOUT.ciRerunsFile);
-		assert.deepEqual(JSON.parse(readFileSync(claimsFile, "utf8")).entries.map((entry: { job_id: string; head_sha: string; run_id: number; step: string }) => [entry.job_id, entry.head_sha, entry.run_id, entry.step]), [["main-demo", tip, 106, "Install treehouse"]]);
+		// cp-a0gs: main CI keeps the legacy claim shape (no attempt/outcome), so it never takes the PR settle or stale wait.
+		const mainClaims = () => (JSON.parse(readFileSync(claimsFile, "utf8")).entries as Array<Record<string, unknown>>).map(({ at: _at, ...entry }) => entry);
+		assert.deepEqual(mainClaims(), [{ job_id: "main-demo", head_sha: tip, run_id: 106, step: "Install treehouse" }]);
 		await observe([own(tip, "success")]);
 		tip = advanceBase(s.repo, "main-change.txt", "main advanced again\n");
 		await observe([own(tip, "failure")], { jobs: { 106: [setupJob("Install treehouse")] }, routes: [...routes, { match: "run rerun 106", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
 		assert.equal(rows().find((row) => row.project === "demo")?.red_since_sha, tip, "refused infra rerun latches main");
 		assert.equal(JSON.parse(readFileSync(claimsFile, "utf8")).entries.length, 2, "refused rerun keeps its claim");
+		assert.deepEqual(mainClaims()[1], { job_id: "main-demo", head_sha: tip, run_id: 106, step: "Install treehouse" }, "a refused main claim records no outcome");
 		assert.equal(s.ghCalls().filter((call) => call === "run rerun 106 --failed").length, 2, "refusal does not earn a retry");
 		await waitFor(s.parentMessages, (body) => body.includes("HTTP 403: forbidden"), { timeoutMs: 30_000, what: "rerun refusal reaches parent" });
 	});
