@@ -9,14 +9,19 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { CommandPost } from "../../src/command-post.ts";
+import { DEFAULT_ORIGIN, type DiffVerdict, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { isDiffReviewWait } from "../../src/diff-review.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
+import { VERDICT_TOOL } from "../../src/drivers/claude-verdict.ts";
 import { nativeAvailabilityFile, readNativeAvailability, recordNativeObservation } from "../../src/native-availability.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, subscriberEnv } from "../harness/claude-mock-provider.ts";
+import {
+	type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, subscriberEnv, toolResults,
+} from "../harness/claude-mock-provider.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
-import { readFleet, readRunEvents, treehouseAvailable } from "../harness/index.ts";
+import { createAgentDir, createScratchHome, createScratchRepo, MockProvider, readFleet, readRunEvents, REPO_ROOT, treehouseAvailable } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -395,3 +400,78 @@ async function waitFailed(fleet: (id: string) => ReturnType<typeof readFleet>["j
 	}
 	return fleet(id);
 }
+
+// N4h: with the reviews row on `driver: "claude"` and claude_review on, cp_review runs a native reviewer (Bash refused,
+// lockdown ok, usage measured) that files the verdict pi would; with the switch off the same review runs on pi.
+test("N4h native reviewer: cp_review on a claude row files pi's verdict natively; claude_review off runs pi", { skip, timeout: 300_000 }, async (t) => {
+	const home = createScratchHome();
+	const repo = createScratchRepo({ name: "demo" });
+	const provider = await MockProvider.start();
+	const agent = createAgentDir({ provider });
+	const verdict = (jobId: string) => ({ job_id: jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["reviewed the packet"] });
+	const [nativeJob, piJob] = ["cp-n4h-native", "cp-n4h-pi"];
+	const claude = await startClaudeMockProvider([
+		{ kind: "tool_use", calls: [{ name: "Bash", input: { command: "cat /etc/hostname" } }] },
+		{ kind: "tool_use", calls: [{ name: VERDICT_TOOL, input: verdict(nativeJob) }] },
+		{ kind: "text", text: "Reviewed." },
+	]);
+	const scratch = mkdtempSync(join(tmpdir(), "cp-n4h-native-"));
+	chmodSync(scratch, 0o700);
+	const fakeHome = join(scratch, "home");
+	mkdirSync(join(fakeHome, ".claude"), { recursive: true, mode: 0o700 });
+	writeFileSync(join(fakeHome, ".claude", "settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: claude.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN } }));
+	const parentEnv = { ...process.env, ...agent.env, HOME: fakeHome, CLAUDE_CONFIG_DIR: join(fakeHome, ".claude") };
+	// pi's lane cannot serve the native model, so the switch-off walk lands on the row's pi fallback.
+	const modelRegistry = () => ({ find: (provider: string, id: string) => ({ provider, id }), hasConfiguredAuth: (m: { provider: string; id: string }) => `${m.provider}/${m.id}` !== FAKE_NATIVE_MODEL });
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv, holdsParentLock: () => true, sendWakeup: () => true, modelRegistry });
+	t.after(async () => {
+		await post.shutdown(); await claude.close(); agent.cleanup(); await provider.stop(); repo.cleanup(); home.cleanup();
+		rmSync(scratch, { recursive: true, force: true });
+	});
+	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
+	for (const jobId of [nativeJob, piJob]) {
+		repo.git("checkout", "--quiet", "-b", jobId, repo.branch);
+		repo.write(`${jobId}.txt`, "one\n");
+		repo.commitAll(jobId);
+		repo.git("push", "--quiet", "-u", "origin", jobId);
+		repo.git("checkout", "--quiet", repo.branch);
+		const now = isoTimestamp();
+		await post.fleet.add({ job_id: jobId, project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held", reported_at: now, dispatched_at: now, usage: EMPTY_USAGE,
+			worker: { pid: process.pid, session_id: "legacy", session_file: join(home.path, "legacy.jsonl"), profile: "implementer", role: "implementer", model: "mock/model", started_at: now }, worktree: join(home.path, "recycled", jobId), branch: jobId });
+	}
+	const piModel = provider.addScript("n4h-pi", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: verdict(piJob) }] }]);
+	agent.writeModels(provider);
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*", FAKE_NATIVE_MODEL],
+		rubric: [{ id: "reviews", role: "gate-reviewer", model: FAKE_NATIVE_MODEL, fallbacks: [piModel], driver: "claude" }] }));
+	const toggle = (on: boolean) => writeFileSync(join(home.path, LAYOUT.data, "native.json"), JSON.stringify({ claude_review: on }));
+	const review = async (jobId: string) => {
+		const started = await post.diffReview({ jobId });
+		if (isDiffReviewWait(started)) {
+			post.reviewRuns.handBack(started.key);
+			await post.reviewRuns.settled(started.key);
+		}
+		const attempt = isDiffReviewWait(started) ? started.attempt : started.verdict.attempt;
+		const result = JSON.parse(readFileSync(join(home.path, paths.reviewFile(jobId, attempt)), "utf8")) as DiffVerdict;
+		const run = join(home.path, paths.reviewRunDir(jobId, attempt));
+		const events = readFileSync(join(run, "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; payload: Record<string, unknown> });
+		const routed = events.find((event) => event.type === "cp:routing_resolved" || event.type === "routing_resolved")?.payload;
+		return { result, run, events, routed, verdictFile: join(home.path, paths.reviewVerdictFile(jobId, attempt)) };
+	};
+	toggle(true);
+	const native = await review(nativeJob);
+	assert.equal(native.result.verdict, "pass", JSON.stringify(native.result));
+	assert.match(String(native.routed?.line), new RegExp(`model=${FAKE_NATIVE_MODEL} .*driver=claude`), JSON.stringify(native.routed));
+	assert.deepEqual((JSON.parse(readFileSync(native.verdictFile, "utf8")) as { review: unknown }).review, verdict(nativeJob), "the native verdict file is pi's shape");
+	assert.match(toolResults(claude.requests)[0] ?? "", /^\[error\]/, "the reviewer's Bash call is refused");
+	const run = native.events.find((event) => event.type === "native_run")?.payload;
+	assert.deepEqual([run?.lockdown, run?.report, run?.usage], ["ok", true, "measured"], JSON.stringify(run));
+	assert.ok((JSON.parse(readFileSync(join(native.run, "status.json"), "utf8")) as { usage: { total_tokens: number } }).usage.total_tokens > 0, "native usage is measured");
+	toggle(false);
+	const pi = await review(piJob);
+	assert.equal(pi.routed?.model, piModel, JSON.stringify(pi.routed));
+	assert.doesNotMatch(String(pi.routed?.line), /driver=claude/);
+	assert.equal(pi.events.some((event) => event.type === "native_run"), false);
+	const same = (v: DiffVerdict) => ({ verdict: v.verdict, cause: v.cause, flags: v.flags, reasons: v.reasons });
+	assert.deepEqual(same(native.result), same(pi.result), "the native review result equals pi's for the same verdict");
+});

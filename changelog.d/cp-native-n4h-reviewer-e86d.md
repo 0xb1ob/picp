@@ -1,0 +1,1 @@
+- Native reviewer (N4h): `cp_review`, `cp_gate` and quality reviews run on the Claude CLI when the reviewer's routing row says `driver: "claude"` and `data/native.json` `claude_review` is on (off by default), with Read/Grep/Glob confined to the review packet and `report_verdict` on pi's own handler (same checks, same `verdict.json`); otherwise the reviewer stays on pi.

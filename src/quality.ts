@@ -59,7 +59,9 @@ import { awaitVerdict } from "./gate.ts";
 import { type ReviewRuns, type ReviewWait, type ReviewWakeup } from "./review-runs.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
-import { type ModelProbe, resolveWithCapacity, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
+import { type ModelProbe, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
+import { resolveReviewerRoute } from "./reviewer-route.ts";
+import { nativeSpawn } from "./dispatch-driver.ts";
 import { RunRecorder } from "./run-artifacts.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 
@@ -452,6 +454,7 @@ export class QualityPass {
 				model,
 				// The voter spawns at the effort routing resolved, not the profile's.
 				...(route.decision.thinking ? { thinking: route.decision.thinking } : {}),
+				...nativeSpawn(route.decision),
 				brief,
 				sessionDir: join(home, LAYOUT.sessions),
 				sessionName: key,
@@ -492,7 +495,7 @@ export class QualityPass {
 	 */
 	async #route(profile: WorkerProfile, request: QualityRequest, record?: { project: string; routing?: JobRouting }): Promise<ReviewerRoute> {
 		const inputs = reviewerRoutingInputs(record);
-		const decision = await resolveWithCapacity(
+		const decision = await resolveReviewerRoute(
 			{
 				profile,
 				jobId: request.jobId,
@@ -505,6 +508,7 @@ export class QualityPass {
 			this.#options.routing,
 			this.#options.probe,
 			this.#options.capacity,
+			{ home: this.#options.home, jobId: request.jobId, record: this.#options.fleet?.get(request.jobId), jobs: this.#options.fleet?.read().jobs ?? [], manager: this.#options.manager },
 		);
 		return { decision, inputs };
 	}

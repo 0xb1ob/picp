@@ -11,6 +11,7 @@ import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, 
 import { nativeAvailability } from "./native-availability.ts";
 export { observeNative } from "./native-availability-observer.ts";
 import type { NativeDriver } from "./worker-driver.ts";
+import type { WorkerManager } from "./worker-manager.ts";
 
 export interface DriverContext {
 	home: string;
@@ -23,6 +24,8 @@ export interface DriverContext {
 	explicit?: NativeDriver;
 	/** Admission (not preview): take the home's one native slot before the async spawn. */
 	reserve?: boolean;
+	/** Native workers live in this parent that the fleet does not list (reviewers, N4h); each holds the native slot. */
+	nativeLive?: readonly string[];
 }
 
 type Capacity = Parameters<typeof resolveWithCapacity>[3];
@@ -91,9 +94,13 @@ function allowRefusal(config: RoutingConfig, role: Role, model: string): { categ
 
 /** Checked synchronously after the last await, so admissions in one parent never overfill the home's N slots. */
 function slotRefusal(ctx: DriverContext): { category: NativeRefusal; why: string } | undefined {
-	const holders = [...liveNativeJobs(ctx.jobs), ...(slots.get(ctx.home) ?? [])];
+	const holders = [...liveNativeJobs(ctx.jobs), ...(slots.get(ctx.home) ?? []), ...(ctx.nativeLive ?? [])];
 	return nativeSlotRefusal(holders, ctx.jobId, nativeMaxConcurrent(ctx.home), "live or being admitted");
 }
+
+/** Keys of this parent's live native workers other than `except`'s: reviewers hold the slot without a fleet record. */
+export const liveNativeWorkers = (manager: Pick<WorkerManager, "active">, except: string): string[] =>
+	manager.active.filter((worker) => worker.driver !== undefined && worker.key !== except).map((worker) => worker.key);
 
 /** The three driver fields `JobRouting` and `cp:routing_resolved` persist; absent is pi. */
 export function driverFields(decision: RoutingDecision): Pick<RoutingDecision, "requested_driver" | "driver" | "driver_reason"> {

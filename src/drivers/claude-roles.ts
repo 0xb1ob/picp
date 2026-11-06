@@ -1,4 +1,4 @@
-/** N4c: the native tool set and the Edit/Write scope per role; only planner (research) and implementer run native. */
+/** N4c: the native tool set and the Edit/Write scope per role: planner (research), implementer and (N4h) reviewer. */
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { Role } from "../contracts.ts";
 import { liveGrants, MandateStore } from "../mandate.ts";
@@ -7,10 +7,11 @@ import { secretPathIn } from "./claude-bash-policy.ts";
 import { worktreePathRefusal } from "./claude-ship-policy.ts";
 import type { SpikeGuard, SpikeJob } from "./claude-spike.ts";
 
-export type NativeRole = "research" | "implementer";
+export type NativeRole = "research" | "implementer" | "reviewer";
 const TOOLS: Record<NativeRole, readonly string[]> = {
 	research: ["Read", "Grep", "Glob", "Bash", "Write"],
 	implementer: ["Read", "Grep", "Glob", "Edit", "Write", "Bash"],
+	reviewer: ["Read", "Grep", "Glob"],
 };
 export const RESEARCH_TOOLS = TOOLS.research;
 
@@ -18,10 +19,27 @@ export const RESEARCH_TOOLS = TOOLS.research;
 export function nativeRole(role: Role): NativeRole {
 	if (role === "planner") return "research";
 	if (role === "implementer") return "implementer";
-	throw new Error(`native claude has no tool set for role ${role}; only planner and implementer run native`);
+	if (role === "gate-reviewer") return "reviewer";
+	throw new Error(`native claude has no tool set for role ${role}; only planner, implementer and gate-reviewer run native`);
 }
 
 export const roleTools = (role: Role): readonly string[] => TOOLS[nativeRole(role)];
+
+/** N4h: a reviewer reads only its scratch cwd (the review packet); a Read/Grep/Glob path elsewhere is refused. */
+export function reviewerReadGuard(job: SpikeJob): SpikeGuard {
+	const root = resolve(job.worktree);
+	return (call) => {
+		if (call.name !== "read" && call.name !== "grep" && call.name !== "find") return undefined;
+		// Grep and Glob default to the cwd; Read always names its file. A Glob pattern is a path too.
+		const paths = call.name === "read" ? [call.input.path] : [call.input.path, ...(call.name === "find" ? [call.input.pattern] : [])].filter((p) => p !== undefined);
+		for (const path of paths) {
+			if (typeof path !== "string" || path === "") return "Refused: a reviewer's Read/Grep/Glob needs a string path.";
+			const why = resolve(root, path) === root ? undefined : worktreePathRefusal(path, root);
+			if (why !== undefined) return `Refused: a reviewer reads only its scratch dir ${root}; ${why} is denied.`;
+		}
+		return undefined;
+	};
+}
 
 /** N4d: the implementer's picp MCP tools beside `report_result` (claude-forge-tools.ts), in the lockdown's surface. */
 export const FORGE_TOOL_NAMES = ["git_push", "git_fetch", "pr_create", "pr_edit", "gh_read"] as const;
@@ -35,8 +53,9 @@ export function implementerExclusions(home: string): string[] {
 	return [...new Set([...loadMandateDefaults(home).exclude_paths, ...grants])];
 }
 
-/** Edit/Write scope: research its artifact directory; an implementer its worktree, no .git, secret or exclusion. */
+/** Edit/Write scope: research its artifact dir; an implementer its worktree, no .git, secret or exclusion; a reviewer none. */
 export function writeScopeGuard(job: SpikeJob, secrets: readonly string[], role: NativeRole): SpikeGuard {
+	if (role === "reviewer") return (call) => (call.name === "write" || call.name === "edit" ? "Refused: a reviewer has no Edit or Write; it only reads." : undefined);
 	if (role === "research") {
 		if (!job.artifactPath) throw new Error(`research ${job.job_id} has no artifact path; a research worker never runs without one`);
 		const writeRoot = dirname(resolve(job.artifactPath));

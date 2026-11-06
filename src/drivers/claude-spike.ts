@@ -34,6 +34,7 @@ import {
 	ENVELOPE_REPAIR_MAX_ATTEMPTS,
 	type Envelope,
 	type EnvelopeRecord,
+	type GateReview,
 	EnvelopeSchema,
 	isoTimestamp,
 	type JobKind,
@@ -59,7 +60,8 @@ import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
 import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
 import { forgeTools } from "./claude-forge-tools.ts";
-import { FORGE_TOOL_NAMES, nativeRole, RESEARCH_TOOLS, roleMcpTools, roleTools, writeScopeGuard } from "./claude-roles.ts";
+import { FORGE_TOOL_NAMES, nativeRole, RESEARCH_TOOLS, reviewerReadGuard, roleMcpTools, roleTools, writeScopeGuard } from "./claude-roles.ts";
+import { VERDICT_TOOL, type VerdictState, verdictServer } from "./claude-verdict.ts";
 import { shipBashRefusal } from "./claude-ship-policy.ts";
 import { type HooksListing, type Lockdown, lockdownVerdict } from "./claude-lockdown.ts";
 import { assertNativeEffort } from "./claude.ts";
@@ -176,6 +178,7 @@ export function normalizeToolCall(toolName: string, input: unknown): NormalizedC
 	if (toolName === "Grep") return { name: "grep", input: { pattern: args.pattern, path: args.path } };
 	if (toolName === "Glob") return { name: "find", input: { pattern: args.pattern, path: args.path } };
 	if (toolName === REPORT_TOOL) return { name: "report_result", input: args };
+	if (toolName === VERDICT_TOOL) return { name: "report_verdict", input: args };
 	const forge = FORGE_TOOL_NAMES.find((name) => toolName === `mcp__picp__${name}`);
 	if (forge !== undefined) return { name: forge, input: args };
 	return undefined;
@@ -195,6 +198,7 @@ export function spikeGuards(
 	let ciStatusQueries = 0;
 	const bash: SpikeGuard = (call) => {
 		if (call.name !== "bash") return undefined;
+		if (native === "reviewer") return "Refused: a reviewer has no Bash; it reads its scratch dir with Read, Grep and Glob.";
 		const command = call.input.command;
 		if (typeof command !== "string") return "Refused: bash needs a string command.";
 		const ci = detectCiWait(command);
@@ -220,10 +224,11 @@ export function spikeGuards(
 		(call) => (WORKER_FORBIDDEN_TOOLS.includes(call.name) ? `${call.name} is a parent-only tool.` : undefined),
 		bash,
 		writeScope,
+		...(native === "reviewer" ? [reviewerReadGuard(job)] : []),
 		(call) => {
 			const paths = call.name === "find" ? [call.input.path, call.input.pattern] : call.name === "read" || call.name === "grep" ? [call.input.path] : [];
 			const secret = paths.find((path) => typeof path === "string" && secretPathIn(path, job.worktree, secrets));
-			const who = native === "research" ? "a research worker" : "an implementer";
+			const who = { research: "a research worker", implementer: "an implementer", reviewer: "a reviewer" }[native];
 			return secret === undefined ? undefined : `Refused: ${who} never reads the Claude settings, its config, /proc or /dev/fd (${String(secret)}).`;
 		},
 		(call) => workerHostGuard(call.name, call.input, job.runDir),
@@ -263,9 +268,8 @@ export function preToolUseHook(
 	};
 }
 
-interface ReportState {
+interface ReportState extends VerdictState {
 	accepted?: Envelope;
-	refusals: string[];
 	attempts: number;
 }
 
@@ -371,6 +375,8 @@ export interface SpikeResult {
 	/** Undefined only when no child was spawned. */
 	exit?: SpikeExit;
 	report?: Envelope;
+	/** A native reviewer's accepted `report_verdict` (N4h), already filed in the run dir. */
+	verdict?: GateReview;
 	reportRefusals: string[];
 	denials: Array<{ tool: string; reason: string }>;
 	resultSubtype?: string;
@@ -434,8 +440,10 @@ async function runInScratch(
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const state: ReportState = { refusals: [], attempts: 0 };
 	const tools = options.tools ?? roleTools(options.job.role);
-	const mcpTools = [REPORT_TOOL, ...roleMcpTools(options.job.role)];
-	const forge = nativeRole(options.job.role) === "implementer" ? forgeTools(options.job, hostEnv) : [];
+	const native = nativeRole(options.job.role);
+	// The lockdown expects the role's MCP surface: a reviewer's server holds report_verdict alone.
+	const mcpTools = native === "reviewer" ? [VERDICT_TOOL] : [REPORT_TOOL, ...roleMcpTools(options.job.role)];
+	const forge = native === "implementer" ? forgeTools(options.job, hostEnv) : [];
 	const denials: SpikeResult["denials"] = [];
 	const models = new Set<string>();
 	let child: ChildProcess | undefined;
@@ -484,7 +492,7 @@ async function runInScratch(
 		// Binds as allowManagedHooksOnly: settings-file and project hooks never run; picp's SDK callback still does.
 		managedSettings: { disableAllHooks: true },
 		strictMcpConfig: true,
-		mcpServers: { picp: reportServer(options.job, state, forge) },
+		mcpServers: { picp: native === "reviewer" ? verdictServer(options.job, state) : reportServer(options.job, state, forge) },
 		tools: [...tools],
 		allowedTools: [...tools, ...mcpTools],
 		disallowedTools: ["Agent", "Task", "WebFetch", "WebSearch"],
@@ -542,6 +550,7 @@ async function runInScratch(
 		...(spawnedEnvKeys === undefined ? {} : { spawnedEnvKeys }),
 		...(exit === undefined ? {} : { exit }),
 		...(state.accepted === undefined ? {} : { report: state.accepted }),
+		...(state.verdict === undefined ? {} : { verdict: state.verdict }),
 		reportRefusals: state.refusals,
 		denials,
 		...(result === undefined ? {} : { resultSubtype: result.subtype }),

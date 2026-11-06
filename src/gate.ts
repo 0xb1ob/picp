@@ -50,7 +50,9 @@ import type { PendingReview } from "./contracts.ts";
 import { ReviewRunsError, type ReviewRuns, type ReviewWait, type ReviewWakeup } from "./review-runs.ts";
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
 import { atomicWriteJson } from "./json-store.ts";
-import { type ModelProbe, resolveWithCapacity, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
+import { type ModelProbe, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
+import { resolveReviewerRoute } from "./reviewer-route.ts";
+import { nativeSpawn } from "./dispatch-driver.ts";
 import { RunRecorder } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { Sender } from "./send.ts";
@@ -910,7 +912,7 @@ export class Gate {
 				model,
 				// The resolved effort travels with the resolved model: a rubric row that
 				// routes reviewers at medium must not be spawned at the profile's high.
-				...(route.decision.thinking ? { thinking: route.decision.thinking } : {}),
+				...(route.decision.thinking ? { thinking: route.decision.thinking } : {}), ...nativeSpawn(route.decision),
 				brief,
 				sessionDir: join(home, LAYOUT.sessions),
 				sessionName: key,
@@ -1168,7 +1170,7 @@ export class Gate {
 	 */
 	async #route(profile: WorkerProfile, jobId: string, record: FleetRecord | undefined, override?: string, thinking?: ReviewerModelSelection["thinking"]): Promise<ReviewerRoute> {
 		const inputs = reviewerRoutingInputs(record);
-		const decision = await resolveWithCapacity(
+		const decision = await resolveReviewerRoute(
 			{
 				profile,
 				jobId,
@@ -1181,7 +1183,7 @@ export class Gate {
 			},
 			this.#options.routing,
 			this.#options.probe,
-			this.#options.capacity,
+			this.#options.capacity, { home: this.#options.home, jobId, record, jobs: this.#options.fleet?.read().jobs ?? [], manager: this.#options.manager },
 		);
 		return { decision, inputs };
 	}

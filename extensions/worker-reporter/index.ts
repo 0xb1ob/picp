@@ -429,6 +429,49 @@ function makeReporter<T>(options: {
 	};
 }
 
+/** `report_verdict`'s handler: clamp, check, repair, write once. pi's tool and the native reviewer (N4h) share it. */
+export function verdictReporter(context: JobContext, state: ReporterState = { attempts: 0, reported: false }) {
+	const recordFile = join(context.runDir, VERDICT_FILE);
+	const rawFile = join(context.runDir, VERDICT_RAW_FILE);
+	// Set by validate() when the payload it accepted had to be clamped, read on
+	// the write path below so the reviewer's own words land next to the record.
+	let unclamped: unknown;
+	return makeReporter<GateReview>({
+		tool: "report_verdict",
+		recordFile,
+		rejectionFile: join(context.runDir, VERDICT_REJECTION_FILE),
+		state,
+		validate: (payload) => {
+			const clamp = clampVerdictItems(payload);
+			const shape = validate<GateReview>(GateReviewSchema, clamp.payload);
+			if (!shape.ok) return shape;
+			const errors = verdictChecks(shape.value, context);
+			if (errors.length > 0) return { ok: false, errors };
+			unclamped = clamp.clamped ? payload : undefined;
+			return shape;
+		},
+		buildRecord: (review, attempt): VerdictRecord => {
+			// buildRecord runs exactly once, immediately before the record is
+			// persisted: the only point where "next to the record" is true.
+			if (unclamped !== undefined) atomicWriteJson(rawFile, unclamped);
+			return {
+				schema_version: SCHEMA_VERSION,
+				job_id: context.job_id,
+				received_at: isoTimestamp(),
+				attempt,
+				review,
+			};
+		},
+		recordPayload: (record) => (record as VerdictRecord).review,
+		details: (review, path) => ({ accepted: true, review, path }),
+		headline: (review) =>
+			unclamped === undefined
+				? `Recorded verdict "${review.verdict}" for ${context.job_id}.`
+				: `Recorded verdict "${review.verdict}" for ${context.job_id}. Over-long reasons/revisions were cut to ` +
+					`${GATE_REVIEW_ITEM_MAX} chars; your unabridged payload is at ${rawFile}.`,
+	});
+}
+
 /** The bounded question tool (T31). Registered only when the parent allows it. */
 export const AskOperatorSchema = Type.Object(
 	{
@@ -594,45 +637,7 @@ export default function (pi: ExtensionAPI): void {
 	}
 
 	if (context.role === "gate-reviewer") {
-		const recordFile = join(context.runDir, VERDICT_FILE);
-		const rawFile = join(context.runDir, VERDICT_RAW_FILE);
-		// Set by validate() when the payload it accepted had to be clamped, read on
-		// the write path below so the reviewer's own words land next to the record.
-		let unclamped: unknown;
-		const report = makeReporter<GateReview>({
-			tool: "report_verdict",
-			recordFile,
-			rejectionFile: join(context.runDir, VERDICT_REJECTION_FILE),
-			state,
-			validate: (payload) => {
-				const clamp = clampVerdictItems(payload);
-				const shape = validate<GateReview>(GateReviewSchema, clamp.payload);
-				if (!shape.ok) return shape;
-				const errors = verdictChecks(shape.value, context);
-				if (errors.length > 0) return { ok: false, errors };
-				unclamped = clamp.clamped ? payload : undefined;
-				return shape;
-			},
-			buildRecord: (review, attempt): VerdictRecord => {
-				// buildRecord runs exactly once, immediately before the record is
-				// persisted: the only point where "next to the record" is true.
-				if (unclamped !== undefined) atomicWriteJson(rawFile, unclamped);
-				return {
-					schema_version: SCHEMA_VERSION,
-					job_id: context.job_id,
-					received_at: isoTimestamp(),
-					attempt,
-					review,
-				};
-			},
-			recordPayload: (record) => (record as VerdictRecord).review,
-			details: (review, path) => ({ accepted: true, review, path }),
-			headline: (review) =>
-				unclamped === undefined
-					? `Recorded verdict "${review.verdict}" for ${context.job_id}.`
-					: `Recorded verdict "${review.verdict}" for ${context.job_id}. Over-long reasons/revisions were cut to ` +
-						`${GATE_REVIEW_ITEM_MAX} chars; your unabridged payload is at ${rawFile}.`,
-		});
+		const report = verdictReporter(context, state);
 
 		pi.registerTool(
 			defineTool({

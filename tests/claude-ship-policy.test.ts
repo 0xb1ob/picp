@@ -77,12 +77,32 @@ test("implementer exclusions come from the job: unlisted, a workflow write is al
 		const open = preToolUseHook(spikeGuards(job([]), SECRETS));
 		assert.equal((await decide(open, "Write", { file_path: ".github/workflows/x.yml" }))?.permissionDecision, "allow");
 		assert.throws(() => spikeGuards(job(), SECRETS), /implementer cp-ship-unit has no exclude_paths/);
-		assert.throws(() => spikeGuards(job([]), SECRETS, "gate-reviewer"), /no tool set for role gate-reviewer/);
+		assert.throws(() => spikeGuards(job([]), SECRETS, "ops" as never), /no tool set for role ops/);
 		assert.deepEqual(roleTools("implementer"), ["Read", "Grep", "Glob", "Edit", "Write", "Bash"]);
 		assert.deepEqual(roleTools("planner"), ["Read", "Grep", "Glob", "Bash", "Write"]);
 		// Research keeps its own Bash and write scope under the same job: Edit is still outside its tool set.
 		const research = preToolUseHook(spikeGuards({ ...job([]), kind: "research", role: "planner" }, SECRETS));
 		assert.equal((await decide(research, "Edit", { file_path: "src/x.ts" }))?.permissionDecisionReason, "Refused: Edit is not in the spike's tool set.");
 		assert.equal((await decide(research, "Bash", { command: "git add -A" }))?.permissionDecision, "deny");
+	});
+});
+
+// N4h: a native reviewer reads only its scratch dir (the review packet); a Read/Grep/Glob outside it, through a link, into a
+// secret, and any Bash, Write or Edit are refused by the real hook, so a reviewer cannot look past what it was handed.
+test("reviewer guards: Read/Grep/Glob stay in the scratch dir; secrets, Bash, Write and Edit are refused", async () => {
+	await withWorktree(async (root, scratch, job) => {
+		const hook = preToolUseHook(spikeGuards({ ...job(), kind: "research", role: "gate-reviewer" }, SECRETS));
+		assert.deepEqual(roleTools("gate-reviewer"), ["Read", "Grep", "Glob"]);
+		const allowed = [["Read", { file_path: join(scratch, "README.md") }], ["Read", { file_path: "README.md" }], ["Grep", { pattern: "x" }],
+			["Grep", { pattern: "x", path: "src" }], ["Glob", { pattern: "**/*.md" }]] as const;
+		for (const [tool, input] of allowed) assert.equal((await decide(hook, tool, input))?.permissionDecision, "allow", JSON.stringify(input));
+		const reason = async (tool: string, input: unknown) => (await decide(hook, tool, input))?.permissionDecisionReason ?? "";
+		assert.match(await reason("Read", { file_path: join(root, "outside", "x.md") }), /^Refused: a reviewer reads only its scratch dir .*outside/);
+		assert.match(await reason("Read", { file_path: "out/x.md" }), /reads only its scratch dir.*a path outside the worktree \(out\/x\.md\)/);
+		assert.match(await reason("Grep", { pattern: "x", path: "/etc" }), /reads only its scratch dir/);
+		assert.match(await reason("Glob", { pattern: "../**/*" }), /reads only its scratch dir/);
+		assert.match(await reason("Read", { file_path: "/op/settings.json" }), /^Refused: a reviewer/);
+		assert.match(await reason("Bash", { command: "ls" }), /^Refused: a reviewer has no Bash/);
+		for (const tool of ["Write", "Edit"]) assert.match(await reason(tool, { file_path: "README.md", content: "x" }), /^Refused: a reviewer has no Edit or Write/);
 	});
 });

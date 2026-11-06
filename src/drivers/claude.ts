@@ -65,15 +65,14 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 		return { category: "switch", why: `the native switch is unreadable (${(error as Error).message})` };
 	}
 	const nativeClass = nativeClassOf(input.kind, input.role, input.delivery);
-	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local or answer) and ship (role implementer, delivery pr or local) jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
+	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local or answer), ship (role implementer, delivery pr or local) and gate-reviewer jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
 	if (nativeClass === undefined) return ineligible;
 	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
-	if (existsSync(join(input.home, paths.pipelineFile(input.jobId)))) {
+	// A reviewer is one-shot and never sent to: the pipeline rule guards the planner's queued sends, not its gate (N4h).
+	if (nativeClass !== "claude_review" && existsSync(join(input.home, paths.pipelineFile(input.jobId)))) {
 		return { category: "pipeline", why: "pipeline-owned research stays on pi; only local and answer research run native" };
 	}
 	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
-	// N4h builds the reviewer path; until then claude_review gates nothing and a reviewer stays on pi.
-	if (nativeClass === "claude_review") return { category: "ineligible", why: "the native reviewer path is not built yet; gate-reviewers run on pi" };
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs), input.jobId, config.max_concurrent);
 	if (occupied) return occupied;
 	try {
@@ -157,8 +156,15 @@ export const NATIVE_LOCAL_SHIP_ADDENDUM = [
 	"head_sha = git rev-parse HEAD.",
 ].join("\n");
 
-/** The addendum for a job's kind and delivery: research, a PR ship job, or a local ship job. */
-export function nativeAddendum(kind: string | undefined, delivery: string | undefined): string {
+/** The reviewer counterpart (N4h): read-only tools, the packet in the cwd, report_verdict as the one way to finish. */
+export const NATIVE_REVIEW_ADDENDUM = [
+	"Native reviewer: your tools are the Claude tools you were given (Read, Grep, Glob) plus report_verdict; ignore any",
+	"other tool names above. Read only the review packet in your working directory, then call report_verdict once.",
+].join("\n");
+
+/** The addendum for a job's kind, delivery and role: research, a PR ship job, a local ship job, or a reviewer. */
+export function nativeAddendum(kind: string | undefined, delivery: string | undefined, role?: string): string {
+	if (role === "gate-reviewer") return NATIVE_REVIEW_ADDENDUM;
 	if (kind !== "ship") return NATIVE_ADDENDUM;
 	return delivery === "local" ? NATIVE_LOCAL_SHIP_ADDENDUM : NATIVE_SHIP_ADDENDUM;
 }
@@ -172,7 +178,7 @@ export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, system
 	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
-	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env.CP_KIND, env.CP_DELIVERY)}\n`, { mode: 0o600 });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env.CP_KIND, env.CP_DELIVERY, env.CP_ROLE)}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file } };
 }
