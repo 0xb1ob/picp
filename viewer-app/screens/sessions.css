@@ -14,10 +14,11 @@
 .session-choice-head > .session-ctx, .session-choice-head > .session-time { flex-shrink: 0; font-size: 12px; color: var(--dim); }
 .session-choice small { font-size: 12px; line-height: 17px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-choice small.session-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
-/* The Operator's project rows (the retired thread rows' sizes; hover and focus are the shell's link rules). */
+/* The Operator's project rows: the retired `.thread-row*` sizes; hover/focus mirror shell.css's `a:hover`. */
 .project-rows { display: flex; flex-direction: column; gap: 1px; margin: 4px 8px 0; padding: 0; list-style: none; }
 .project-row { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; }
 .project-row[aria-current=page] { background: var(--nav-selected); color: var(--text); }
+.project-row:hover, .project-row:focus-visible { color: var(--hover); }
 .project-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-panel { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* The phone top bar (chat v2): 48 px plus its hairline; back and ⋯ are 44 px, the avatar 28 px; the name (15 px) over a

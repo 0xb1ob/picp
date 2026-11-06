@@ -359,7 +359,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const shell=useContext(ShellContext);
  // Combine: from 900 px the chat column carries the rail's chrome, so the shell drops its own rail.
  useLayoutEffect(()=>shell.claimRail?.(),[shell.claimRail]);
- /** The project rows under Operator (All projects, then each registered name); a click only moves the hash's selection. */
+ /** The project rows under Operator (All projects, then each registered name); a click only moves the hash. */
  const projectRows=(you:string)=>{const current=selectionValue(selection); return <ul class="project-rows" aria-label="Projects">{["",...(data.projects ?? [])].map(v=><li key={v || "all"}>
   <a href={selectionHash(filterable ? location.hash : you,v)} class="project-row" aria-current={filterable && v === current ? "page" : undefined} title={v || "All projects"}>
    <span aria-hidden="true">#</span><span class="project-row-name">{v || "All projects"}</span></a></li>)}</ul>;};

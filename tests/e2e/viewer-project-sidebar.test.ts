@@ -72,11 +72,12 @@ test("project-sidebar: registered rows select the hash's project; no thread chro
 	await settle();
 	assert.deepEqual(tab.requests.filter((r) => /thread/.test(r.path)).map((r) => r.path), [], "no thread read or write");
 
-	// Served CSS: the old thread row's size, selected fill and ellipsis; no thread or header-filter rules remain.
+	// Served CSS: the old thread row's size, selected fill, hover/focus and ellipsis; no thread or header-filter rules.
 	const css = (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
 	const rule = (selector: string) => [...css.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
 	assert.match(rule(".project-row"), /min-height:36px;padding:0 10px;border-radius:8px/);
 	assert.match(rule(".project-row[aria-current=page]"), /background:var\(--nav-selected\)/);
 	assert.match(rule(".project-row-name"), /text-overflow:ellipsis;white-space:nowrap/);
+	assert.match(rule(".project-row:hover,.project-row:focus-visible"), /color:var\(--hover\)/);
 	assert.doesNotMatch(css, /\.thread-|\.session-filter-menu|\.operator-composer-hash/, "the retired rules are gone");
 });

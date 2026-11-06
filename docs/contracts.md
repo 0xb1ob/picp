@@ -7015,7 +7015,7 @@ S10b tags jobs and joins them (below); S11's chat UI was retired by cp-2tf2 (Thr
 
 A dashboard message names its thread explicitly: `POST /api/operator/message` takes `thread_id` (`th-` + 16 hex, or `null`
 / absent for No thread), separate from the text and any P1 evidence reference. The dashboard composer sends none since
-cp-2tf2 (below); a queued, held, retried or edited send keeps the thread it was sent with.
+cp-2tf2 (below), and Send again drops a stored thread; a queued, held or edited send keeps the thread it was sent with.
 
 - **Validated before journaling.** Malformed is 400 at the viewer. A named thread must be in the registry: unknown is 404
   `no thread <id>; nothing was sent`, an unavailable registry is 503 (`send without a thread or repair it: <file:line>`);
