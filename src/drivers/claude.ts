@@ -149,6 +149,20 @@ export const NATIVE_SHIP_ADDENDUM = [
 	"report_result once with head_sha = git rev-parse HEAD.",
 ].join("\n");
 
+/** Delivery `local` (N4i): picp integrates the branch itself, so the worker commits and never pushes or opens a PR. */
+export const NATIVE_LOCAL_SHIP_ADDENDUM = [
+	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Edit, Write, Bash) and report_result;",
+	"ignore any other tool names above. This job is delivery local: commit with git in Bash and stop there. Never call",
+	"git_push or pr_create and never open a PR; picp integrates the branch locally. Then call report_result once with",
+	"head_sha = git rev-parse HEAD.",
+].join("\n");
+
+/** The addendum for a job's kind and delivery: research, a PR ship job, or a local ship job. */
+export function nativeAddendum(kind: string | undefined, delivery: string | undefined): string {
+	if (kind !== "ship") return NATIVE_ADDENDUM;
+	return delivery === "local" ? NATIVE_LOCAL_SHIP_ADDENDUM : NATIVE_SHIP_ADDENDUM;
+}
+
 /**
  * Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir,
  * not the argv or env.
@@ -158,7 +172,7 @@ export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, system
 	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
-	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${env.CP_KIND === "ship" ? NATIVE_SHIP_ADDENDUM : NATIVE_ADDENDUM}\n`, { mode: 0o600 });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env.CP_KIND, env.CP_DELIVERY)}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file } };
 }

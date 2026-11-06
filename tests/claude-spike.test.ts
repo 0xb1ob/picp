@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import type { Delivery, FleetRecord, JobKind, Role } from "../src/contracts.ts";
 import { nativeSpawn } from "../src/dispatch-driver.ts";
-import { assertNativeSelection, nativeBaseEnv, NativeDriverError, nativeMaxConcurrent, nativeSelectionRefusal, nativeSlotRefusal } from "../src/drivers/claude.ts";
+import { assertNativeSelection, nativeAddendum, nativeBaseEnv, NativeDriverError, nativeMaxConcurrent, nativeSelectionRefusal, nativeSlotRefusal } from "../src/drivers/claude.ts";
 import { nativeRevivePrompt, nativeSessionMoved } from "../src/drivers/claude-followup.ts";
 import { readOnlyBashRefusal, secretPaths } from "../src/drivers/claude-bash-policy.ts";
 import { CLI_BUILTIN_AGENTS, type InitSurface, lockdownVerdict } from "../src/drivers/claude-lockdown.ts";
@@ -344,6 +344,17 @@ test("N4i concurrency: max_concurrent N admits N native jobs, refuses the next b
 	assert.equal(nativeSlotRefusal(["cp-a", "cp-b"], "cp-c", 2, "live or being admitted")?.why, "native concurrency is 2 and cp-a, cp-b are live or being admitted; tear one down first");
 	writeFileSync(nativeConfigFile(home), "{");
 	assert.equal(nativeMaxConcurrent(home), 1);
+});
+
+test("N4i ship addendum by delivery: pr pushes and opens the PR, local only commits, research writes its artifact", () => {
+	const rows = [["ship", "pr", true], ["ship", "local", false]] as const;
+	for (const [kind, delivery, forge] of rows) {
+		const text = nativeAddendum(kind, delivery);
+		assert.match(text, /report_result once with\s+head_sha = git rev-parse HEAD/, delivery);
+		assert.equal(/push only with git_push, open the draft PR with pr_create/.test(text), forge, delivery);
+	}
+	assert.match(nativeAddendum("ship", "local"), /commit with git in Bash and stop there\. Never call\s+git_push or pr_create/);
+	assert.match(nativeAddendum("research", "local"), /Write the research artifact/);
 });
 
 test("N4f follow-ups: the revive prompt names the job's kind, a moved worktree refuses the session resume, the base rides the env", () => {
