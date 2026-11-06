@@ -53,7 +53,8 @@ export function implementerExclusions(home: string): string[] {
 	return [...new Set([...loadMandateDefaults(home).exclude_paths, ...grants])];
 }
 
-/** Edit/Write scope: research its artifact dir; an implementer its worktree, no .git, secret or exclusion; a reviewer none. */
+/** Edit/Write scope: research its artifact dir; an implementer its worktree, no .git, secret or exclusion;
+ * a reviewer none. */
 export function writeScopeGuard(job: SpikeJob, secrets: readonly string[], role: NativeRole): SpikeGuard {
 	if (role === "reviewer") return (call) => (call.name === "write" || call.name === "edit" ? "Refused: a reviewer has no Edit or Write; it only reads." : undefined);
 	if (role === "research") {

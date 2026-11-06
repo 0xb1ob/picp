@@ -40,7 +40,7 @@ export function nativeRunStop(end: TurnEnd, maxTurns: number): { fields: Record<
 	return { fields, line: `stopped: ${end.stop}${end.window ? ` (${end.window})` : ""}; a named failure, never a nudge` };
 }
 
-/** The idle-prompt refusal's closing words: the worker started no turn, so send.ts may restore a superseded envelope. */
+/** The idle-prompt refusal's closing words: no turn started, so send.ts may restore a superseded envelope. */
 export const NOT_RESUMED = "Nothing was resumed.";
 
 /**
