@@ -1,1 +1,0 @@
-- Dashboard sends carry an explicit thread (full match S9): `thread_id` is validated against the named-thread registry before anything is journaled, kept through the queue, inbox, retry, edit and owner restart, and bound to the delivered pi entry; replies and tool entries take their turn's thread, while CLI input and old history stay untagged.

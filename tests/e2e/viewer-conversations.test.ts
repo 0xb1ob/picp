@@ -209,8 +209,12 @@ test("P19-upload-send: images and text files reach the operator session inline, 
 
 	d.tick();
 	const client_id = "dc-20261004140000-00000019";
-	// #588: a stale client's `thread` is accepted and dropped: not in the projected body, not in the marker.
-	const mixed = await d.send(MESSAGE, d.json(csrf, { kind: "message", text: "look", images: [image], files: [id], thread: "file-chat", client_id }));
+	// cp-chat-cleanup: a retired `thread` or `thread_id` field is an unknown field, refused before anything is sent.
+	for (const retired of [{ thread: "file-chat" }, { thread_id: "th-aaaaaaaaaaaaaaaa" }]) {
+		const refused = await d.send(MESSAGE, d.json(csrf, { kind: "message", text: "look", ...retired }));
+		assert.deepEqual([refused.status, refused.body.error], [400, `unknown field ${Object.keys(retired)[0]}`]);
+	}
+	const mixed = await d.send(MESSAGE, d.json(csrf, { kind: "message", text: "look", images: [image], files: [id], client_id }));
 	assert.equal(mixed.status, 202, JSON.stringify(mixed.body));
 	assert.equal(mixed.body.id, client_id, "mixed uploads keep the pre-acknowledgement correlation id");
 	assert.deepEqual((await control()).sends.find((s: Json) => s.id === client_id)?.body, { kind: "message", text: "look", images: [image], files: [id] }, "the reload projection keeps both kinds");
@@ -219,10 +223,9 @@ test("P19-upload-send: images and text files reach the operator session inline, 
 	assert.ok(last().text.includes("File: report_1_.HTML\n```text\n<script>UNIQUE_ATTACHMENT_CONTENT</script>\n```"));
 	assert.match(last().text, / — from the dashboard; images=im-[^;]+; files=tx-[^\]]+\]$/);
 	assert.doesNotMatch(last().text, /thread=/);
-	// Full match S8 supersedes #588's fall-through: GET /api/threads is the named-thread projection, empty with no
-	// registry; it never reads the retired journal. POST /api/threads/done stays the read-only 405.
-	const listed = await d.get("/api/threads");
-	assert.deepEqual([listed.status, listed.body.available, listed.body.threads, listed.body.bindings], [200, true, [], []], "an empty S8 projection");
+	// cp-chat-cleanup: the named-thread projection is deleted, so GET /api/threads is an unknown route.
+	// POST /api/threads/done stays the read-only 405.
+	assert.equal((await d.get("/api/threads")).status, 404, "no thread projection");
 	const done = await d.send("/api/threads/done", d.json(csrf, { id: "th-aaaaaaaaaaaa" }));
 	assert.deepEqual([done.status, done.raw.toString("utf8")], [405, "read-only viewer: GET only\n"]);
 	for (const body of [{ files: [image] }, { images: [id] }, { files: [id, id] }, { files: [] }, { files: "x" }, { files: [id], images: Array.from({ length: 8 }, () => `im-${day()}-${"d".repeat(24)}.png`) }]) {

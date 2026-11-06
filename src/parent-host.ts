@@ -44,7 +44,6 @@ import { runEscalationRelayWatch } from "./escalation-relay-watch.ts";
 import { SINGLE_MODE_REMOVED } from "./mode.ts";
 import { FleetStore, isPidAlive } from "./fleet.ts";
 import { deliverableRelay } from "./relay-scope.ts";
-import type { ParentSendOrigin } from "./operator-origins.ts";
 import type { ParentSendDelegation } from "./parent-outbox.ts";
 import { readParentLock } from "./parent-lock.ts";
 import { LOADED_COMMIT } from "./viewer/loaded-commit.ts";
@@ -331,8 +330,6 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 		observe: async (args) => bridge.observe(args[0]),
 		start: (args) => bridge.start({ ...(args[0] as ParentStartOptions), home, mode }),
 		send: (args) => bridge.send(String(args[0]), (args[1] ?? undefined) as number | undefined, (args[2] ?? {}) as ParentSendDelegation),
-		// Full match S10a: a separate op, so an older host refuses an origin as unknown instead of dropping it.
-		sendFrom: (args) => bridge.send(String(args[0]), (args[1] ?? undefined) as number | undefined, (args[2] ?? {}) as ParentSendDelegation, args[3] as ParentSendOrigin),
 		statusWithContext: () => bridge.statusWithContext(),
 		doctor: () => bridge.diagnostic("doctor"),
 		version: () => bridge.diagnostic("version"),

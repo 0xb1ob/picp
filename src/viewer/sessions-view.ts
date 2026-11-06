@@ -3,7 +3,6 @@ import { dirname, join } from "node:path";
 import type { JobTranscriptResponse, SessionEntry, SessionsResponse, SessionTier, TranscriptAsk } from "./api-types.ts";
 import { listBoards } from "./boards.ts";
 import { INBOX_REPLAY_PREFIX, isAskId, parseDashboardText, readUploadMetadata } from "./control-files.ts";
-import { applyThreadMembership } from "./named-threads-view.ts";
 import { registeredProjects } from "./fleet-view.ts";
 import { operatorSessionsFile, readOperatorSessions } from "./operator-sessions.ts";
 import { askDetails, evidenceLink } from "./decision-views.ts";
@@ -106,24 +105,18 @@ function stampSegments(entries: SessionEntry[], names: Set<string>, projectOf: (
   if (only?.projects.length) { e.project = only.projects.join(", "); e.projects = [...only.projects]; }
  }
 }
-function parseTranscript(state: ViewerState, file: string, sides: {user:string;assistant:string}, backlog = BACKLOG_BYTES): {entries:SessionEntry[];truncated:boolean;keys?:Map<SessionEntry,string>;turns?:Map<SessionEntry,string>} {
+function parseTranscript(state: ViewerState, file: string, sides: {user:string;assistant:string}, backlog = BACKLOG_BYTES): {entries:SessionEntry[];truncated:boolean;keys?:Map<SessionEntry,string>} {
  const start = startOffset(file,undefined,backlog);
  const lines = readLines(file,start.offset,backlog);
  const entries: SessionEntry[] = [];
  const keys = new Map<SessionEntry,string>(); // assistant text block → its reply-splits key
  const calls = new Map<string,SessionEntry>();
  const askCalls = new Set<string>(); // cp_parent ask calls: their result names the ask id
- // S9: each entry's turn input (the last user entry's pi id; a custom message starts an autonomous, untagged turn).
- const turns = new Map<SessionEntry,string>();
- let input: string | undefined, mark = 0;
- const stampTurns = () => { for (; mark < entries.length; mark++) if (input) turns.set(entries[mark]!,input); };
  for (const line of lines.lines) {
-  stampTurns();
   const record = parseObject(line.text);
   const at = stamp(record?.timestamp);
   const base = String(line.id);
   if (!record) continue;
-  if (record.type === "custom_message") input = undefined;
   if (record.type === "compaction") {
    const before = num(record.tokensBefore);
    entries.push(entry(`${base}-compaction`,at,"system","compaction",before === undefined ? "Context compacted" : `Context compacted (${before} tokens before)`));
@@ -168,7 +161,6 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
    if (!call) entries.push(e);
    if (callId) calls.delete(callId);
   } else {
-   if (role === "user") input = str(record.id);
    const text=textOf(message.content);
    if (!text.trim()) continue; // an empty system/prompt record is nothing the CLI showed
    // Image parts follow the text, so the end-anchored marker is read from the text parts alone. The marker's upload ids
@@ -194,8 +186,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
  }
  const uploadMetadata=readUploadMetadata(state.stateDir,entries.flatMap(e=>e.files ?? []));
  for (const e of entries) if (e.files) e.file_metadata=Object.fromEntries(e.files.flatMap(id=>uploadMetadata.has(id) ? [[id,uploadMetadata.get(id)!]] : []));
- stampTurns();
- return {entries,truncated:start.offset>0,keys,turns};
+ return {entries,truncated:start.offset>0,keys};
 }
 /** The parent session file as the Sessions tier parses it, with a caller-sized tail (Stats reads whole archives). */
 export function parentTranscript(state: ViewerState, file: string, backlog: number): {entries:SessionEntry[];truncated:boolean} {
@@ -305,13 +296,13 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
  const selected = wanted ? files.find((file) => file.id === wanted) : files[0];
  const warnings: string[] = [];
  let entries: SessionEntry[] = [];
- let truncated = false, keys = new Map<SessionEntry,string>(), turns = new Map<SessionEntry,string>();
+ let truncated = false, keys = new Map<SessionEntry,string>();
  if (!selected) warnings.push(`No operator session recorded yet (${operatorSessionsFile(dir)})`);
  else {
   try {
    if (!statSync(selected.file).isFile()) throw new Error("not a file");
    const parsed = parseTranscript(state, selected.file, SIDES.you);
-   entries = parsed.entries; truncated = parsed.truncated; keys = parsed.keys ?? keys; turns = parsed.turns ?? turns;
+   entries = parsed.entries; truncated = parsed.truncated; keys = parsed.keys ?? keys;
   } catch (error) {
    const code = (error as NodeJS.ErrnoException).code;
    warnings.push(`Operator transcript ${code === "ENOENT" ? "missing" : "unreadable"}: ${selected.file} (${code ?? "not a file"})`);
@@ -319,7 +310,7 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
  }
  const d = decisions(state,now), asks = d.askHistory;
  stampSegments(entries,projectNames(state),refProject(state,d));
- if (selected) { applyReplySplits(entries,keys,readReplySplits(state.stateDir,selected.file)); applyThreadMembership(state.stateDir,selected.file,entries,turns); }
+ if (selected) applyReplySplits(entries,keys,readReplySplits(state.stateDir,selected.file));
  if (asks.availability === "unavailable") warnings.push("asks unavailable");
  const cards = withAskCards(entries,asks.value);
  const window = windowed(cards,(e)=>e.ask?.state === "open");

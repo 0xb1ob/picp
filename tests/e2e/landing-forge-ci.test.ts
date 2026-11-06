@@ -968,8 +968,7 @@ test(
 			s.setGh({ routes: [{ match: `pr view ${ref}`, replies: [json({ number: Number(ref.split("/").pop()), url: ref.startsWith("https://") ? ref : `https://github.com/example/demo/pull/${ref}`,
 				state: "MERGED", mergedAt, mergeCommit: { oid: MERGE }, headRefName: branch, headRefOid: head, baseRefName: "main", ...over })] }] });
 		const nothing = (jobId: string) => assert.equal(existsSync(join(s.home, paths.mergeFile(jobId))), false, `${jobId} has no receipt`);
-		const origin = { source_send_id: "dc-20261104150000-000000aa", thread_id: "th-00000000000000aa" };
-		const live = await s.held("merge receipt", 91, { origin });
+		const live = await s.held("merge receipt", 91);
 		const prStatus = () => s.post.fleet.get(live.jobId)?.receipts?.filter((receipt) => receipt.kind === "pr").map((receipt) => receipt.status);
 
 		// Not merged, merged with no merge commit, another branch's PR, or gh unreachable: nothing is written or changed.
@@ -1001,7 +1000,6 @@ test(
 		assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "merge_recorded").length, 1);
 		const [deploy, ...extra] = deployJobs(s.post, live.jobId);
 		assert.ok(deploy && extra.length === 0, "exactly one deploy job");
-		assert.deepEqual(deploy.origin, origin, "the after-merge deploy child inherits its merged job's origin (S10b)");
 		for (const label of ["ops:deploy", "resource:host-a", "resource:db", "risk:high", "kind:research", "delivery:local", "project:demo"]) assert.ok(deploy.labels.includes(label), label);
 		assert.deepEqual([deploy.blocked_by, deploy.status], [[live.jobId], "open"]);
 		const taskFile = join(s.home, paths.afterMergeTaskFile(live.jobId));

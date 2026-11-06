@@ -196,7 +196,8 @@ test("P9d-remote-queue: a queued remote message keeps its sender and a remote ed
 });
 
 // P9d-remote-inbox: messages held while no session ran are replayed once, each remote one with its own device line
-// and marker (a legacy thread tag dropped, #588); local ones keep their bytes; a malformed device replays as local.
+// and marker (a retired `thread` key on a held line is ignored); local ones keep their bytes; a malformed device
+// replays as local.
 test("P9d-remote-inbox: the offline inbox replays each remote held message with its own device line and marker", { timeout: 90_000 }, async (t) => {
 	const s = await scratch(t);
 	const start = Date.now() - 300_000;
@@ -476,7 +477,7 @@ test("P9e-control: the real bridge's dashboard control delivers, holds, steers, 
 	const status = await op.send("status", {});
 	assert.ok(status.ok);
 	assert.deepEqual({ ...(status.result as Json), recent: undefined, restart: undefined, parent_restart: undefined },
-		{ busy: false, pending: false, session_file: sessionFile.split("/").pop(), recent: undefined, restart: undefined, parent_restart: undefined, images: true, files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, commands: true, threads: true, thread_sends: true, thread_origins: true });
+		{ busy: false, pending: false, session_file: sessionFile.split("/").pop(), recent: undefined, restart: undefined, parent_restart: undefined, images: true, files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, commands: true });
 	assert.deepEqual({ ...(status.result as Json).parent_restart as Json, reason: undefined }, { safe: false, reason: undefined, last: null }, "undrained");
 
 	const hello = await op.send("send", { kind: "message", text: "  hello there  ", peer: "100.64.0.9" });
@@ -514,9 +515,8 @@ test("P9e-control: the real bridge's dashboard control delivers, holds, steers, 
 	assert.ok((await op.send("abort", {})).ok);
 	await waitFor(() => op.child.eventsOfType("agent_settled").length, (n) => n >= 4, { timeoutMs: 30_000, what: "the aborted turn to settle" });
 
-	const click = await op.send("send", { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "Billing Bug", peer: "100.64.0.9" });
+	const click = await op.send("send", { kind: "answer", ask_id: "ask-abcd", label: "Keep", peer: "100.64.0.9" });
 	assert.ok(click.ok, JSON.stringify(click));
-	// #588: a stale `thread` field is accepted and dropped, never named in the marker.
 	assert.match(await op.seen("ask-abcd: Keep"), new RegExp(`^ask-abcd: Keep\\n\\n${MARK}; ask=ask-abcd\\]$`), "the verbatim label with the ask id");
 	const refusals = [
 		[{ ask_id: "ask-abcd", label: "keep" }, 400, /not an option/],
@@ -682,7 +682,7 @@ test("P9e-control-inbox: the offline inbox and a reloaded queue hand over in tim
 			`- ${taggedAt} (dc-20260928103000-0000c0de): later`,
 			`- ${inboxAt} (dc-20260928110000-00000002): second`,
 			...(stale ? [`- dropped, held longer than 24 h: ${staleAt} (dc-20260926100000-00000009)`] : []),
-		], "oldest first, each with its time; the closed ask is marked; a legacy thread tag (#588) adds no marker; the stale one listed as dropped, never injected");
+		], "oldest first, each with its time; the closed ask is marked; a retired thread key adds no marker; the stale one listed as dropped, never injected");
 		const after = readFileSync(controlInboxFile(s.state), "utf8").trim().split("\n").map((row) => JSON.parse(row) as Json).slice(rows.length);
 		assert.deepEqual(after.map((row) => [row.type, row.id]).sort(), [["delivered", "dc-20260928100000-00000001"], ["delivered", "dc-20260928103000-0000c0de"],
 			["delivered", "dc-20260928110000-00000002"], ...(stale ? [["dropped", "dc-20260926100000-00000009"]] : [])]);

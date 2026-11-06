@@ -29,7 +29,7 @@ import { isRelayOnlyNotice, relayOnlyMessage } from "./wake-rules.ts";
 import { ParentDelivery } from "./parent-delivery.ts";
 import { cleanSegmentEnd, freshTurn, type TurnBuf, wakeSpans } from "./bridge-segments.ts";
 import { idleNextKey, idleWakeGate } from "./idle-wake.ts";
-import { type ParentSendDelegation, type ParentSendOrigin, messageText as textOf, parentSendFile, ParentSendOutbox, receiptOf, sendIdOfMessage } from "./parent-outbox.ts";
+import { type ParentSendDelegation, messageText as textOf, parentSendFile, ParentSendOutbox, receiptOf, sendIdOfMessage } from "./parent-outbox.ts";
 import { PACKAGE_ROOT } from "./home.ts";
 import { agentDirFor } from "./viewer/skill-catalog.ts";
 import { parentGatewayKey } from "./gateway-key.ts";
@@ -339,11 +339,11 @@ export class CpBridge {
 	 * send id, in the background: a transient failure is resumed with
 	 * `RESUME_NUDGE` (never `text` again), so the caller never blocks on its delays.
 	 */
-	async send(text: string, timeoutMs = this.#options?.settleTimeoutMs ?? DEFAULT_BRIDGE_SETTLE_MS, delegation: ParentSendDelegation = {}, origin?: ParentSendOrigin): Promise<BridgeReceipt> {
+	async send(text: string, timeoutMs = this.#options?.settleTimeoutMs ?? DEFAULT_BRIDGE_SETTLE_MS, delegation: ParentSendDelegation = {}): Promise<BridgeReceipt> {
 		if (this.#autoControl) await this.#autoControl;
 		if (!this.#delivery || this.#stopping) throw new CpBridgeError("parent is not running; call cp_parent start");
 		if (this.#controlBusy) throw new CpBridgeError("parent control is in progress; send later");
-		return this.#delivery.send(text, timeoutMs, delegation, origin);
+		return this.#delivery.send(text, timeoutMs, delegation);
 	}
 
 	/**

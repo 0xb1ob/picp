@@ -110,7 +110,7 @@ export async function advanceSelfReview(ports: SelfReviewPorts, runId: string): 
 		const admitted = run.members.find((member) => member.role === spec.role)?.job_id;
 		if (admitted) { roleIds.set(spec.role, admitted); continue; }
 		const title = `${spec.title} [${anchor.id}]`, project = run.policy.project;
-		const job = ledger.findDuplicate({ title, project }) ?? await ledger.create({ title, project, kind: "research", delivery: spec.role === "S1" ? "board" : "local", labels: [`schedule:${run.schedule_id}`], ...(anchor.origin ? { origin: anchor.origin } : {}) });
+		const job = ledger.findDuplicate({ title, project }) ?? await ledger.create({ title, project, kind: "research", delivery: spec.role === "S1" ? "board" : "local", labels: [`schedule:${run.schedule_id}`] });
 		run = await runs.admitMember(run.id, { job_id: job.id, role: spec.role, admitted_at: job.created_at });
 		roleIds.set(spec.role, job.id);
 	}

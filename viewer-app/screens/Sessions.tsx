@@ -39,7 +39,8 @@ const TOOL_TEXT_MAX = 1200;
 function rowHash(hash: string, value: string): string {
  const [path = "", query = ""] = selectionHash(hash, value).split("?"), q = new URLSearchParams(query);
  q.delete("transcript");
- return q.size ? `${path}?${q}` : path;
+ const rest = q.toString();
+ return rest ? `${path}?${rest}` : path;
 }
 function pickRow(e: MouseEvent, value: string): void {
  if (e.button > 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

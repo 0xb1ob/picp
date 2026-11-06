@@ -1,0 +1,2 @@
+- Threads are gone end to end (cp-chat-cleanup): the named-thread registry, `GET /api/threads`, `POST /api/operator/threads`, `thread_id` on dashboard sends, the `threads`/`thread_sends`/`thread_origins` capabilities, and `source_send_id` origins on asks, parent sends and jobs (`cp_parent`, `cp_job create`, `cp_pipeline start`, `cp_ask`, `cp_dispatch`) are deleted. Old `source`/`origin` fields on stored asks, sends and jobs are ignored on read; nothing is migrated.
+  After it installs, the operator session needs a `/reload`: `cp_parent` no longer has `source_send_id`.

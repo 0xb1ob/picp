@@ -108,17 +108,3 @@ test("a legacy parent-expanded run (expanded: marker, no admitted role) is never
 	assert.deepEqual(b.calls.dispatch, []);
 });
 
-// S10b review low (C12): each member the runner admits copies its anchor's origin. ensureAnchor (schedule-native.ts)
-// creates anchors untagged, so no production run has a tagged anchor yet; the test tags one on disk to pin the copy.
-test("self-review members inherit a tagged anchor's origin", async (t) => {
-	const b = await bench(t);
-	const fired = await b.fire();
-	const origin = { source_send_id: "dc-20261104150000-0000000a", thread_id: "th-00000000000000a1" };
-	const doc = b.ledger.read();
-	doc.jobs.find((job) => job.id === fired.job_id)!.origin = origin;
-	writeFileSync(b.ledger.file, JSON.stringify(doc));
-	await b.runner.onFired(fired);
-	const members = Object.values(b.roles(b.runs.run(fired.run_id!)!));
-	assert.equal(members.length, 7, "six readers and S1");
-	for (const id of members) assert.deepEqual((await b.ledger.show(id)).origin, origin, `${id} carries the anchor's origin`);
-});

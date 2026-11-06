@@ -38,7 +38,7 @@ export const INBOX_MAX_HELD = 20;
 /** A held message older than this is dropped and reported at delivery, never injected. */
 export const INBOX_MAX_AGE_MS = 24 * 3_600_000;
 export type InboxLine =
-	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; remote?: RemoteDevice; thread_id?: string }
+	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; remote?: RemoteDevice }
 	| { type: "delivered"; id: string; at: string }
 	| { type: "dropped"; id: string; at: string; reason: string };
 
@@ -228,8 +228,7 @@ function parseRemoteLine(line: string): RemoteInvolvement | undefined {
 	return out;
 }
 
-// `; thread=` is a legacy (#588) marker field: still parsed so old transcripts keep their entries, never written.
-const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; thread=[a-z0-9][a-z0-9-]{0,31})?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?(; remote)?\\]\\s*$`);
+const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?(; remote)?\\]\\s*$`);
 
 /**
  * A marker with `; remote` is a remote message: its line directly above the marker names the devices (`remote`) and is
@@ -271,14 +270,12 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
  * and one `upload` line per stored attachment: ids, mime, bytes and optional display names, never contents.
  */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice; command?: string; thread_id?: string }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice; command?: string }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting" | "restarted" | "dropped" | "cancelled"; reason: string | null }
 	/** cp-y43c: a dashboard-queued message's text replaced before its handoff; every revision stays in the journal. */
 	| { type: "edited"; by: "bridge"; id: string; at: string; peer: string | null; text: string; remote?: RemoteDevice }
 	| { type: "outcome"; by: "viewer"; id: string; at: string; peer: string | null; state: "dropped"; reason: string }
-	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "command" | "start" | "schedule" | "upload" | "settings" | "queue" | "thread" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp | "edit" | "cancel" | "create" | "rename"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string; thread_id?: string }
-	/** Full match S8: the operator session's answer to one named-thread write; the registry line is the write itself. */
-	| { type: "thread"; by: "bridge"; id: string | null; at: string; peer: string | null; op: "create" | "rename"; thread_id: string | null; name: string | null; state: "created" | "renamed" | "replayed" | "refused"; reason: string | null }
+	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "command" | "start" | "schedule" | "upload" | "settings" | "queue" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string }
 	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number; name?: string }
 	/** Remote dashboard: secret-free device events from `device-store.ts`; `id` stays null so the composer readers skip them. */
 	| { type: "device"; by: "viewer"; id: null; at: string; peer: string | null; event: "code_issued" | "paired" | "claim_refused" | "signin_refused" | "revoked"; reason: string | null; pairing_id?: string; device_id?: string; name?: string; level?: "full" | "view"; route?: "cli-up" | "cli-pair" | "loopback-dashboard" | "tailnet-dashboard" }

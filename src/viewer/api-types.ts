@@ -31,8 +31,6 @@ export interface SessionEntry {
  dashboard_id?: string; ask_id?: string; ask?: TranscriptAsk;
  /** Full transcript: a dashboard message from a paired remote device — its sender (null: a local message a device edited) and remote editors. */
  remote?: {sender: {device_id: string; name: string} | null; editors: {device_id: string; name: string}[]};
- /** Full match S9: this entry's turn thread (its input entry's binding); absent is untagged. */
- thread_id?: string;
  /** Full transcript: the upload ids a dashboard message's marker names (`; images=`), shown as thumbnails from `/api/operator/uploads/<id>`. */
  images?: string[];
  /** Text upload ids and display metadata from the upload journal; links serve text/plain only. */
@@ -62,9 +60,8 @@ export interface TranscriptAsk {
  id: string; question: string; options: {label: string; consequence: string; reply: string}[]; recommendation: string;
  state: "open" | "answered" | "withdrawn"; answer: string | null; answered_at: string | null; reason: string | null;
 }
-/** Composer request and its durable status projection; attachment ids stay on the original body for retry.
- * S9: `thread_id` is the send's explicit thread (null or absent: No thread), never the page's selection. */
-export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; client_id?: string; thread_id?: string | null};
+/** Composer request and its durable status projection; attachment ids stay on the original body for retry. */
+export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; client_id?: string};
 /** Full match S6: one bounded dashboard command, idempotent by `client_id`; the bridge turns it into one message. */
 export type ControlCommandBody = {kind: "command"; command: "status" | "stop"; job_id?: string; client_id: string};
 export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed" | "dropped"; reason: string | null; ask_id: string | null; body: ControlMessageBody; /** cp-y43c: queued by the dashboard, not yet handed to the session: Edit and Cancel apply. */ editable?: boolean; /** picp-96n: basename of the listed operator session a Not confirmed send was handed to; never the current one. */ target_session?: string; /** Full match S6: the dashboard command this message carries (`/stop cp-abcd`), as journaled. */ command?: string }
@@ -97,25 +94,7 @@ export interface ControlStatusResponse {
  parent_restart?: ParentRestartStatus;
  /** Running only, full match S6: true when this session's cp-bridge takes dashboard commands; absent otherwise. */
  commands?: boolean;
- /** Running only, full match S8: true when this session's dashboard control owns the named-thread registry. */
- threads?: boolean;
 }
-/** Full match S8: one named thread; `id` is opaque and immutable, `name` free and editable (duplicates allowed). */
-export interface NamedThread { id: string; name: string; created_at: string; renamed_at: string | null }
-/** Full match S8: one membership, keyed by `{kind, id, session_id?}`; `thread_id` null is an explicit No thread. */
-export interface ThreadBinding { kind: "message" | "ask" | "job" | "parent_send"; id: string; session_id?: string; thread_id: string | null; at: string }
-/** `GET /api/threads` (full match S8): absent is available and empty; corrupt or over cap names its `file:line`. */
-export interface ThreadsResponse { generated_at: string; available: boolean; reason: string | null; threads: NamedThread[]; bindings: ThreadBinding[]; joins: ThreadJoins[]; join_diagnostics: ThreadJoinDiagnostics }
-/** Full match S10b: a job or ask in a thread; an ask's answer goes with the ask by id. Newest first. */
-export interface ThreadMember { id: string; title: string; state: string; created_at: string }
-/** Full match S10b: a job opened from a delivered dashboard send in this thread; `source_send_id` is that dc id. */
-export interface StartedFromChat { job_id: string; title: string; state: string; created_at: string; source_send_id: string }
-/** Full match S10b: jobs by `origin.thread_id`, asks by `source.thread_id`; each list capped, `omitted` counts the rest. */
-export interface ThreadJoins { thread_id: string; jobs: ThreadMember[]; asks: ThreadMember[]; started_from_chat: StartedFromChat[]; omitted: number }
-/** Full match S10b: records that join no thread, by reason, never guessed; `unreadable` names a source that failed. */
-export interface ThreadJoinDiagnostics { multi_origin: number; unknown_thread: number; malformed: number; unreadable: string[] }
-/** `POST /api/operator/threads` (full match S8): the operator session's answer; the same client_id replays it. */
-export interface ThreadWriteResponse { thread_id: string; name: string; state: "created" | "renamed"; replayed: boolean }
 /** `POST /api/operator/upload` stored an attachment: 201 with its upload id (the composer sends ids, never bytes). */
 export interface OperatorUploadResponse { id: string; mime: string; bytes: number; expires_at: string; url: string; name?: string }
 export interface RestartStatus { supported: boolean; blockers: string[]; reason: string | null }

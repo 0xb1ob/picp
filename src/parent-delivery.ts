@@ -21,7 +21,6 @@ import {
 	sendIdsInText,
 	sendRelay,
 } from "./parent-outbox.ts";
-import type { ParentSendOrigin } from "./operator-origins.ts";
 import { isTransientProviderError, MAX_OUTER_RETRIES, OUTER_RETRY_DELAYS_MS, RESUME_NUDGE } from "./provider-retry.ts";
 import type { WorkerProcess, WorkerTranscript } from "./worker-process.ts";
 
@@ -103,8 +102,8 @@ export class ParentDelivery {
 	 * On disk first, then injected. An outcome inside `timeoutMs` is the tool
 	 * result; a later one arrives as a `send` relay with the same id (`pending`).
 	 */
-	async send(text: string, timeoutMs: number, delegation: ParentSendDelegation = {}, origin?: ParentSendOrigin): Promise<ParentSendReceipt> {
-		const entry = this.outbox.enqueue(text, delegation, origin);
+	async send(text: string, timeoutMs: number, delegation: ParentSendDelegation = {}): Promise<ParentSendReceipt> {
+		const entry = this.outbox.enqueue(text, delegation);
 		const pending = { send_id: entry.id, pending: entry.id };
 		const proc = this.#host.liveProc();
 		if (!proc) return { level: null, reached: [], ...pending };
