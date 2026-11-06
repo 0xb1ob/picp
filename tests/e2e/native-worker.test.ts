@@ -4,12 +4,14 @@
  * CLAUDE_CONFIG_DIR per run and no user setting sources. P3a–P3j of the N3b task.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
-import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, LAYOUT, paths } from "../../src/contracts.ts";
+import { localChecks } from "../../extensions/worker-reporter/index.ts";
+import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, type Envelope, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { NATIVE_SESSION_FILE, readNativeSession } from "../../src/drivers/claude-followup.ts";
@@ -117,7 +119,7 @@ test("P3a/c/d/h/i/j: a native research job reports once, refuses peers and ship 
 	assert.equal((JSON.parse(readFileSync(h.envelope(native.id), "utf8")) as { envelope: { job_id: string } }).envelope.job_id, native.id);
 	// P3c, P3d: a second native job and a ship role are refused before any spawn.
 	assert.match(text(second), /concurrency is 1/);
-	assert.match(text(third), /only research jobs/);
+	assert.match(text(third), /the switch workers\.native_claude_ship is off/);
 	for (const id of [peer.id, ship.id]) assert.equal(existsSync(join(h.b.home, paths.runDir(id))), false, `${id} has a run`);
 	// P3h: usage is measured, never zero, and the budget check reads it.
 	const status = readRunStatus(h.b.home, native.id);
@@ -179,6 +181,93 @@ test("N4b: a native research dispatch sends the planner profile and the native a
 	const file = join(h.b.home, paths.runDir(native.id), "native-system-prompt.md");
 	assert.equal(statSync(file).mode & 0o777, 0o600);
 	assert.equal(readRunEvents(h.b.home, native.id).filter((event) => event.type === "envelope_received").length, 1, "the run still reports");
+	assert.equal(h.claude.overrun(), 0);
+});
+
+// N4f Acceptance 2: a `small-ship` row with driver claude ships an implementer natively when claude_ship is on (commit,
+// git_push, pr_create on a non-main base, head_sha report); with the switch off the same row runs pi, reason named.
+test("N4f: a claude small-ship row ships natively with claude_ship on; off, the same dispatch runs pi by name", { skip, timeout: 420_000 }, async (t) => {
+	const ids: string[] = [];
+	const worktree = () => readFleet(h.b.home).jobs.find((job) => job.job_id === ids[0])!.worktree;
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: worktree(), encoding: "utf8" }).trim();
+	const h = await nativeHome(t, [
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(worktree(), "src", "shipped.ts"), content: "export const shipped = true;\n" }) }] },
+		step("Bash", { command: "git add -A && git commit -q -m shipped" }),
+		step("mcp__picp__git_push", { branch: "release" }),
+		step("mcp__picp__git_push", {}),
+		step("mcp__picp__pr_create", { title: "Ship it", body: "Native ship e2e." }),
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => ({ job_id: ids[0], kind: "ship", status: "done", summary: "Shipped natively.", branch: ids[0], head_sha: git("rev-parse", "HEAD"), pr_url: PR_URL }) }] },
+		{ kind: "text", text: "Reported." },
+		// The CI-repair promotion's turn: the same session resumes and fixes the head.
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(worktree(), "repaired.txt"), content: "fixed\n" }) }] },
+		step("Bash", { command: "git add -A && git commit -q -m repaired" }),
+		step("mcp__picp__git_push", {}),
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => ({ job_id: ids[0], kind: "ship", status: "done", summary: "Repaired natively.", branch: ids[0], head_sha: git("rev-parse", "HEAD"), pr_url: PR_URL }) }] },
+		{ kind: "text", text: "Repaired." },
+	]);
+	const PR_URL = "https://github.com/picp-e2e/forge/pull/7";
+	const piModel = h.b.provider.addScript("n4f-pi-ship", Array.from({ length: 6 }, () => ({ kind: "text" as const, text: "idle" })));
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*", FAKE_NATIVE_MODEL],
+		rubric: [{ id: "small-ship", role: "implementer", scope: ["S"], model: FAKE_NATIVE_MODEL, fallbacks: [piModel], driver: "claude" }] }));
+	const switchFile = join(h.b.home, LAYOUT.data, "native.json");
+	writeFileSync(switchFile, JSON.stringify({ claude_research: true, claude_ship: false }));
+	// A non-main base: preflight keeps the canonical clone on it, so the clone switches to release and publishes it.
+	execFileSync("git", ["checkout", "-q", "-b", "release"], { cwd: h.b.clone });
+	execFileSync("git", ["push", "-q", "-u", "origin", "release"], { cwd: h.b.clone });
+	const bin = mkdtempSync(join(tmpdir(), "cp-n4f-gh-"));
+	t.after(() => rmSync(bin, { recursive: true, force: true }));
+	copyFileSync(join(import.meta.dirname, "..", "fixtures", "forge-gh"), join(bin, "gh"));
+	chmodSync(join(bin, "gh"), 0o755);
+	const ghLog = join(bin, "calls.log");
+	writeFileSync(join(bin, "gitconfig"), "[user]\n\tname = n4f e2e\n\temail = n4f@test.invalid\n");
+	const [off, native] = await Promise.all([1, 2].map((n) => h.b.ledger.create({ title: `n4f ship ${n} ${Math.random()}`, project: "demo", delivery: "pr", kind: "ship" })));
+	ids.push(native!.id);
+	const dispatch = (id: string) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: id, task: "Add src/shipped.ts.", scope: "S", base: "release", queue: false, when_ready: false } }] });
+	const ends = (await h.b.run([
+		dispatch(off!.id),
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `echo '{"claude_ship":true}' > "${switchFile}"` } }] },
+		dispatch(native!.id),
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(native!.id)) } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_send", args: { job_id: native!.id, message: "CI is red on the pushed head: fix it.", purpose: "repair" } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(native!.id)) } }] },
+	], { ...h.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, FORGE_GH_LOG: ghLog, GIT_CONFIG_GLOBAL: join(bin, "gitconfig") }, undefined, 300_000)) as Tool[];
+	const [offEnd, nativeEnd] = ends.filter((end) => end.toolName === "cp_dispatch");
+	assert.notEqual(offEnd?.isError, true, text(offEnd));
+	assert.notEqual(nativeEnd?.isError, true, text(nativeEnd));
+	// Switch off: the claude row falls back to pi with the class switch named; no native run.
+	const offRecord = readFleet(h.b.home).jobs.find((job) => job.job_id === off!.id)!;
+	assert.deepEqual([offRecord.worker.driver, offRecord.worker.model, offRecord.routing?.requested_driver, offRecord.routing?.driver], [undefined, piModel, "claude", "pi"]);
+	assert.match(offRecord.routing?.driver_reason ?? "", /^switch: the switch workers\.native_claude_ship is off/);
+	// Switch on: the Driver fact is claude, and the report's head_sha is the worktree HEAD and origin/<job>.
+	const record = readFleet(h.b.home).jobs.find((job) => job.job_id === native!.id)!;
+	assert.deepEqual([record.worker.driver, record.routing?.driver], ["claude", "claude"]);
+	// The repair below reopened the slot: the first accepted envelope is archived as generation 1, at the shipped commit.
+	const filed = (JSON.parse(readFileSync(join(h.b.home, paths.supersededEnvelopeFile(native!.id, 1)), "utf8")) as { envelope: Envelope }).envelope;
+	assert.equal(filed.head_sha, git("rev-parse", "HEAD~1"), toolResults(h.claude.requests).join("\n---\n"));
+	assert.equal(git("log", "-1", "--format=%s", "HEAD~1"), "shipped");
+	assert.equal(readRunEvents(h.b.home, native!.id).filter((event) => event.type === "envelope_received").length, 2, "the ship and the repair");
+	// CP_BASE_BRANCH reached the worker from the dispatch base: pr_create targets it and git_push refuses it.
+	assert.match(toolResults(h.claude.requests).join("\n"), /Refused: git_push never pushes release \(main and the base branch/);
+	// The parent's own forge reads (`api user`, `pr view`) share the shim; only the worker creates a PR.
+	const created = readFileSync(ghLog, "utf8").trim().split("\n").filter((line) => line.startsWith("pr create"));
+	assert.deepEqual(created, [`pr create --draft --head ${native!.id} --base release --title Ship it --body Native ship e2e.`]);
+	const system = readFileSync(join(h.b.home, paths.runDir(native!.id), "native-system-prompt.md"), "utf8");
+	assert.match(system, /open the draft PR with pr_create/, "the ship addendum, not the research one");
+	assert.doesNotMatch(system, /Write the research artifact/);
+	const run = readRunEvents(h.b.home, native!.id).find((event) => event.type === "native_run")?.payload as Record<string, unknown> | undefined;
+	assert.equal(run?.lockdown, "ok");
+	assert.ok(readRunStatus(h.b.home, native!.id).usage.total_tokens > 0);
+	// The CI-repair promotion (same kind) is admitted and resumes the reporting session: its prompt rides the transcript.
+	const sent = ends.find((end) => end.toolName === "cp_send");
+	assert.notEqual(sent?.isError, true, text(sent));
+	const repair = h.claude.requests.filter((request) => JSON.stringify(request.body.messages ?? "").includes("CI is red on the pushed head"));
+	assert.ok(repair.length > 0, "the repair prompt reached the model");
+	assert.match(JSON.stringify(repair[0]!.body.messages), /Shipped natively\.[\s\S]*CI is red on the pushed head/, "the repair turn resumed the same session");
+	const repaired = (JSON.parse(readFileSync(h.envelope(native!.id), "utf8")) as { envelope: Envelope }).envelope;
+	assert.deepEqual([repaired.summary, repaired.head_sha, git("log", "-1", "--format=%s")], ["Repaired natively.", git("rev-parse", "HEAD"), "repaired"]);
+	assert.equal(git("ls-remote", "origin", `refs/heads/${native!.id}`).split("\t")[0], repaired.head_sha);
+	assert.deepEqual(localChecks(repaired, { job_id: native!.id, kind: "ship", delivery: "pr", role: "implementer", runDir: join(h.b.home, paths.runDir(native!.id)), worktree: worktree(), mayAskOperator: false }), []);
+	assert.ok(readNativeSession(join(h.b.home, paths.runDir(native!.id), NATIVE_SESSION_FILE)).session_id);
 	assert.equal(h.claude.overrun(), 0);
 });
 

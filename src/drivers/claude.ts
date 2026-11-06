@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Delivery, type FleetRecord, type JobKind, paths, type Role } from "../contracts.ts";
-import { loadNativeConfig, nativeConfigFile, type NativeDriver } from "../worker-driver.ts";
+import { loadNativeConfig, type NativeClass, nativeConfigFile, type NativeDriver } from "../worker-driver.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
 
 /** Why a job may not run native (S1): the resolver falls back to pi on these; an explicit request refuses. */
@@ -25,7 +25,13 @@ const NATIVE_SYSTEM_PROMPT_FILE = "native-system-prompt.md";
 const LIVE_PHASES: readonly string[] = ["launching", "waiting", "held"];
 // One shared load: concurrent admissions awaiting their own import() could see a half-evaluated module.
 let spike: Promise<typeof import("./claude-spike.ts")> | undefined;
-const DELIVERIES: readonly Delivery[] = ["local", "answer"];
+const RESEARCH_DELIVERIES: readonly Delivery[] = ["local", "answer"];
+const SHIP_DELIVERIES: readonly Delivery[] = ["pr", "local"];
+const SWITCH_WHERE: Record<NativeClass, string> = {
+	claude_research: "dashboard Settings → Native workers",
+	claude_ship: "data/native.json claude_ship",
+	claude_review: "data/native.json claude_review",
+};
 const NATIVE_MODEL = /^anthropic\/(claude-[A-Za-z0-9][A-Za-z0-9._[\]-]*)$/;
 /** Routed levels the SDK serves as `effort`; `off` disables thinking and `minimal` has no native equivalent. */
 export const NATIVE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -41,22 +47,33 @@ export interface NativeSelection {
 	env?: NodeJS.ProcessEnv;
 }
 
-/** The first N3b condition that fails, typed, or undefined: switch on, local/answer research not owned by a
+/** The switch a job's role/kind/delivery falls under, or undefined when no native class takes it (N4f). Research
+ * delivery is checked after the pipeline rule, so pipeline-owned research is named as such (D2). */
+export function nativeClassOf(kind: JobKind, role: Role, delivery: Delivery): NativeClass | undefined {
+	if (role === "planner" && kind === "research") return "claude_research";
+	if (role === "implementer" && kind === "ship" && SHIP_DELIVERIES.includes(delivery)) return "claude_ship";
+	return role === "gate-reviewer" ? "claude_review" : undefined;
+}
+
+/** The first selection condition that fails, typed, or undefined: a native class whose switch is on, not owned by a
  * pipeline (D2), concurrency 1, pinned claude. */
 export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ category: NativeRefusal; why: string } | undefined> {
-	let on: boolean;
+	let config: ReturnType<typeof loadNativeConfig>;
 	try {
-		on = loadNativeConfig(nativeConfigFile(input.home)).claude_research;
+		config = loadNativeConfig(nativeConfigFile(input.home));
 	} catch (error) {
 		return { category: "switch", why: `the native switch is unreadable (${(error as Error).message})` };
 	}
-	if (!on) return { category: "switch", why: "the switch workers.native_claude_research is off (dashboard Settings → Native workers)" };
+	const nativeClass = nativeClassOf(input.kind, input.role, input.delivery);
+	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local or answer) and ship (role implementer, delivery pr or local) jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
+	if (nativeClass === undefined) return ineligible;
+	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
 	if (existsSync(join(input.home, paths.pipelineFile(input.jobId)))) {
 		return { category: "pipeline", why: "pipeline-owned research stays on pi; only local and answer research run native" };
 	}
-	if (input.kind !== "research" || input.role !== "planner" || !DELIVERIES.includes(input.delivery)) {
-		return { category: "ineligible", why: `only research jobs (role planner, delivery local or answer) run native; this is ${input.kind}/${input.role}/${input.delivery}` };
-	}
+	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
+	// N4h builds the reviewer path; until then claude_review gates nothing and a reviewer stays on pi.
+	if (nativeClass === "claude_review") return { category: "ineligible", why: "the native reviewer path is not built yet; gate-reviewers run on pi" };
 	const live = liveNativeJobs(input.jobs).filter((id) => id !== input.jobId);
 	if (live.length > 0) return { category: "occupied", why: `native concurrency is 1 and ${live.join(", ")} is live; tear it down first` };
 	try {
@@ -107,6 +124,14 @@ export const NATIVE_ADDENDUM = [
 	"path (CP_ARTIFACT_PATH), never with a shell heredoc, then call report_result.",
 ].join("\n");
 
+/** The ship counterpart (N4f): the forge tools replace pi's push and gh; the PR base is the job's base branch. */
+export const NATIVE_SHIP_ADDENDUM = [
+	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Edit, Write, Bash), the picp forge",
+	"tools (git_push, git_fetch, pr_create, pr_edit, gh_read) and report_result; ignore any other tool names above.",
+	"Commit with git in Bash, push only with git_push, open the draft PR with pr_create (never gh in Bash), then call",
+	"report_result once with head_sha = git rev-parse HEAD.",
+].join("\n");
+
 /**
  * Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir,
  * not the argv or env.
@@ -116,7 +141,7 @@ export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, system
 	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
-	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${NATIVE_ADDENDUM}\n`, { mode: 0o600 });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${env.CP_KIND === "ship" ? NATIVE_SHIP_ADDENDUM : NATIVE_ADDENDUM}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file } };
 }
@@ -130,4 +155,9 @@ export function assertNativeEffort(level: string | undefined): asserts level is 
 /** The routed thinking level for the native worker's SDK options; absent leaves the CLI default (recorded as such). */
 export function nativeThinkingEnv(thinking: string | undefined): Record<string, string> {
 	return thinking ? { CP_NATIVE_THINKING: thinking } : {};
+}
+
+/** The job's base branch for the native worker's forge tools: the PR base, and a branch `git_push` refuses. */
+export function nativeBaseEnv(base: string | undefined): Record<string, string> {
+	return base?.trim() ? { CP_BASE_BRANCH: base.trim() } : {};
 }

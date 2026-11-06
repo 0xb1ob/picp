@@ -37,6 +37,14 @@ test("agent_empty_output: settled with nothing to show", () => {
 	assert.equal(classifyRun(withText), undefined);
 });
 
+// N4e review (#765): a refused Claude sign-in is `model_call_failed`, never a nudge, even after an earlier settle.
+test("native_run stop=auth classifies as model_call_failed with the sign-in remedy", () => {
+	const events = [event("spawned", {}, "cp"), event("agent_start"), event("agent_settled"), event("native_run", { stop: "auth" }), event("process_exit", { code: 1 }, "cp")];
+	const failure = classifyRun(events);
+	assert.equal(failure?.class, "model_call_failed");
+	assert.match(failure?.message ?? "", /sign-in was refused; not nudged\. Sign in again, then cp_revive; the worktree and session are kept/);
+});
+
 /**
  * Verbatim shape from `state/runs/cp-1l2s/events.jsonl` (2026-09-04): pi ran
  * the loop, the assistant message came back `stopReason: "error"` with the

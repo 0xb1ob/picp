@@ -40,11 +40,12 @@ class StubWorker {
 	alive = true;
 	readonly sent: string[] = [];
 	receipt: SendReceipt = "delivered";
+	error = "worker stdin is closed";
 	readonly #listeners = new Set<(event: WorkerEvent) => void>();
 
 	async send(message: string, _mode?: "prompt" | "steer" | "follow_up"): Promise<{ receipt: SendReceipt; error?: string }> {
 		this.sent.push(message);
-		return this.receipt === "failed" ? { receipt: "failed", error: "worker stdin is closed" } : { receipt: this.receipt };
+		return this.receipt === "failed" ? { receipt: "failed", error: this.error } : { receipt: this.receipt };
 	}
 
 	onEvent(listener: (event: WorkerEvent) => void): () => void {
@@ -247,6 +248,21 @@ test("an undeliverable nudge is recorded rather than retried", async (t) => {
 	const nudges = readRunEvents(b.home.path, JOB_ID).filter((event) => event.type === "report_nudged");
 	assert.equal(nudges.length, 1);
 	assert.equal((nudges[0]?.payload as { receipt?: string }).receipt, "failed");
+});
+
+// N4e review (#765): a native worker refuses its idle nudge (`success:false`, a named admission refusal). The refusal
+// is recorded verbatim with the job left unreported, and later settles never re-send it in a loop.
+test("a native worker's refused nudge records the admission refusal once and is never retried", async (t) => {
+	const b = await bench(t);
+	b.worker.receipt = "failed";
+	b.worker.error = "prompt rejected by worker: cp-settle: native admission refused (the spend cap is paused). Nothing was resumed.";
+	const outcome = await b.watcher.settled(JOB_ID, b.worker);
+	assert.equal(outcome.action, "recorded");
+	assert.match(JSON.stringify(outcome), /could not be delivered: prompt rejected by worker: .*native admission refused/);
+	for (let settle = 0; settle < 3; settle += 1) assert.equal((await b.watcher.settled(JOB_ID, b.worker)).action, "recorded");
+	assert.equal(b.worker.sent.length, 1, "the refused nudge is sent once, never looped");
+	const nudges = readRunEvents(b.home.path, JOB_ID).filter((event) => event.type === "report_nudged");
+	assert.deepEqual(nudges.map((event) => (event.payload as { receipt?: string; error?: string })), [{ receipt: "failed", settles: 1, bytes: (nudges[0]?.payload as { bytes: number }).bytes, error: b.worker.error }]);
 });
 
 test("a worker that is already gone is recorded, never prompted", async (t) => {

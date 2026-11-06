@@ -17,6 +17,12 @@ const readJson = (file: string): Json | undefined => {
 	try { return obj(JSON.parse(readFileSync(file, "utf8"))); } catch { return undefined; }
 };
 const only = (value: Json, keys: readonly string[]) => Object.keys(value).every((key) => keys.includes(key));
+/** Viewer copy of `NATIVE_CLASSES` (`worker-driver.ts`): valid like `loadNativeConfig`, and some class switch on. */
+const SWITCHES = ["claude_research", "claude_ship", "claude_review"] as const;
+const nativeSwitchOn = (config: Json): boolean => only(config, [...SWITCHES, "max_concurrent"])
+	&& SWITCHES.every((key) => config[key] === undefined || typeof config[key] === "boolean")
+	&& (config.max_concurrent === undefined || (Number.isInteger(config.max_concurrent) && (config.max_concurrent as number) >= 1 && (config.max_concurrent as number) <= 4))
+	&& SWITCHES.some((key) => config[key] === true);
 const at = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined);
 const version = (value: unknown) => value === undefined || (typeof value === "string" && value.length >= 1 && value.length <= 40);
 /** S2's entry schemas (no extra keys): a window entry, or a sticky auth/lockdown entry when `codes` is set. */
@@ -48,7 +54,7 @@ function parse(raw: Json | undefined) {
 export function nativeQuotaLine(stateDir: string, now: number): ClaudeItem | undefined {
 	const switchFile = join(dirname(stateDir), "data", "native.json");
 	const config = readJson(switchFile);
-	if (!config || Object.keys(config).some((key) => key !== "claude_research") || config.claude_research !== true) return undefined;
+	if (!config || !nativeSwitchOn(config)) return undefined;
 	const snapshot = parse(readJson(join(stateDir, "native-availability.json")));
 	if (!snapshot) return { state: "unknown", label: "Claude unknown", detail: "no readable native-availability snapshot yet" };
 	// shortcut: CLI-version invalidation (iii) is skipped (it spawns claude); add it if a CLI update leaves the line

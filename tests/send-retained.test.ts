@@ -250,7 +250,7 @@ test("the diff reviewer/plan gate reads the latest generation, not a stale copy"
 // 4b-1 (4B1-T5): restore on send — fake workers, no child process
 // ---------------------------------------------------------------------------
 
-async function releaseBench(t: { after(fn: () => void | Promise<void>): void }, options: { reviveFails?: boolean; mandates?: (home: string) => MandateStore } = {}) {
+async function releaseBench(t: { after(fn: () => void | Promise<void>): void }, options: { reviveFails?: boolean; mandates?: (home: string) => MandateStore; nativeResearch?: boolean } = {}) {
 	const home = createScratchHome();
 	const runs = new RunRegistry(home.path);
 	const fleet = new FleetStore({ home: home.path });
@@ -262,8 +262,8 @@ async function releaseBench(t: { after(fn: () => void | Promise<void>): void }, 
 	});
 	const jobId = "cp-aaa1";
 	await fleet.add({
-		job_id: jobId, project: "example-app", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held",
-		worker: { pid: 4242, session_id: "s", session_file: join(home.path, "s.jsonl"), profile: "implementer", role: "implementer", model: "mock/unused", started_at: isoTimestamp() },
+		job_id: jobId, project: "example-app", kind: options.nativeResearch ? "research" : "ship", delivery: options.nativeResearch ? "local" : "pr", origin: DEFAULT_ORIGIN, phase: "held",
+		worker: { pid: 4242, session_id: "s", session_file: join(home.path, "s.jsonl"), profile: "implementer", role: "implementer", model: "mock/unused", started_at: isoTimestamp(), ...(options.nativeResearch ? { driver: "claude", profile: "planner", role: "planner" } : {}) },
 		worktree: home.path, branch: jobId, dispatched_at: isoTimestamp(new Date(Date.now() - 30_000)), reported_at: isoTimestamp(), usage: EMPTY_USAGE,
 	});
 	const released = new Set<string>();
@@ -396,4 +396,20 @@ test("S5: a malformed session is a named refusal; marker-looking prose and an un
 	rmSync(sessionFile);
 	assert.equal((await b.sender.send({ jobId: b.jobId, message: "second" })).receipt, "delivered", "pi has not written the file yet");
 	assert.equal(live.sent.length, 2);
+});
+
+// N4f: a native worker's tools and policy are fixed at spawn, so a research worker never takes a ship brief by cp_send.
+test("N4f: a kind-changing promotion of a native research worker is refused by name; a plain prompt goes on to admission", async (t) => {
+	const b = await releaseBench(t, { nativeResearch: true });
+	const live = b.workers.spawn(b.jobId);
+	for (const promotion of [{ task: "Now implement it." }, { taskFile: join(b.home, "ship.md") }]) {
+		await assert.rejects(b.sender.send({ jobId: b.jobId, message: "go", ...promotion }), (error: unknown) => {
+			assert.ok(error instanceof SendError);
+			assert.match(error.message, /^cp-aaa1 runs on the native claude driver as research: a kind-changing promotion .* is refused.*Nothing was sent\.$/);
+			return true;
+		});
+	}
+	assert.deepEqual(live.sent, []);
+	// A plain prompt passes this guard and reaches native admission (here refused for the bench's non-claude model).
+	await assert.rejects(b.sender.send({ jobId: b.jobId, message: "one more source" }), /^Error: refused: resume of native cp-aaa1: /);
 });

@@ -211,6 +211,10 @@ export class Sender {
 		if (isScriptFleetRecord(record)) throw new SendError(`${request.jobId} is a script job; cp_send cannot promote or replay it`);
 		const native = record.worker?.driver !== undefined;
 		if (native && request.mode === "steer") throw new SendError(nativeDoorRefusal(request.jobId, "steer"));
+		// A native worker's tool set, policy and env are fixed at spawn: a research worker never takes a ship brief.
+		if (native && record.kind === "research" && (request.task !== undefined || request.taskFile !== undefined)) {
+			throw new SendError(`${request.jobId} runs on the native claude driver as research: a kind-changing promotion (a new brief via task/task_file) is refused, since its tools and policy were fixed at spawn. Tear it down and dispatch a ship job. Nothing was sent.`);
+		}
 		if (record.phase === "failed") {
 			throw new SendError(
 				native

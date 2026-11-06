@@ -16,19 +16,30 @@ export type NativeDriver = (typeof NATIVE_DRIVERS)[number];
 
 export const nativeConfigFile = (home: string): string => join(home, LAYOUT.data, "native.json");
 
-/** `data/native.json` (`workers.native_claude_research`): absent means off; another key or a non-boolean throws. */
-export function loadNativeConfig(file: string): { claude_research: boolean } {
+/** The per-class switches (N4f): research, ship implementers and reviewers; each defaults to off. */
+export const NATIVE_CLASSES = ["claude_research", "claude_ship", "claude_review"] as const;
+export type NativeClass = (typeof NATIVE_CLASSES)[number];
+export type NativeConfig = Record<NativeClass, boolean> & { max_concurrent: number };
+const NATIVE_KEYS: readonly string[] = [...NATIVE_CLASSES, "max_concurrent"];
+const MAX_CONCURRENT = 4;
+
+/** `data/native.json`: absent means every class off; an unknown key, a non-boolean switch or a bad count throws. */
+export function loadNativeConfig(file: string): NativeConfig {
 	let raw: unknown;
 	try {
 		raw = JSON.parse(readFileSync(file, "utf8"));
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { claude_research: false };
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { claude_research: false, claude_ship: false, claude_review: false, max_concurrent: 1 };
 		throw new Error(`${file} is unreadable: ${(error as Error).message}`);
 	}
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${file} is not a JSON object`);
-	const extra = Object.keys(raw).filter((key) => key !== "claude_research");
-	if (extra.length) throw new Error(`${file} has unknown key ${extra.join(", ")}; the only key is "claude_research"`);
-	const value = (raw as { claude_research?: unknown }).claude_research;
-	if (value !== undefined && typeof value !== "boolean") throw new Error(`${file}: claude_research must be true or false`);
-	return { claude_research: value === true };
+	const extra = Object.keys(raw).filter((key) => !NATIVE_KEYS.includes(key));
+	if (extra.length) throw new Error(`${file} has unknown key ${extra.join(", ")}; the keys are ${NATIVE_KEYS.join(", ")}`);
+	const values = raw as Record<string, unknown>;
+	for (const key of NATIVE_CLASSES) {
+		if (values[key] !== undefined && typeof values[key] !== "boolean") throw new Error(`${file}: ${key} must be true or false`);
+	}
+	const count = values.max_concurrent === undefined ? 1 : values.max_concurrent;
+	if (!Number.isInteger(count) || (count as number) < 1 || (count as number) > MAX_CONCURRENT) throw new Error(`${file}: max_concurrent must be an integer from 1 to ${MAX_CONCURRENT}`);
+	return { claude_research: values.claude_research === true, claude_ship: values.claude_ship === true, claude_review: values.claude_review === true, max_concurrent: count as number };
 }
