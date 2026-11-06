@@ -6985,7 +6985,7 @@ never read or written.
 The decided named-threads product (es-99574f): a thread is an opaque, immutable id (`th-` + 16 random hex) plus a free
 display name (trimmed, 1–80 code points, no control characters; duplicates allowed). S8 ships only the registry and its
 read-only projection; S9 tags dashboard sends (below); S10a carries the source on asks and the parent outbox (below);
-S10b tags jobs and joins them (below), and S11 shows them in the chat (Thread UI, below).
+S10b tags jobs and joins them (below); S11's chat UI was retired by cp-2tf2 (Thread UI, below).
 
 - **Registry.** `state/operator/named-threads.jsonl` (0600), append-only, one complete fsynced line per event, schema
   `NamedThreadEventSchema` (`src/contracts/threads.ts`), `v: 1`: `create` / `rename` (`request_id` = the dashboard
@@ -7014,8 +7014,8 @@ S10b tags jobs and joins them (below), and S11 shows them in the chat (Thread UI
 ### Thread sends (full match S9)
 
 A dashboard message names its thread explicitly: `POST /api/operator/message` takes `thread_id` (`th-` + 16 hex, or `null`
-/ absent for No thread), separate from the text and any P1 evidence reference. The composer sends the S11 selection
-(below), else `thread_id: null`; a queued, held, retried or edited send keeps the thread it was sent with.
+/ absent for No thread), separate from the text and any P1 evidence reference. The dashboard composer sends none since
+cp-2tf2 (below); a queued, held, retried or edited send keeps the thread it was sent with.
 
 - **Validated before journaling.** Malformed is 400 at the viewer. A named thread must be in the registry: unknown is 404
   `no thread <id>; nothing was sent`, an unavailable registry is 503 (`send without a thread or repair it: <file:line>`);
@@ -7091,26 +7091,12 @@ untagged.
   it, and names a ledger, asks or journal it could not read.
 - **No authority.** An origin grants no mandate, decision, risk or merge, and appears in no label or path.
 
-### Thread UI (full match S11)
+### Thread UI (retired by cp-2tf2)
 
-The operator Full transcript shows the named threads (`viewer-app/components/ThreadRail.tsx`): the Operator row's rail
-(New thread, All messages, each named thread, No thread, Started from chat), a tab strip above the transcript and the
-composer's `#` picker (also `/thread`). It reads `GET /api/threads` and writes only through `POST /api/operator/threads`.
-
-- **Selection in the hash.** `thread=th-…` is one named thread, `thread=none` No thread, absent All messages
-  (`viewer-app/thread-selection.ts`). It never reaches an API and never remounts the screen; the project filter still
-  applies beside it. A thread link drops `transcript=1` (keeping `session=`), so it opens a `defaulted` Full transcript:
-  if the server refuses the transcript (403), it falls back silently to Decisions, not to the explicit-route error.
-- **Recorded membership only.** A named thread shows the entries, pending sends, open asks and working jobs its
-  `thread_id`, ask join or job join names; No thread shows what no thread claims; All messages filters nothing and keeps
-  the one model and context line. Untagged history is never placed in a named thread.
-- **Sends.** The composer sends the selected thread's id, else an explicit `thread_id: null` (No thread and All
-  messages). Each selection keeps its own draft (`cp-composer-draft:<session file>#<selection>`; All keeps the old key).
-- **Local only.** Open tabs (`cp-thread-tabs`) and unread cursors (`cp-thread-seen:<id>`) are this browser's. The `#`
-  chip and `/thread` show once a named thread exists; New thread needs a running owner advertising `threads: true` and
-  says why it is disabled otherwise. An unknown selected id shows nothing under it and links back to All messages.
-- **Capped joins.** Started from chat shows the join's first 8 rows and "N more" counting the rest plus its `omitted`
-  (joins are capped at `THREAD_JOINS_MAX`, 100); there is no paging.
+The S11 thread rail, tab strip, `#` picker and `/thread` are gone: the operator Full transcript's sidebar lists "All
+projects" then one row per registered project (`projects` on its `/api/sessions` response, from `data/projects.json`),
+and a row sets the same `project=` hash filter the header select did, the one filter control. The dashboard sends no
+`thread_id` and reads no `GET /api/threads`; a stored pending send's retired `thread`/`thread_id` is dropped on read.
 
 ### Remote devices (remote dashboard PR 1)
 

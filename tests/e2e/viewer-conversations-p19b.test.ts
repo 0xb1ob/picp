@@ -516,17 +516,15 @@ const MANY = Array.from({ length: 30 }, (_, i) => `p${String(i).padStart(2, "0")
 const SPLIT = "Status first.\n\n[picp] merged cp-a\n\n[atlas] queued the next step";
 /** An assistant text block with its own `message.timestamp`, so a reply-splits record can key it. */
 const keyed = (ts: number, text: string) => JSON.stringify({ type: "message", timestamp: AT, message: { role: "assistant", timestamp: ts, content: [{ type: "text", text }] } });
-const FILTER = 'select[aria-label="Filter by project"]';
-/** The filter's shown value (linkedom reads it from the selected option). */
-const chosen = (tab: Tab) => (tab.$(FILTER) as unknown as { value: string } | null)?.value;
+const ROWS = ".session-sidebar .project-row";
+/** The sidebar row the selection marks current (none for Untagged or an unknown name). */
+const chosen = (tab: Tab) => tab.$(`${ROWS}[aria-current="page"]`)?.textContent?.replace(/^#/, "");
 /** The transcript's text alone: the sidebar's Operator preview reads the full data by design. */
 const shown = (tab: Tab) => tab.$(".session-entries")?.textContent ?? "";
-/** Picks `value` in the filter as a browser would, then lets the route see the hash the app wrote. */
-async function choose(tab: Tab, value: string) {
-	const select = await tab.find(FILTER);
-	for (const option of select.querySelectorAll("option")) option.toggleAttribute("selected", option.getAttribute("value") === value);
-	select.dispatchEvent(new tab.window.Event("change", { bubbles: true }));
-	tab.go(tab.window.location.hash);
+/** Follows the sidebar row named `name` as a browser would (linkedom does not navigate links), then settles. */
+async function choose(tab: Tab, name: string) {
+	const row = await tab.find(ROWS, (a) => a.textContent === `#${name}`);
+	tab.go(row.getAttribute("href")!);
 	await settle();
 }
 const bubble = (tab: Tab, text: string) => tab.$$(".session-bubble").find((b) => b.textContent?.includes(text));
@@ -536,6 +534,8 @@ const sections = (b: Element | undefined) => [...(b?.querySelectorAll(".session-
 async function tagged(t: Context) {
 	return viewer(t, { seed: (stateDir, home) => {
 		for (const name of ["picp", "atlas", ...MANY]) write(join(home, LAYOUT.projects, name, "README.md"), "x\n");
+		// The sidebar's rows are the registry; "solo" has no loaded entries.
+		write(join(dirname(stateDir), "data", "projects.json"), { projects: ["picp", "atlas", "solo", ...MANY].map((name) => ({ name })) });
 		write(join(stateDir, "fleet.json"), { jobs: [{ job_id: "cp-a", project: "picp", phase: "held" }] });
 		const file = join(home, "pi-sessions", "session.jsonl"), gone = join(home, "pi-sessions", "gone.jsonl");
 		write(file, `${[operator("[picp] please merge cp-a"), relay(SPLIT), relay("cp-a is waiting on CI"), operator("hello there"), relay("general chatter"),
@@ -577,25 +577,31 @@ test("M1-sections: a project shows only its sections, the original toggle the un
 	await tab.waitText(/sidecar target/);
 	assert.deepEqual(sections(bubble(tab, "queued the next step")), ["atlas"]);
 	assert.ok(!shown(tab).includes("please merge") && !shown(tab).includes("waiting on CI"));
-	await choose(tab, "/untagged");
-	assert.equal(tab.window.location.hash, "#sessions?view=you&transcript=1&untagged=1");
+	// Untagged has no row; its deep link keeps filtering, with no row current.
+	tab.go(`${FULL}&untagged=1`);
+	await settle();
+	assert.equal(chosen(tab), undefined);
 	await tab.waitText(/general chatter/);
 	assert.deepEqual(sections(bubble(tab, "Status first")), [null], "Untagged keeps a mixed reply's preamble only");
 	assert.ok(shown(tab).includes("stale tag words") && !shown(tab).includes("please merge") && !shown(tab).includes("fleet-wide"), "untagged entries only");
-	await choose(tab, "");
+	await choose(tab, "All projects");
 	assert.equal(tab.window.location.hash, "#sessions?view=you&transcript=1", "All clears both parameters");
 	await tab.waitText(/fleet-wide note/);
 	assert.deepEqual(sections(bubble(tab, "merged cp-a")), [null, "picp", "atlas"], "All renders as before");
 	assert.deepEqual(reads(), ["/api/sessions?view=you&transcript=1"], "a selection change re-reads nothing and keeps the screen mounted");
 
-	const options = [...tab.$(FILTER)!.querySelectorAll("option")].map((o) => o.getAttribute("value"));
-	assert.deepEqual(options, ["", "/untagged", "atlas", ...MANY, "picp"], "All, Untagged, then every name sorted, none truncated");
+	const rows = tab.$$(ROWS).map((a) => a.textContent);
+	assert.deepEqual(rows, ["#All projects", ...["atlas", ...MANY, "picp", "solo"].map((n) => `#${n}`)], "All, then every registered name sorted, none truncated");
+	assert.equal(tab.$('select[aria-label="Filter by project"]'), null, "one filter control: no header dropdown");
 	await choose(tab, "p17");
 	await until(() => tab.$$(".session-bubble").length, (n) => n === 1, "a large tag set matches any one of its names");
+	await choose(tab, "solo");
+	await until(() => shown(tab), (text) => /No loaded entries for solo/.test(text), "a registered project with no messages");
+	assert.equal(chosen(tab), "solo");
 
 	const renamed = await d.open(`${FULL}&project=old-name`);
 	await renamed.waitText(/No loaded entries for old-name/);
-	assert.deepEqual([chosen(renamed), renamed.$$(".session-bubble").length], ["old-name", 0], "an unknown or renamed name stays selected, explicitly empty");
+	assert.deepEqual([chosen(renamed), renamed.$$(".session-bubble").length], [undefined, 0], "an unknown or renamed name stays in the hash, explicitly empty");
 	const reloaded = await tab.reopen(`${FULL}&project=atlas`);
 	await reloaded.waitText(/sidecar target/);
 	assert.equal(chosen(reloaded), "atlas", "reload keeps the selection");

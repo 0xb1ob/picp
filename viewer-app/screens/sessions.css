@@ -14,37 +14,11 @@
 .session-choice-head > .session-ctx, .session-choice-head > .session-time { flex-shrink: 0; font-size: 12px; color: var(--dim); }
 .session-choice small { font-size: 12px; line-height: 17px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-choice small.session-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
-/* Full match S11 (frames 1, 10, 11): the Operator's thread rows, its Started from chat list, and the chat's tab strip.
-   Long names ellipsize in one line; the tab strip scrolls sideways at 390 px. */
-.thread-rail-new { margin: 4px 8px 0; }
-.thread-new { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 10px; background: none; color: var(--muted); border: 1px dashed var(--border); border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
-.thread-new kbd { margin-left: auto; font: inherit; font-size: 11px; color: var(--dim); }
-.thread-new:disabled, .thread-tab-new:disabled { opacity: 0.5; cursor: default; }
-.thread-gate { margin: 4px 0 0; padding: 0 2px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.thread-create { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.thread-create input { flex: 1 1 140px; min-width: 0; min-height: 36px; padding: 0 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; }
-.thread-create button { min-height: 36px; padding: 0 10px; background: var(--raised); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
-.thread-create p { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.thread-rows { display: flex; flex-direction: column; gap: 1px; margin: 4px 8px 0; padding: 0; list-style: none; }
-.thread-row { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; }
-.thread-row[aria-current=page] { background: var(--nav-selected); color: var(--text); }
-.thread-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-unread { flex-shrink: 0; font-size: 11px; color: var(--text); }
-.thread-started { margin: 8px 8px 0; }
-.thread-started h2 { margin: 0; padding: 6px 10px; font-size: 11px; font-weight: 500; color: var(--dim); }
-.thread-started ul { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
-.thread-started a { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: 13px; min-width: 0; }
-.thread-started a > small, .thread-started-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-started a > small { font-size: 11px; color: var(--dim); }
-.thread-started-head { display: flex; gap: 8px; min-width: 0; }
-.thread-started-head b { flex: 1; min-width: 0; font-weight: 500; }
-.thread-started-state { flex-shrink: 0; font-size: 11px; color: var(--muted); }
-.thread-more { margin: 2px 0 0; padding: 0 10px; font-size: 12px; color: var(--muted); }
-.thread-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 6px 12px; border-bottom: 1px solid var(--divider); overflow-x: auto; scrollbar-width: none; flex-shrink: 0; }
-.thread-tab { display: flex; align-items: center; flex-shrink: 0; max-width: 220px; min-height: 32px; border-radius: 8px; color: var(--muted); font-size: 13px; }
-.thread-tab[aria-current=page] { background: var(--nav-selected); color: var(--text); }
-.thread-tab a { min-width: 0; padding: 6px 10px; color: inherit; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-tab button, .thread-tab-new { flex-shrink: 0; width: 28px; height: 28px; padding: 0; background: none; color: var(--muted); border: 0; border-radius: 6px; font: inherit; font-size: 15px; cursor: pointer; }
+/* The Operator's project rows (the retired thread rows' sizes; hover and focus are the shell's link rules). */
+.project-rows { display: flex; flex-direction: column; gap: 1px; margin: 4px 8px 0; padding: 0; list-style: none; }
+.project-row { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; }
+.project-row[aria-current=page] { background: var(--nav-selected); color: var(--text); }
+.project-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-panel { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* The phone top bar (chat v2): 48 px plus its hairline; back and ⋯ are 44 px, the avatar 28 px; the name (15 px) over a
    11 px state line. Desktop keeps the sidebar and heading. */
@@ -78,13 +52,8 @@
 .session-bar-restart .operator-restart { flex-direction: column; align-items: stretch; }
 .session-file-picker { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--muted); }
 .session-file-picker select { min-width: 0; max-width: 100%; min-height: 44px; padding: 0 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; text-overflow: ellipsis; }
-/* The Full transcript's actions in the heading row: the project popover (hash-owned select), Jobs and Context (M3). */
+/* The Full transcript's actions in the heading row: Jobs and Context (M3). */
 .session-filter { display: flex; align-items: center; gap: 6px; flex-shrink: 0; min-width: 0; margin-left: auto; }
-.session-filter-menu { position: relative; min-width: 0; }
-.session-filter-menu > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; max-width: 150px; padding: 0 10px; border-radius: 9px; font-size: 13px; color: var(--text); }
-.session-filter-menu > summary > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-filter-menu[open] > summary { background: var(--toggle); }
-.session-filter-sheet { position: absolute; top: 100%; right: 0; z-index: 4; width: max-content; max-width: min(320px, calc(100vw - 28px)); padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
 /* Phone live/ask strip (design `.strip`): a neutral run ring, the live count, and the ask count only when one is open. */
 .session-strip { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .session-strip-job { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -109,10 +78,9 @@
  .session-heading > .session-avatar, .session-heading > .session-heading-id { display: none; }
  /* The strip already carries the ask count; the toggle's own name still says it. */
  .session-heading .workspace-context-open > .workspace-badge { display: none; }
- /* C1: the project label ellipsizes before the strip's suffix and elapsed; the strip's own ellipsis is the fallback. */
+ /* C1: the strip ellipsizes its own suffix and elapsed before the actions. */
  .session-heading > .session-strip { flex: 1 1 auto; }
  .session-heading > .session-filter { display: contents; }
- .session-heading .session-filter-menu { flex-shrink: 100000; min-width: 44px; }
 }
 /* Chat v2 header: avatar, name over the state line (dot · state · model · ctx). */
 .session-heading > .session-avatar { color: var(--text); overflow: visible; }

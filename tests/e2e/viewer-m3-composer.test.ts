@@ -39,6 +39,8 @@ function seed(stateDir: string, home: string) {
 		return { job_id, project, kind: "ship", phase: "held", ...(job_id === "cp-orphan" ? {} : { dispatched_at: iso(60) }) };
 	}) });
 	put("skills/teach/SKILL.md", "---\ndescription: Explain step by step\n---\n\n# Body\n");
+	mkdirSync(join(dirname(stateDir), "data"), { recursive: true });
+	writeFileSync(join(dirname(stateDir), "data", "projects.json"), JSON.stringify({ projects: [{ name: "picp" }, { name: "atlas" }] }));
 }
 const start = async (t: Context, online = true) => {
 	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed });
@@ -76,7 +78,7 @@ test("M3-composer-typed: a `/` draft offers /status, /jobs and /stop; Enter/Tab 
 	await tab.find(".operator-composer textarea");
 	await type(tab, "/");
 	assert.deepEqual([tab.$('[role="listbox"]')!.getAttribute("aria-label"), options(tab)], ["Commands", [`/status${STATUS}`, "/jobsOpen the jobs drawer", "/stopAsk the operator to stop a job"]]);
-	assert.doesNotMatch(tab.text(), /\/thread/, "full match S11: no /thread command until a named thread exists");
+	assert.doesNotMatch(tab.text(), /\/thread/, "the retired /thread command is gone");
 
 	await type(tab, "/j");
 	assert.deepEqual(options(tab), ["/jobsOpen the jobs drawer"]);
@@ -111,7 +113,7 @@ test("M3-composer-typed: a `/` draft offers /status, /jobs and /stop; Enter/Tab 
 	assert.deepEqual([await press(tab, "Escape", true), !!tab.$("aside.workspace-context")], [false, true], "an IME Escape keeps the inspector");
 	const footer = [...tab.document.querySelectorAll(".operator-composer-attach, .operator-composer-at, .operator-composer-slash")] as unknown as Element[];
 	assert.deepEqual(footer.map((el) => el.textContent), ["", "@ job", "/ command"], "the paperclip first, then frame 4's `@ job` and `/ command`");
-	assert.doesNotMatch(tab.$(".operator-composer-footer")!.textContent!, /#|thread/i, "full match S11: no # thread chip until a named thread exists");
+	assert.doesNotMatch(tab.$(".operator-composer-footer")!.textContent!, /#|thread/i, "no retired # thread chip");
 });
 
 test("M3-composer-menu: the `/ command` and `@ job` chips prepare commands and attach a selection's job as the P1 reference; Escape and removal keep the draft", { timeout: 180_000 }, async (t) => {
@@ -147,7 +149,7 @@ test("M3-composer-menu: the `/ command` and `@ job` chips prepare commands and a
 	assert.deepEqual([n(tab, "#operator-composer-command-menu"), focused() === field(tab), sends(tab)], [0, true, 0]);
 
 	tab.go(`${CHAT}&project=atlas`);
-	await tab.find(".session-filter select option[selected][value=atlas]");
+	await tab.find('.session-sidebar .project-row[aria-current="page"]', (a) => a.textContent === "#atlas");
 	tab.click(slash);
 	await tab.find("#operator-composer-command-menu button code", (c) => c.textContent === "@cp-other");
 	assert.deepEqual(tab.$$("#operator-composer-command-menu button code").map((c) => c.textContent), ["/status", "/jobs", "/stop", "@cp-other"], "M1 narrows the jobs");

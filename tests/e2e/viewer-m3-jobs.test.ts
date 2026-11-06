@@ -32,6 +32,8 @@ function seed(stateDir: string, home: string, extra = false) {
 	writeFileSync(chat, `${JSON.stringify({ type: "message", timestamp: iso(10), message: { role: "assistant", content: [{ type: "text", text: "REPLY-CARD" }] } })}\n`);
 	mkdirSync(join(stateDir, "sessions"), { recursive: true });
 	writeFileSync(operatorSessionsFile(join(stateDir, "sessions")), `${JSON.stringify({ at: iso(20), session_file: chat })}\n`);
+	mkdirSync(join(dirname(stateDir), "data"), { recursive: true });
+	writeFileSync(join(dirname(stateDir), "data", "projects.json"), JSON.stringify({ projects: [{ name: "picp" }, { name: "picp-lab" }] }));
 	const job = (id: string, project: string, status: string, title = `Title ${id}`, extra: object = {}) =>
 		({ id, title, status, labels: [`project:${project}`, "kind:ship"], blocked_by: [], ...extra });
 	const extras = extra ? EXTRA : [];
@@ -130,7 +132,7 @@ test("M3-jobs-drawer: chat Cmd+J opens the Jobs drawer; segments and the M1 filt
 	await until(() => headings(tab), (h) => h.length === 1, "the picp-lab selection");
 	assert.deepEqual([headings(tab), tab.window.location.hash], [["In flight · 1"], `${CHAT}&project=picp-lab`], "M1: the hash carries the chat's selection");
 	assert.equal(tab.$(`${DRAWER} .workspace-full`)!.getAttribute("href"), "#jobs?project=picp-lab", "Full page keeps the selection");
-	assert.equal((tab.$('.session-filter select[aria-label="Filter by project"]') as unknown as { value: string }).value, "picp-lab", "one selection for chat and drawer");
+	assert.equal(tab.$('.session-sidebar .project-row[aria-current="page"]')?.textContent, "#picp-lab", "one selection for chat and drawer");
 	assert.equal(reads(tab), 4, "one read per opening plus the context's one; the selection never refetches");
 
 	assert.equal(escape(tab), true);

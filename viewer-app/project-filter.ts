@@ -19,10 +19,10 @@ export function selectionHash(hash: string, value: string): string {
  const rest = q.toString();
  return `#${path}${rest ? `?${rest}` : ""}`;
 }
-/** A route query without its project and S11 thread selections: the API never sees them, a change never remounts. */
+/** A route query without its project selection: the API never sees it, a change never remounts. */
 export function withoutSelection(query: string | undefined): string {
  const q = new URLSearchParams(query ?? "");
- for (const key of [...KEYS, "thread"]) q.delete(key);
+ for (const key of KEYS) q.delete(key);
  return q.toString();
 }
 /** Exact any-project match: Untagged is no project at all; All matches everything. */

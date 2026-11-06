@@ -187,6 +187,8 @@ export interface SessionsResponse {
  open_asks?: AwaitingDetail[];
  /** Live PR and issue chips by URL (src/viewer/pr-chips.ts), from files the viewer already reads; no GitHub call. */
  pr_chips?: Record<string, PrChip>;
+ /** Operator Full transcript only: registered project names (`data/projects.json`), sorted; the sidebar's filter rows. */
+ projects?: string[];
 }
 /** One PR or issue as a Sessions chip; every null field is unknown on disk and never rendered. */
 export interface PrChip {
