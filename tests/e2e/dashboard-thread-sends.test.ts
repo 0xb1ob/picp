@@ -206,7 +206,8 @@ test("thread-sends: unknown or unverifiable threads refused with nothing written
 	assert.deepEqual([sends(journal), read(registry)], broken, "refused before any request or bind line");
 	assert.equal((await post(d, { kind: "message", text: "null while broken", client_id: ID(25), thread_id: null })).status, 202, "No thread never reads the registry");
 	await delivered(d, ID(25));
-	const untagged = await transcript(d);
+	// A delivered outcome precedes pi's session write: wait for the entry (CI run 42209190427 read the transcript first).
+	const untagged = await until(() => transcript(d), (entries) => entries.some((e) => e.text === "null while broken"), "the null send in the transcript", 30_000);
 	assert.ok(untagged.some((e) => e.text === "null while broken"), "still visible");
 	assert.deepEqual(untagged.filter((e) => e.thread_id), [], "an unavailable registry leaves every entry untagged");
 	writeFileSync(registry, broken[1].replace("{not json}\n", ""));
