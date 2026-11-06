@@ -72,6 +72,11 @@ export const SPIKE_TOOLS: readonly string[] = RESEARCH_TOOLS;
 export const REPORT_TOOL = "mcp__picp__report_result";
 const HOST_ENV_ALLOW = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] as const;
 const EXIT_GRACE_MS = 10_000;
+/**
+ * Policy settings for every child. disableAllHooks binds as managed-only hooks; an empty strictKnownMarketplaces stops
+ * the headless reconcile installing the passed settings' enabledPlugins into the kept scratch for the next process.
+ */
+export const CHILD_MANAGED_SETTINGS = { disableAllHooks: true, strictKnownMarketplaces: [] } satisfies Options["managedSettings"];
 
 export class ClaudeSpikeError extends Error {
 	/** Set by `resolveClaude`: no CLI on PATH, or one that cannot prove the floor. */
@@ -164,6 +169,7 @@ export function buildChildEnv(
 		DISABLE_TELEMETRY: "1",
 		DISABLE_ERROR_REPORTING: "1",
 		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+		CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1",
 		CLAUDE_AGENT_SDK_CLIENT_APP: "picp-native-spike",
 		...providerEnv,
 	};
@@ -490,7 +496,7 @@ async function runInScratch(
 		settingSources: [],
 		...(settingsPath === null ? {} : { settings: settingsPath }),
 		// Binds as allowManagedHooksOnly: settings-file and project hooks never run; picp's SDK callback still does.
-		managedSettings: { disableAllHooks: true },
+		managedSettings: CHILD_MANAGED_SETTINGS,
 		strictMcpConfig: true,
 		mcpServers: { picp: native === "reviewer" ? verdictServer(options.job, state) : reportServer(options.job, state, forge) },
 		tools: [...tools],

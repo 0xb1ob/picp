@@ -1,0 +1,1 @@
+- N4m: a resumed native follow-up no longer dies at lockdown. Every Claude child now gets `strictKnownMarketplaces: []` as policy settings (and `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1`), so the CLI's headless plugin reconcile cannot install the passed settings' `enabledPlugins` into the kept scratch for the next process. The lockdown is unchanged.

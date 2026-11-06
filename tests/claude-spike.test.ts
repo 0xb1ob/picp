@@ -22,6 +22,7 @@ import { readOnlyBashRefusal, secretPaths } from "../src/drivers/claude-bash-pol
 import { CLI_BUILTIN_AGENTS, type InitSurface, lockdownVerdict } from "../src/drivers/claude-lockdown.ts";
 import {
 	buildChildEnv,
+	CHILD_MANAGED_SETTINGS,
 	claudeVersionRefusal,
 	parseClaudeVersion,
 	preToolUseHook,
@@ -48,6 +49,9 @@ test("buildChildEnv passes only the allow-list, the isolated dirs and the explic
 	assert.equal(env.ANTHROPIC_AUTH_TOKEN, "synthetic");
 	for (const key of ["ANTHROPIC_API_KEY", "GH_TOKEN", "NODE_OPTIONS"]) assert.equal(key in env, false, key);
 	assert.equal("ANTHROPIC_BASE_URL" in buildChildEnv(dirs, { ANTHROPIC_BASE_URL: "http://host" }), false);
+	// N4m: no marketplace auto-install, and policy settings that keep a settings-enabled plugin out of the kept scratch.
+	assert.equal(env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL, "1");
+	assert.deepEqual(CHILD_MANAGED_SETTINGS, { disableAllHooks: true, strictKnownMarketplaces: [] });
 });
 
 const call = async (hook: HookCallback, tool_name: string, tool_input: unknown) => {
