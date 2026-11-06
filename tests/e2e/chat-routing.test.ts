@@ -1,8 +1,5 @@
-/**
- * cp-chat-cleanup: chat sends, asks and jobs after the thread and origin removal, through real entry points: the viewer
- * HTTP routes beside the operator's real dashboard-control owner, the operator's pi with the real cp-bridge and parent
- * host (fake parent), and a pi running the command-post extension (mock provider) for parent intake.
- */
+/** cp-chat-cleanup: sends, asks and jobs after the thread/origin removal, via viewer HTTP, the dashboard-control owner,
+ * the operator's pi (cp-bridge, fake parent) and a command-post pi parent (mock provider). */
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
