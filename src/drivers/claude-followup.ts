@@ -6,7 +6,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "nod
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
-import { isScriptFleetRecord, type Usage } from "../contracts.ts";
+import { isScriptFleetRecord, type JobKind, type Usage } from "../contracts.ts";
 import { assertDispatchOpen } from "../drain.ts";
 import { checkBudget } from "../failures.ts";
 import { FleetStore } from "../fleet.ts";
@@ -20,10 +20,20 @@ export const NATIVE_SESSION_FILE = "native-claude";
 export const NATIVE_FOLLOWUPS_FILE = "native-followups.jsonl";
 export const NATIVE_SCRATCH_PREFIX = "cp-claude-native-";
 
-/** The revive prompt: the resumed session is told why it was resumed and what still ends the job. */
-export const NATIVE_REVIVE_PROMPT =
-	"picp revived this job: your previous native run ended without an accepted report (a crash, a stop or a restart). " +
-	"Continue the research from where the session stopped and call report_result once when you are done.";
+const REVIVED = "picp revived this job: your previous native run ended without an accepted report (a crash, a stop or a restart). ";
+
+/** The revive prompt per kind: the resumed session is told why it was resumed and what still ends the job. */
+export function nativeRevivePrompt(kind: JobKind): string {
+	return REVIVED + (kind === "research"
+		? "Continue the research from where the session stopped and call report_result once when you are done."
+		: "Continue the implementation from where the session stopped: commit, git_push, open the draft PR with pr_create if it is not open, then call report_result once with head_sha.");
+}
+
+/** Why a recorded session must not resume in `worktree`: it started elsewhere (an awaiting_merge re-lease). */
+export function nativeSessionMoved(session: NativeSession, worktree: string): string | undefined {
+	if (session.cwd === undefined || resolve(session.cwd) === resolve(worktree)) return undefined;
+	return `the native session started in ${session.cwd} and the worktree is now ${worktree}; the Claude CLI keys sessions by cwd, so its resume is refused and the job continues on a fresh session`;
+}
 
 export const NATIVE_ACK = {
 	resumed:
@@ -46,6 +56,8 @@ export const NativeSessionSchema = Type.Object(
 		driver: Type.Literal("claude"),
 		scratch_dir: Type.String({ minLength: 1 }),
 		session_id: Type.Optional(Type.String({ minLength: 1 })),
+		/** The worktree the session started in; the CLI keys sessions by cwd. Absent on a pre-N4f record. */
+		cwd: Type.Optional(Type.String({ minLength: 1 })),
 		/** The session's cumulative per-model tokens and cost at its last result; absent means a resume is unmeasured. */
 		baseline: Type.Optional(Type.Object({ ledger: LedgerSchema, cost_usd: Type.Number({ minimum: 0 }) }, { additionalProperties: false })),
 	},
@@ -173,8 +185,9 @@ export async function nativeReviveRefusal(home: string, jobId: string, sessionFi
 export async function sendNativeRevive(
 	worker: { send(message: string, mode: "prompt"): Promise<{ receipt: string; disposition?: string; error?: string }> },
 	record: (payload: Record<string, unknown>) => void,
+	kind: JobKind,
 ): Promise<string | undefined> {
-	const sent = await worker.send(NATIVE_REVIVE_PROMPT, "prompt");
+	const sent = await worker.send(nativeRevivePrompt(kind), "prompt");
 	record({ receipt: sent.receipt, ...(sent.disposition ? { disposition: sent.disposition } : {}), native_revive: true, ...(sent.error ? { error: sent.error } : {}) });
 	return sent.receipt === "failed" ? `the native worker refused the revive prompt (${sent.error ?? "no error text"})` : undefined;
 }

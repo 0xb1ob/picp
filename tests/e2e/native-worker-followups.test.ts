@@ -12,7 +12,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_BUDGET_CONFIG, type Failure, LAYOUT, paths } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
-import { NATIVE_FOLLOWUPS_FILE, NATIVE_REVIVE_PROMPT, NATIVE_SESSION_FILE, queuedFollowUps, readNativeSession } from "../../src/drivers/claude-followup.ts";
+import { NATIVE_FOLLOWUPS_FILE, NATIVE_SESSION_FILE, nativeRevivePrompt, queuedFollowUps, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { OBSERVATION_EVENT } from "../../src/drivers/claude-observation.ts";
 import { recordNativeObservation } from "../../src/native-availability.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
@@ -237,7 +237,7 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	assert.match(text(frozenRevive), /native_refused.*draining/);
 	// F2: the revive resumes the session with picp's revive prompt and the job reports once more (generation 2).
 	assert.match(text(revived), /resumed its native Claude session/, text(revived));
-	const revivedRun = modelCalls(h.claude.requests).find((request) => messages(request).includes(NATIVE_REVIVE_PROMPT.slice(0, 40)));
+	const revivedRun = modelCalls(h.claude.requests).find((request) => messages(request).includes(nativeRevivePrompt("research").slice(0, 40)));
 	assert.ok(messages(revivedRun).includes("ls -l"), "the revive resumed the same session");
 	const stops = readRunEvents(h.b.home, id).filter((event) => event.type === "native_run").map((event) => (event.payload as { stop?: string }).stop);
 	assert.deepEqual(stops, [undefined, "max_turns", undefined], "the unreported follow-up ended at its turn limit, never settled");
@@ -309,7 +309,7 @@ test("H2: a resume that throws returns its claimed sends undelivered, and the ne
 	assert.equal(existsSync(join(runDir, `${NATIVE_FOLLOWUPS_FILE}.claimed`)), false);
 	const last = messages(modelCalls(h.claude.requests).at(-1));
 	assert.equal(last.split(queued).length - 1, 1, "the queued send reached the model exactly once");
-	assert.ok(last.includes(NATIVE_REVIVE_PROMPT.slice(0, 40)), "the revive turn delivered it");
+	assert.ok(last.includes(nativeRevivePrompt("research").slice(0, 40)), "the revive turn delivered it");
 	assert.equal(events.filter((event) => event.type === "envelope_received").length, 2);
 	assert.equal(h.claude.overrun(), 0);
 });
@@ -410,7 +410,7 @@ test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_r
 	const [nativeRevive, piRevive] = ends.filter((end) => end.toolName === "cp_revive");
 	// L1: the plain revive resumed the same session with picp's revive prompt, and the job reported exactly once.
 	assert.match(text(nativeRevive), /resumed its native Claude session/, text(nativeRevive));
-	const revivedRun = modelCalls(h.claude.requests).find((request) => messages(request).includes(NATIVE_REVIVE_PROMPT.slice(0, 40)));
+	const revivedRun = modelCalls(h.claude.requests).find((request) => messages(request).includes(nativeRevivePrompt("research").slice(0, 40)));
 	assert.ok(messages(revivedRun).includes("Report the repo"), "the revive resumed the killed turn's conversation");
 	assert.equal(readNativeSession(sessionFile).session_id, before);
 	const events = readRunEvents(h.b.home, ids.native);

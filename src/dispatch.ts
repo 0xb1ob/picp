@@ -733,7 +733,7 @@ export class Dispatcher {
 				sessionName: issue.id,
 				...(skills.length ? { skills: skills.map((s) => s.dir) } : {}),
 				admit: () => void (operatorPick = admitOperatorPick(options.home, request, options.fleet.get(issue.id), now())),
-				...nativeSpawn(routing),
+				...nativeSpawn(routing, bound?.base ?? base),
 			}));
 			recorder.markSpawned({
 				pid: managed.worker.pid,

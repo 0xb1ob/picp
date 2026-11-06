@@ -90,8 +90,8 @@ export interface SpikeJob {
 	delivery: Delivery;
 	runDir: string;
 	worktree: string;
-	/** Predeclared research artifact; its directory is the only place Write may touch. */
-	artifactPath: string;
+	/** Predeclared research artifact; its directory is the only place a research Write may touch. Ship has none. */
+	artifactPath?: string;
 	/** Implementer only: grant and home `exclude_paths` no Edit/Write may touch, read by the worker process. */
 	excludePaths?: readonly string[];
 }

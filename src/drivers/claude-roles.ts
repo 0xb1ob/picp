@@ -38,6 +38,7 @@ export function implementerExclusions(home: string): string[] {
 /** Edit/Write scope: research its artifact directory; an implementer its worktree, no .git, secret or exclusion. */
 export function writeScopeGuard(job: SpikeJob, secrets: readonly string[], role: NativeRole): SpikeGuard {
 	if (role === "research") {
+		if (!job.artifactPath) throw new Error(`research ${job.job_id} has no artifact path; a research worker never runs without one`);
 		const writeRoot = dirname(resolve(job.artifactPath));
 		return (call) => {
 			if (call.name === "edit") return "Refused: Edit is not in the spike's tool set.";

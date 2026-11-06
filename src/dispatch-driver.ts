@@ -3,7 +3,7 @@
  * strict, and a started job keeps its driver (D1). Only local/answer research may run native (D2).
  */
 import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision } from "./contracts.ts";
-import { assertNativeEffort, nativeModelId, NativeDriverError, nativeSelectionRefusal, type NativeRefusal, nativeThinkingEnv } from "./drivers/claude.ts";
+import { assertNativeEffort, nativeBaseEnv, nativeModelId, NativeDriverError, nativeSelectionRefusal, type NativeRefusal, nativeThinkingEnv } from "./drivers/claude.ts";
 import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest } from "./routing.ts";
 import { nativeAvailability } from "./native-availability.ts";
 export { observeNative } from "./native-availability-observer.ts";
@@ -96,9 +96,10 @@ export function driverFields(decision: RoutingDecision): Pick<RoutingDecision, "
 	return { ...(requested_driver ? { requested_driver } : {}), ...(driver ? { driver } : {}), ...(driver_reason ? { driver_reason } : {}) };
 }
 
-/** Spawn fields for the decided driver: the native worker gets its routed effort; pi gets nothing extra. */
-export function nativeSpawn(decision: RoutingDecision): { driver?: NativeDriver; extraEnv?: Record<string, string> } {
-	return decision.driver === "claude" ? { driver: "claude", extraEnv: nativeThinkingEnv(decision.thinking) } : {};
+/** Spawn fields for the decided driver: the native worker gets its routed effort and the job's base branch (its
+ * forge tools' PR base and refused push target); pi gets nothing extra. */
+export function nativeSpawn(decision: RoutingDecision, base?: string): { driver?: NativeDriver; extraEnv?: Record<string, string> } {
+	return decision.driver === "claude" ? { driver: "claude", extraEnv: { ...nativeThinkingEnv(decision.thinking), ...nativeBaseEnv(base) } } : {};
 }
 
 function bounded(reason: string): string {

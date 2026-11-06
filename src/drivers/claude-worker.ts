@@ -26,6 +26,7 @@ import {
 	NATIVE_SESSION_FILE,
 	type NativeSession,
 	nativeDoorRefusal,
+	nativeSessionMoved,
 	readNativeSession,
 	removeNativeScratch,
 	returnClaim,
@@ -93,11 +94,17 @@ function relay(message: SDKMessage): void {
 }
 
 /** A new session record and scratch dir; a previous record's scratch dir is removed first, never orphaned. */
-function freshSession(): NativeSession {
+function freshSession(cwd: string): NativeSession {
 	if (existsSync(sessionFile)) removeNativeScratch(sessionFile);
-	const fresh: NativeSession = { driver: "claude", scratch_dir: mkdtempSync(join(tmpdir(), NATIVE_SCRATCH_PREFIX)), baseline: { ledger: {}, cost_usd: 0 } };
+	const fresh: NativeSession = { driver: "claude", scratch_dir: mkdtempSync(join(tmpdir(), NATIVE_SCRATCH_PREFIX)), cwd, baseline: { ledger: {}, cost_usd: 0 } };
 	writeNativeSession(sessionFile, fresh);
 	return fresh;
+}
+
+/** A fresh session after a moved worktree has no transcript: the job's brief leads its first prompt. */
+function briefFor(jobId: string): string {
+	const file = join(env.CP_HOME ?? "", paths.briefFile(jobId));
+	return existsSync(file) ? `${readFileSync(file, "utf8").trimEnd()}\n\n` : "";
 }
 
 /** The role contract the dispatch wrote; a missing or unreadable file stops the turn, never a run without it. */
@@ -124,11 +131,22 @@ interface Turn {
 
 /** One claude process: fresh on a dispatch, else a resume of the recorded session over its recorded baseline. */
 async function turn(prompt: string): Promise<Turn> {
-	if (env.CP_KIND !== "research" || env.CP_ROLE !== "planner") throw new Error(`native claude runs research jobs only, not ${env.CP_KIND}/${env.CP_ROLE}`);
+	const [kind, role] = [env.CP_KIND, env.CP_ROLE];
+	if (!((kind === "research" && role === "planner") || (kind === "ship" && role === "implementer"))) {
+		throw new Error(`native claude runs research/planner and ship/implementer jobs only, not ${kind}/${role}`);
+	}
 	const [jobId, runDir, worktree, artifactPath] = [env.CP_JOB_ID, env.CP_RUN_DIR, env.CP_WORKTREE, env.CP_ARTIFACT_PATH];
-	if (!jobId || !runDir || !worktree || !artifactPath) throw new Error("native claude worker started without its job identity");
+	if (!jobId || !runDir || !worktree || (env.CP_KIND === "research" && !artifactPath)) throw new Error("native claude worker started without its job identity");
 	const systemPrompt = readSystemPrompt();
-	const current = resuming ? readNativeSession(sessionFile) : freshSession();
+	let current = resuming ? readNativeSession(sessionFile) : freshSession(worktree);
+	const moved = resuming ? nativeSessionMoved(current, worktree) : undefined;
+	if (moved) {
+		write({ type: "native_session_moved", from: current.cwd, to: worktree, reason: moved });
+		process.stderr.write(`[native claude] ${moved}\n`);
+		resuming = false;
+		current = freshSession(worktree);
+		prompt = `${briefFor(jobId)}${prompt}`;
+	}
 	session = current;
 	if (resuming && current.session_id === undefined) throw new Error(`${sessionFile} holds no session id; there is nothing to resume`);
 	const baseline = current.baseline;
@@ -142,10 +160,10 @@ async function turn(prompt: string): Promise<Turn> {
 		write({ type: "native_transcript", transcript_file: transcript.file });
 	}
 	transcript.prompt(prompt, resumed);
-	const implementer = nativeRole(env.CP_ROLE) === "implementer";
+	const implementer = nativeRole(role) === "implementer";
 	const result = await runClaudeSpike({
 		job: {
-			job_id: jobId, kind: env.CP_KIND, role: env.CP_ROLE, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath,
+			job_id: jobId, kind, role, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, ...(artifactPath ? { artifactPath } : {}),
 			...(implementer ? { excludePaths: implementerExclusions(env.CP_HOME ?? "") } : {}),
 		},
 		...(implementer ? { providerEnv: commitIdentityEnv(worktree) } : {}),

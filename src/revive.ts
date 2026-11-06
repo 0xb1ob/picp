@@ -35,7 +35,8 @@ import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
 import { nativeDoorRefusal, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
 import { observeNative } from "./native-availability-observer.ts";
-import { nativeThinkingEnv } from "./drivers/claude.ts";
+import { nativeBaseEnv, nativeThinkingEnv } from "./drivers/claude.ts";
+import { projectBaseBranch } from "./forge-runtime.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
@@ -574,7 +575,7 @@ export class Reviver {
 					delivery: record.delivery,
 					runDir: this.#options.runs.open(jobId).runDir,
 					worktree: record.worktree,
-					...(record.worker.driver ? { artifactPath: join(this.#options.home, paths.artifactFile(jobId)) } : {}),
+					...(record.worker.driver && record.kind === "research" ? { artifactPath: join(this.#options.home, paths.artifactFile(jobId)) } : {}),
 				},
 				profile,
 				model: plan.model,
@@ -582,7 +583,7 @@ export class Reviver {
 				...(plan.skills?.length ? { skills: plan.skills.map((s) => s.dir) } : {}),
 				sessionFile: plan.session_file,
 				// N3c: a native job respawns its native worker, which resumes the recorded Claude session.
-				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1", ...nativeThinkingEnv(plan.thinking) } } : {}),
+				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1", ...nativeThinkingEnv(plan.thinking), ...nativeBaseEnv(record.bound_pr?.base ?? projectBaseBranch(this.#options.home, record.project)) } } : {}),
 				// No `brief`: a revived pi worker resumes idle. `report_result` stays
 				// write-once (worker-reporter), so nothing here can double-report.
 			}));
@@ -645,7 +646,7 @@ export class Reviver {
 			await safely(() => this.#options.manager.shutdown(jobId));
 			throw new ReviveError(`revive ${jobId}: spawned but failed to record it (${(error as Error).message}); worker shut down`);
 		}
-		const refusedPrompt = record.worker.driver ? await sendNativeRevive(managed.worker, (payload) => this.#options.runs.open(jobId).cp("prompt_sent", payload)) : undefined;
+		const refusedPrompt = record.worker.driver ? await sendNativeRevive(managed.worker, (payload) => this.#options.runs.open(jobId).cp("prompt_sent", payload), record.kind) : undefined;
 		if (refusedPrompt) throw new ReviveError(`revive ${jobId}: ${refusedPrompt}`);
 
 		return {
