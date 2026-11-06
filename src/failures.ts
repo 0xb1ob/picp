@@ -135,6 +135,8 @@ interface Scan {
 	retryOpen: boolean;
 	/** The latest native run stopped at this SDK turn cap (`native_run` `stop: "max_turns"`). */
 	turnLimit?: number;
+	/** The latest native run's named stop (N4e: `window`, `auth`, `lockdown`), already classified. */
+	nativeStop?: Classification;
 }
 
 function scan(events: readonly RunEvent[]): Scan {
@@ -214,12 +216,42 @@ function scan(events: readonly RunEvent[]): Scan {
 				break;
 			case "native_run":
 				state.turnLimit = payload.stop === "max_turns" ? Number(payload.max_turns) : undefined;
+				state.nativeStop = nativeStopClass(payload);
 				break;
 			default:
 				break;
 		}
 	}
 	return state;
+}
+
+/** A native run's named stop (N4e) as its failure: never a nudge, worktree and session kept for a revive. */
+function nativeStopClass(payload: Record<string, unknown>): Classification | undefined {
+	const kept = "the worktree and session are kept";
+	if (payload.stop === "window") {
+		const window = typeof payload.window === "string" ? payload.window : "unspecified";
+		const at = typeof payload.resets_at === "number" ? new Date(payload.resets_at).toISOString() : undefined;
+		return {
+			class: "provider_limit",
+			message: `native run stopped: the Claude subscription window ${window} is spent (${at ? `resets ${at}` : "reset unknown"}); ${kept}, and cp_revive after the reset resumes the same session`,
+			evidence: ["native_run stop=window", "cp:process_exit"],
+		};
+	}
+	if (payload.stop === "auth") {
+		return {
+			class: "model_call_failed",
+			message: `native run stopped: the Claude CLI's sign-in was refused; not nudged. Sign in again, then cp_revive; ${kept}`,
+			evidence: ["native_run stop=auth", "cp:process_exit"],
+		};
+	}
+	if (payload.stop === "lockdown") {
+		return {
+			class: "spawn_failed",
+			message: `native run stopped: the Claude CLI lockdown refused the loaded surface before any tool ran; not nudged. Fix the CLI settings, then cp_revive; ${kept}`,
+			evidence: ["native_run stop=lockdown", "cp:process_exit"],
+		};
+	}
+	return undefined;
 }
 
 function hasText(content: unknown): boolean {
@@ -310,6 +342,15 @@ export function classifyRun(events: readonly RunEvent[], options: ClassifyOption
 	}
 
 	if (state.exited) {
+		// A native run's own stop comes first: a settle from an earlier turn must not rename the stop that ended it.
+		if (state.nativeStop) return state.nativeStop;
+		if (state.turnLimit !== undefined) {
+			return {
+				class: "turn_limit",
+				message: `native run stopped at the turn limit (${state.turnLimit} turns) before reporting; the worktree and session are kept`,
+				evidence: ["native_run stop=max_turns", "cp:process_exit"],
+			};
+		}
 		// A settle before the exit is the whole difference (cp-settle-without-report):
 		// a crash is an exit with no settle, and a run that settled cleanly and then
 		// ended is a run that finished its work and skipped the last tool call. The
@@ -323,13 +364,6 @@ export function classifyRun(events: readonly RunEvent[], options: ClassifyOption
 					"the work may be finished and merely unreported. Check the branch and any PR before re-dispatching; " +
 					"cp_revive relaunches this worker on its own session file so it can still file its envelope.",
 				evidence: ["agent_settled", "cp:process_exit"],
-			};
-		}
-		if (state.turnLimit !== undefined) {
-			return {
-				class: "turn_limit",
-				message: `native run stopped at the turn limit (${state.turnLimit} turns) before reporting; the worktree and session are kept`,
-				evidence: ["native_run stop=max_turns", "cp:process_exit"],
 			};
 		}
 		return {
