@@ -543,8 +543,8 @@ Run history groups jobs by run (`src/viewer/schedule-run-groups.ts`): one anchor
 answer is a report under Reports, a short one stays in chat. `#answers` opens Reports; `GET /api/answers/control` is 404
 and `POST /api/answers/ack` the read-only viewer's 405.
 
-**Threads** were removed by #588, cp-2tf2 and cp-chat-cleanup (docs/contracts.md §Threads, retired): the transcript is one unfiltered
-chat, with no thread chips, sidebar section, composer picker or `cp-thread` selection.
+**Threads** were removed by #588, cp-2tf2 and cp-chat-cleanup (docs/contracts.md §Threads, retired): the transcript has no
+thread chips, thread sidebar section, composer picker or `cp-thread` selection; its one filter is Project rows (below).
 
 **Settings** (cp-settings-minimal, docs/contracts.md §Settings writes; `screens/Settings.tsx`,
 `use-settings-control.ts`, `settings-control.ts`). `#settings`, under More on both layouts, has exactly four sections, each with its own

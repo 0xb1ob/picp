@@ -6996,6 +6996,10 @@ or request line's `thread`/`thread_id`. A legacy `; thread=<tag>` marker in a se
 and shows as plain text. `state/operator/threads.jsonl` and `state/operator/named-threads.jsonl` are left on disk,
 never read or written. A send body carrying `thread` or `thread_id` is an unknown field (400), nothing journaled.
 
+In place of the thread UI, the operator Full transcript's sidebar lists "All projects" then one row per registered
+project (`projects` on its `/api/sessions` response, from `data/projects.json`); a row sets the `project=` hash filter,
+the one filter control ([viewer-app.md](viewer-app.md), Project rows).
+
 ### Remote devices (remote dashboard PR 1)
 
 **Status.** **Off by default**: on a home where `cp-tunnel up` never ran, nothing starts the remote listener, the device

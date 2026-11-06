@@ -196,7 +196,8 @@ test("P9d-remote-queue: a queued remote message keeps its sender and a remote ed
 });
 
 // P9d-remote-inbox: messages held while no session ran are replayed once, each remote one with its own device line
-// and marker (a retired `thread` key on a held line is ignored); local ones keep their bytes; a malformed device replays as local.
+// and marker (a retired `thread` key on a held line is ignored); local ones keep their bytes; a malformed device
+// replays as local.
 test("P9d-remote-inbox: the offline inbox replays each remote held message with its own device line and marker", { timeout: 90_000 }, async (t) => {
 	const s = await scratch(t);
 	const start = Date.now() - 300_000;
