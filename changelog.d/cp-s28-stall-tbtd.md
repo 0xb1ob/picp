@@ -1,0 +1,1 @@
+- Test harness: `MockProvider.stop()` now drops every connection (`server.closeAllConnections()`), so a worker's hang request that lands after teardown began no longer holds `close()` for ~300 s (the S28 manual-dispatch e2e stall on CI).
