@@ -39,7 +39,7 @@ export function loadNativeConfig(file: string): NativeConfig {
 	for (const key of NATIVE_CLASSES) {
 		if (values[key] !== undefined && typeof values[key] !== "boolean") throw new Error(`${file}: ${key} must be true or false`);
 	}
-	const count = values.max_concurrent ?? 1;
+	const count = values.max_concurrent === undefined ? 1 : values.max_concurrent;
 	if (!Number.isInteger(count) || (count as number) < 1 || (count as number) > MAX_CONCURRENT) throw new Error(`${file}: max_concurrent must be an integer from 1 to ${MAX_CONCURRENT}`);
 	return { claude_research: values.claude_research === true, claude_ship: values.claude_ship === true, claude_review: values.claude_review === true, max_concurrent: count as number };
 }

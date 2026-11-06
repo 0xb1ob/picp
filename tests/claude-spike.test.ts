@@ -4,12 +4,16 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
+import type { Delivery, JobKind, Role } from "../src/contracts.ts";
+import { nativeSpawn } from "../src/dispatch-driver.ts";
+import { nativeBaseEnv, nativeSelectionRefusal } from "../src/drivers/claude.ts";
+import { nativeRevivePrompt, nativeSessionMoved } from "../src/drivers/claude-followup.ts";
 import { readOnlyBashRefusal, secretPaths } from "../src/drivers/claude-bash-policy.ts";
 import { CLI_BUILTIN_AGENTS, type InitSurface, lockdownVerdict } from "../src/drivers/claude-lockdown.ts";
 import {
@@ -21,6 +25,8 @@ import {
 	spikeGuards,
 	spikeUsage,
 } from "../src/drivers/claude-spike.ts";
+import { nativeQuotaLine } from "../src/viewer/native-quota.ts";
+import { loadNativeConfig, nativeConfigFile } from "../src/worker-driver.ts";
 
 const dirs = { home: "/scratch/home", configDir: "/scratch/config", tmp: "/scratch/tmp" };
 
@@ -235,15 +241,20 @@ const WORKER = fileURLToPath(new URL("../src/drivers/claude-worker.ts", import.m
 const startWorker = (env: Record<string, string>) =>
 	spawnSync(process.execPath, [WORKER], { input: `${JSON.stringify({ id: 1, type: "prompt", message: "go" })}\n`, env: { PATH: process.env.PATH ?? "", ...env }, encoding: "utf8", timeout: 60_000 });
 
-// N4b review (#761): until N4f opens ship, the worker refuses a non-research job, and a missing or empty role contract
-// is a named start error; each exits 1 before any claude process starts.
-test("claude-worker: a non-research CP_KIND and a missing or empty system prompt file are named start errors", () => {
+// N4f: the worker takes the two pairs selection allows (research planner, ship implementer); any other pair, a missing
+// or empty role contract is a named start error, each exiting 1 before any claude process starts.
+test("claude-worker: a role/kind pair selection never allows and a missing or empty system prompt file are named start errors", () => {
 	const dir = mkdtempSync(join(tmpdir(), "cp-native-start-"));
 	try {
 		const job = { CP_JOB_ID: "cp-unit", CP_RUN_DIR: dir, CP_WORKTREE: dir, CP_ARTIFACT_PATH: join(dir, "report.md"), CP_DELIVERY: "local" };
-		const ship = startWorker({ ...job, CP_KIND: "ship", CP_ROLE: "implementer" });
+		for (const [kind, role] of [["ship", "planner"], ["research", "implementer"], ["ship", "gate-reviewer"]]) {
+			const refused = startWorker({ ...job, CP_KIND: kind!, CP_ROLE: role! });
+			assert.equal(refused.status, 1, refused.stderr);
+			assert.match(refused.stderr, new RegExp(`refused: native claude runs research/planner and ship/implementer jobs only, not ${kind}/${role}`));
+		}
+		const ship = startWorker({ ...job, CP_ARTIFACT_PATH: "", CP_KIND: "ship", CP_ROLE: "implementer" });
 		assert.equal(ship.status, 1, ship.stderr);
-		assert.match(ship.stderr, /refused: native claude runs research jobs only, not ship\/implementer/);
+		assert.match(ship.stderr, /started without its system prompt file/, "a ship implementer with no artifact passes the pair check");
 		const research = { ...job, CP_KIND: "research", CP_ROLE: "planner" };
 		const missing = startWorker(research);
 		assert.equal(missing.status, 1, missing.stderr);
@@ -256,4 +267,67 @@ test("claude-worker: a non-research CP_KIND and a missing or empty system prompt
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("N4f native.json: absent is every class off at concurrency 1; switches are booleans, max_concurrent 1-4, unknown keys refused", (t) => {
+	const home = mkdtempSync(join(tmpdir(), "cp-native-config-"));
+	t.after(() => rmSync(home, { recursive: true, force: true }));
+	const file = nativeConfigFile(home);
+	mkdirSync(dirname(file), { recursive: true });
+	assert.deepEqual(loadNativeConfig(file), { claude_research: false, claude_ship: false, claude_review: false, max_concurrent: 1 });
+	const load = (value: unknown) => (writeFileSync(file, JSON.stringify(value)), loadNativeConfig(file));
+	assert.deepEqual(load({ claude_ship: true, max_concurrent: 4 }), { claude_research: false, claude_ship: true, claude_review: false, max_concurrent: 4 });
+	assert.equal(load({ claude_review: true }).claude_review, true);
+	for (const bad of [0, 5, 1.5, "2", null]) assert.throws(() => load({ max_concurrent: bad }), /max_concurrent must be an integer from 1 to 4/, String(bad));
+	assert.throws(() => load({ claude_ship: "yes" }), /claude_ship must be true or false/);
+	assert.throws(() => load({ claude_research: true, claude_deploy: true }), /unknown key claude_deploy/);
+	// The dashboard's Claude item read the file with only claude_research allowed; the new keys keep it visible.
+	const state = join(dirname(dirname(file)), "state");
+	mkdirSync(state);
+	writeFileSync(file, JSON.stringify({ claude_ship: true, max_concurrent: 2 }));
+	assert.equal(nativeQuotaLine(state, Date.now())?.state, "unknown");
+	writeFileSync(file, JSON.stringify({ claude_ship: true, extra: 1 }));
+	assert.equal(nativeQuotaLine(state, Date.now()), undefined);
+	writeFileSync(file, JSON.stringify({ claude_ship: false, claude_review: false }));
+	assert.equal(nativeQuotaLine(state, Date.now()), undefined);
+});
+
+test("N4f eligibility: research, ship and review map to their own switch; a disabled class or another pair refuses by name", async (t) => {
+	const home = mkdtempSync(join(tmpdir(), "cp-native-class-"));
+	t.after(() => rmSync(home, { recursive: true, force: true }));
+	mkdirSync(dirname(nativeConfigFile(home)), { recursive: true });
+	const toggle = (value: Record<string, boolean>) => writeFileSync(nativeConfigFile(home), JSON.stringify(value));
+	// An empty PATH makes a passing selection end at the CLI check, so `cli_missing` means every class gate passed.
+	const refusal = (kind: JobKind, role: Role, delivery: Delivery) =>
+		nativeSelectionRefusal({ home, jobId: "cp-class", driver: "claude", kind, role, delivery, jobs: [], env: { PATH: "" } });
+	toggle({ claude_research: true });
+	assert.equal((await refusal("research", "planner", "local"))?.category, "cli_missing");
+	assert.match((await refusal("ship", "implementer", "pr"))?.why ?? "", /^the switch workers\.native_claude_ship is off \(data\/native\.json claude_ship\)$/);
+	toggle({ claude_ship: true });
+	assert.equal((await refusal("ship", "implementer", "pr"))?.category, "cli_missing");
+	assert.equal((await refusal("ship", "implementer", "local"))?.category, "cli_missing");
+	assert.match((await refusal("research", "planner", "answer"))?.why ?? "", /workers\.native_claude_research is off/);
+	for (const [kind, role, delivery] of [["ship", "implementer", "answer"], ["research", "implementer", "local"], ["ship", "planner", "pr"]] as const) {
+		const refused = await refusal(kind, role, delivery);
+		assert.equal(refused?.category, "ineligible", `${kind}/${role}/${delivery}`);
+		assert.match(refused?.why ?? "", new RegExp(`this is ${kind}/${role}/${delivery}$`));
+	}
+	assert.match((await refusal("ship", "gate-reviewer", "pr"))?.why ?? "", /workers\.native_claude_review is off/);
+	toggle({ claude_review: true });
+	assert.deepEqual(await refusal("ship", "gate-reviewer", "pr"), { category: "ineligible", why: "the native reviewer path is not built yet; gate-reviewers run on pi" });
+});
+
+test("N4f follow-ups: the revive prompt names the job's kind, a moved worktree refuses the session resume, the base rides the env", () => {
+	assert.match(nativeRevivePrompt("research"), /Continue the research/);
+	const ship = nativeRevivePrompt("ship");
+	assert.doesNotMatch(ship, /research/);
+	assert.match(ship, /Continue the implementation[\s\S]*git_push[\s\S]*report_result once with head_sha\.$/);
+	const session = { driver: "claude" as const, scratch_dir: "/tmp/cp-claude-native-x", cwd: "/leases/1/picp" };
+	assert.equal(nativeSessionMoved(session, "/leases/1/picp/"), undefined);
+	assert.equal(nativeSessionMoved({ ...session, cwd: undefined }, "/leases/2/picp"), undefined, "a pre-N4f record keeps resuming");
+	assert.match(nativeSessionMoved(session, "/leases/2/picp") ?? "", /started in \/leases\/1\/picp and the worktree is now \/leases\/2\/picp; .*resume is refused/);
+	const decision = { model: "anthropic/claude-x", source: "rubric", rule: "r", driver: "claude", thinking: "high" } as const;
+	assert.deepEqual(nativeSpawn(decision, "release"), { driver: "claude", extraEnv: { CP_NATIVE_THINKING: "high", CP_BASE_BRANCH: "release" } });
+	assert.deepEqual(nativeSpawn({ ...decision, driver: "pi" }, "release"), {});
+	assert.deepEqual(nativeBaseEnv(" "), {});
 });
