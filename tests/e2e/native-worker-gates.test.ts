@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -260,7 +260,8 @@ test("N4m: a resumed follow-up in the kept scratch sees the first run's surface,
 			assert.deepEqual(runs.map((result) => result.lockdown?.seen), runs.map(() => first.lockdown?.seen));
 			assert.deepEqual(runs.map((result) => result.sessionId), runs.map(() => first.sessionId), "the follow-ups did not resume");
 			assert.equal(provider.requests.some((request) => JSON.stringify(request.body).includes("MARKER-PLUGIN-SKILL")), false);
-			assert.deepEqual(readdirSync(join(scratchDir, "config", "plugins")).filter((name) => ["cache", "marketplaces"].includes(name)), []);
+			const plugins = join(scratchDir, "config", "plugins");
+			assert.deepEqual((existsSync(plugins) ? readdirSync(plugins) : []).filter((name) => ["cache", "marketplaces"].includes(name)), []);
 		} finally {
 			rmSync(scratchDir, { recursive: true, force: true });
 		}

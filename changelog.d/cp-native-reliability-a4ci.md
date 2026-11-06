@@ -1,0 +1,1 @@
+- Native reliability: a gate or diff review routed to the native claude driver now reserves its native slot from route to spawn, so a racing second review routes to pi instead of failing at spawn; a native promotion whose prompt fails for any reason (not only "Nothing was resumed.") restores the superseded envelope, `reported_at` and phase.

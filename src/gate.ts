@@ -51,7 +51,7 @@ import { ReviewRunsError, type ReviewRuns, type ReviewWait, type ReviewWakeup } 
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { type ModelProbe, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
-import { resolveReviewerRoute } from "./reviewer-route.ts";
+import { holdReviewerSlot, resolveReviewerRoute } from "./reviewer-route.ts";
 import { nativeSpawn } from "./dispatch-driver.ts";
 import { RunRecorder } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -780,7 +780,11 @@ export class Gate {
 	}
 
 	/** Recovery resolves before ordinary pass reuse; only a fresh claim may start its reviewer. */
-	async start(request: GateRequest): Promise<GateStart> {
+	start(request: GateRequest): Promise<GateStart> {
+		return holdReviewerSlot(this.#options.home, request.jobId, () => this.#start(request));
+	}
+
+	async #start(request: GateRequest): Promise<GateStart> {
 		const { home, artifacts, manager, reviews } = this.#options;
 		const now = this.#options.now ?? (() => new Date());
 		const jobId = request.jobId;
@@ -1183,7 +1187,7 @@ export class Gate {
 			},
 			this.#options.routing,
 			this.#options.probe,
-			this.#options.capacity, { home: this.#options.home, jobId, record, jobs: this.#options.fleet?.read().jobs ?? [], manager: this.#options.manager },
+			this.#options.capacity, { home: this.#options.home, jobId, record, jobs: this.#options.fleet?.read().jobs ?? [], manager: this.#options.manager, reserve: true },
 		);
 		return { decision, inputs };
 	}

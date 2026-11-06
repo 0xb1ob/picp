@@ -13,7 +13,7 @@ import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai
 import workerReporter, { VERDICT_FILE, VERDICT_RAW_FILE } from "../extensions/worker-reporter/index.ts";
 import { type Delivery, type FleetRecord, type JobKind, paths, type Role, type RoutingConfig } from "../src/contracts.ts";
 import { verdictReport } from "../src/drivers/claude-verdict.ts";
-import { resolveReviewerRoute } from "../src/reviewer-route.ts";
+import { holdReviewerSlot, resolveReviewerRoute } from "../src/reviewer-route.ts";
 import { ALWAYS_AVAILABLE } from "../src/routing.ts";
 import { nativeSpawn } from "../src/dispatch-driver.ts";
 import { assertNativeSelection, nativeAddendum, nativeBaseEnv, NativeDriverError, nativeMaxConcurrent, nativeSelectionRefusal, nativeSlotRefusal } from "../src/drivers/claude.ts";
@@ -474,4 +474,14 @@ test("N4h reviewer route: off is pi, on is claude, a pi row is pi, a live native
 	assert.match(`${busy.driver} ${busy.driver_reason}`, /^pi occupied: native concurrency is 1 and cp-other is live or being admitted/);
 	const own = await route({ driver: "claude" }, ["cp-subj"]);
 	assert.match(`${own.driver} ${own.driver_reason}`, /^pi occupied: .* cp-subj is live/, "the subject's own native worker holds a slot");
+	// Unfixed, a review routed native held nothing until its spawn, so a racing second review also routed native and
+	// failed at WorkerManager.spawn; a reserving route now holds the slot until its start settles.
+	const reserving = (jobId: string) => resolveReviewerRoute({ profile, jobId, project: "demo", kind: "research" }, config({ driver: "claude" }),
+		ALWAYS_AVAILABLE, undefined, { home, jobId, record: subject, jobs: [subject], manager: { active: [] } as never, reserve: true });
+	await holdReviewerSlot(home, "cp-a", async () => {
+		assert.equal((await reserving("cp-a")).driver, "claude");
+		const raced = await reserving("cp-b");
+		assert.match(`${raced.driver} ${raced.driver_reason}`, /^pi occupied: .* cp-a\/review is live or being admitted/);
+	});
+	assert.equal(await holdReviewerSlot(home, "cp-b", async () => (await reserving("cp-b")).driver), "claude", "the settled start released its slot");
 });
