@@ -1,0 +1,1 @@
+- Trim three comment lines over 120 characters in the native Claude driver and its ship-policy test; no behavior change.

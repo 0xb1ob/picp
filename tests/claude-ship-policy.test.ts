@@ -87,8 +87,8 @@ test("implementer exclusions come from the job: unlisted, a workflow write is al
 	});
 });
 
-// N4h: a native reviewer reads only its scratch dir (the review packet); a Read/Grep/Glob outside it, through a link, into a
-// secret, and any Bash, Write or Edit are refused by the real hook, so a reviewer cannot look past what it was handed.
+// N4h: a native reviewer reads only its scratch dir (the review packet); a Read/Grep/Glob outside it, through a link,
+// into a secret, and any Bash, Write or Edit are refused by the real hook, so it cannot look past what it was handed.
 test("reviewer guards: Read/Grep/Glob stay in the scratch dir; secrets, Bash, Write and Edit are refused", async () => {
 	await withWorktree(async (root, scratch, job) => {
 		const hook = preToolUseHook(spikeGuards({ ...job(), kind: "research", role: "gate-reviewer" }, SECRETS));
