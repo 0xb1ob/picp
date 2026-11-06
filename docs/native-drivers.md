@@ -354,14 +354,20 @@ subtype: `success` and every `error_*` result, so a run stopped at the turn limi
 input, output, cache read, cache write and `costUSD`; the cost is the larger of the per-model sum and `total_cost_usd`
 (the cross-check). The growth over the session baseline becomes pi's `message_end` usage (input excludes cache
 read/write), so run status, the fleet record, mandate accounting and the per-job `checkBudget` read it exactly like pi
-usage. A run with no result message (the process was stopped first), an unreadable `modelUsage` or zero tokens writes no
-measurement: the worker emits `usage_unavailable`, run status carries `usage_unavailable: true` and the dashboard shows
-"unavailable (not measured)". Accounting then adds nothing for that run (never a measured zero) and admission does not
-wait on it. Every `native_run` event names `result_subtype`, `usage_status` (`complete`, `unavailable` or
-`unbaselined`) and `denied`: at most 5 `tool: reason` lines of at most 200 characters, paths and env values redacted.
-A teardown that reaches a turn still in flight (typically after its `report_result`, before the closing `result`)
-waits up to `NATIVE_RESULT_GRACE_MS` (4 s, under the parent's 5 s stdin grace) for that result, measures it, then
-stops; queued follow-ups stay queued. A result that does not arrive in time is abandoned and the run stays unavailable.
+usage. An unreadable `modelUsage` or zero tokens writes no measurement: the worker emits `usage_unavailable`, run status
+carries `usage_unavailable: true` and the dashboard shows "unavailable (not measured)". Accounting then adds nothing for
+that run (never a measured zero) and admission does not wait on it. Every `native_run` event names `result_subtype`,
+`usage_status` (`complete`, `estimated`, `unavailable` or `unbaselined`) and `denied`: at most 5 `tool: reason` lines
+of at most 200 characters, paths and env values redacted.
+
+**Measured, estimated or unavailable (N4k).** A stop (stdin end or SIGTERM) that reaches a turn in flight waits for
+its `result`: `NATIVE_REPORTED_GRACE_MS` (45 s) once a `report_result` or `report_verdict` was accepted, because the
+parent stops a reviewer as soon as its verdict lands, else `NATIVE_RESULT_GRACE_MS` (4 s). The parent's stdin→SIGTERM
+grace for a native worker is `NATIVE_SHUTDOWN_GRACE_MS` (57 s), so no SIGTERM cuts the wait; a second stop still aborts
+at once. A result in time is **measured** (`complete`). A run that still ends without one is **estimated**: the usage
+on its streamed assistant messages, counted once per message id, becomes the same `message_end` usage at cost 0 with
+`cost_unknown` (picp holds no per-model price table), and the session baseline advances by it so a resume never counts
+those tokens again. Only a run with neither a result nor streamed usage stays **unavailable**.
 
 **Rollback.** Turning the switch off refuses new native dispatches, resumes and revives; a live native job keeps its
 driver until its own exit or teardown, and teardown still works.
