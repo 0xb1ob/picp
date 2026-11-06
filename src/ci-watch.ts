@@ -543,36 +543,10 @@ export class CiWatch {
 	readonly #cadence: CiWatchCadence;
 	readonly #retryMs: number;
 	/**
-	 * Facts sent on this process's watch and not yet observed arriving, keyed by
-	 * the same idempotence key a `cp-ci` message carries. In memory on purpose:
-	 * "in flight" is a fact about a live transport, and a restart has no transport
-	 * to speak of.
-	 *
-	 * **Bounded at one resend** (pi-command-post-jua), mirroring
-	 * `ReviewRuns#inFlight`/`resendDue`: a fact that is never confirmed used to be
-	 * re-added to `due` — and re-sent as a brand-new `followUp` — every
-	 * `retryMs` *forever*, because only `sentAt` was tracked. Three jobs were
-	 * observed doing exactly that: a done/torn-down job kept surfacing a stale
-	 * notice, an old-generation head kept resurfacing after a newer one was held,
-	 * and an unchanged green head kept re-announcing itself for hours while its
-	 * review sat pending. None of those facts was ever lost — each was sent once,
-	 * correctly — the defect was that a *lagging confirmation* (a busy or idle
-	 * session takes a while to run the turn that observes arrival) was
-	 * indistinguishable from a *lost* send, so this kept manufacturing new copies
-	 * of the same fact indefinitely instead of trusting the first two. `resent`
-	 * makes that bound explicit: at most one delivered resend per key, and once
-	 * a key has had it, further ticks leave the fact alone — silent
-	 * under-delivery is the accepted trade, exactly as `review-runs.ts` already
-	 * accepts it for verdict wake-ups.
-	 *
-	 * That silence never costs the merge itself: a dropped `ci_green`/`pr_merged`
-	 * notice only ever loses the *wake-up* about the fact, never the fact. Merge
-	 * permission is `cp_integrate`'s own read of GitHub for the pushed head
-	 * (AGENTS.md §Integration), re-derived on every call rather than trusted from
-	 * a prior notice — so a parent that never got told still finds a green,
-	 * mergeable head the next time anything calls `cp_integrate` on that job.
+	 * Sent, unconfirmed facts by `cp-ci` key (in memory: a restart has no transport). Re-sent every `retryMs` until
+	 * confirmed or no longer derived; the old one-resend cap lost a rerun's result when both handoffs dropped (cp-a0gs).
 	 */
-	readonly #inFlight = new Map<string, { sentAt: number; resent: boolean }>();
+	readonly #inFlight = new Map<string, { sentAt: number }>();
 	#tick: Promise<CiWatchTick> | undefined;
 	#disabled: string | undefined;
 	#disabledNotified = false;
@@ -672,6 +646,8 @@ export class CiWatch {
 		} catch {
 			// Pruning is housekeeping; a failure here must not skip the tick.
 		}
+		const live = new Set(watched.map((record) => record.job_id));
+		for (const key of this.#inFlight.keys()) if (!live.has(jobIdOfKey(key) ?? "")) this.#inFlight.delete(key);
 		const now = this.#now();
 		for (const record of watched) {
 			const gitlab = parseChangeRequestUrl(prReceiptOf(record)?.url ?? "")?.kind === "gitlab";
@@ -719,14 +695,9 @@ export class CiWatch {
 		for (const observation of derived) {
 			if (announced.has(observation.key)) continue;
 			const existing = this.#inFlight.get(observation.key);
-			// pi-command-post-jua: a fact that already had its one delivered resend is
-			// left alone from here on — resending it again on every future tick is the
-			// defect this bound exists to close, and confirmation (or the job leaving
-			// the watch set) is what clears it, never a third send.
-			if (existing?.resent) continue;
 			if (existing !== undefined && millis - existing.sentAt < this.#retryMs) continue;
 			const isResend = existing !== undefined;
-			this.#inFlight.set(observation.key, { sentAt: millis, resent: isResend });
+			this.#inFlight.set(observation.key, { sentAt: millis });
 			due.push(observation);
 			if (!isResend) {
 				try {
@@ -736,6 +707,8 @@ export class CiWatch {
 				}
 			}
 		}
+		const current = new Set(derived.map((observation) => observation.key));
+		for (const key of this.#inFlight.keys()) if (jobIdOfKey(key) === record.job_id && !current.has(key)) this.#inFlight.delete(key);
 		const headSha = facts.pr?.head_sha ?? head.sha;
 		const settled = derived.length > 0;
 		// pi-command-post-8ok: `head_observed_at` moves with the head, and only with

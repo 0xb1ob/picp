@@ -21,10 +21,47 @@ export const CiRerunEntrySchema = Type.Object(
 		/** The first failed step that made it infra-only, e.g. `Install treehouse`. */
 		step: Type.String({ minLength: 1, maxLength: 200 }),
 		at: IsoTimestampSchema,
+		/** The failed attempt that was rerun; absent on claims written before it existed. */
+		attempt: Type.Optional(Type.Integer({ minimum: 1 })),
+		/** `uncertain` until gh answers (a crash leaves it so); absent is a legacy claim, spent. */
+		outcome: Type.Optional(Type.Union([Type.Literal("uncertain"), Type.Literal("accepted"), Type.Literal("refused")])),
 	},
 	{ additionalProperties: false },
 );
 export type CiRerunEntry = Static<typeof CiRerunEntrySchema>;
+
+/** `defaults/ci-flakes.json`: a failed test (file + exact name, optional literal text) known to be flaky. */
+const CiFlakeTestSchema = Type.Object(
+	{
+		project: Type.String({ minLength: 1, maxLength: 100 }),
+		file: Type.String({ minLength: 1, maxLength: 300 }),
+		test: Type.String({ minLength: 1, maxLength: 300 }),
+		text: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
+		evidence: Type.String({ minLength: 1, maxLength: 300 }),
+	},
+	{ additionalProperties: false },
+);
+/** A gate job whose only failed step just aggregates other jobs; it never qualifies a rerun alone. */
+const CiFlakeStepSchema = Type.Object(
+	{
+		project: Type.String({ minLength: 1, maxLength: 100 }),
+		job: Type.String({ minLength: 1, maxLength: 200 }),
+		step: Type.String({ minLength: 1, maxLength: 200 }),
+		evidence: Type.String({ minLength: 1, maxLength: 300 }),
+	},
+	{ additionalProperties: false },
+);
+export const CiFlakeEntrySchema = Type.Union([CiFlakeTestSchema, CiFlakeStepSchema]);
+export type CiFlakeEntry = Static<typeof CiFlakeEntrySchema>;
+export const CiFlakesFileSchema = Type.Object(
+	{ schema_version: Type.Literal(1), entries: Type.Array(CiFlakeEntrySchema, { maxItems: 200 }) },
+	{ additionalProperties: false },
+);
+export type CiFlakesFile = { schema_version: 1; entries: CiFlakeEntry[] };
+
+export function validateCiFlakesFile(value: unknown): ValidationResult<CiFlakesFile> {
+	return validate<CiFlakesFile>(CiFlakesFileSchema, value);
+}
 
 export const CiRerunsFileSchema = Type.Object(
 	{

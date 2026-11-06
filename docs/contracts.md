@@ -1049,7 +1049,8 @@ rule applies unchanged: a send is a hand-off to pi's `followUp` queue, not
 evidence of arrival, so a fact is written to `announced` only when the `cp-ci`
 message is **observed landing in the parent's context** (`ciKeysFromMessage`,
 the `message_start`/`context` hooks). Until then it is in-memory in-flight and
-is derived and sent again after `CI_WATCH_DELIVERY_RETRY_SECONDS`. A duplicate
+is derived and sent again every `CI_WATCH_DELIVERY_RETRY_SECONDS` until it
+arrives or is no longer derived (a moved head, a job out of the watch set). A duplicate
 CI notice is idempotent and visible; a lost one is invisible, which is the whole
 reason this exists. `announced` is **persisted** — the deliberate inversion of
 `WedgedWatch`'s in-memory memory, because a still-wedged call is news again to a
@@ -3588,6 +3589,17 @@ re-drives it. Every other path — an unreadable claim file or listing
 included — names why in a fact and falls through to today's `resolve`.
 Green-on-the-current-head, review, holds, merge permission and
 `human_handoff` are untouched: a rerun only replaces a promote with a wait.
+PR integration (never main CI) shares that one allowance with **known flakes**
+(cp-a0gs): `defaults/ci-flakes.json` lists, per project, a test (file + exact
+name, optional literal failure text) or a gate job's aggregating step, each with
+its evidence run. A red first attempt qualifies only when every failed job is a
+listed gate or every entry of its `✖ failing tests:` block (node's spec reporter)
+is listed, read by `gh run view <id> -R <repo> --attempt <attempt> --log-failed`;
+an errored, empty, expired or cut log refuses. Workers add entries only from a
+confirmed failed-attempt log. A claim records `attempt` and `outcome`
+(`uncertain` → `accepted`/`refused`; absent is a legacy, spent claim): the next
+call on that head settles an `uncertain` one from the run's attempts and never
+reruns, and an accepted rerun whose attempt still reads red waits.
 
 **Serial per project.** Every continuation step and every manual `cp_integrate`
 share one lane per project, so a second PR's step reads the base the first merge

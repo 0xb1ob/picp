@@ -125,11 +125,15 @@ test("landing S02: watch delivery, restart and query cadence survive real forge 
 	assert.deepEqual((await s.post.ciTick()).observations, [], "queued delivery is not immediately resent");
 	advance(601_000);
 	const resend = await s.post.ciTick();
-	assert.deepEqual(resend.observations.map((fact) => fact.key), first.observations.map((fact) => fact.key), "one resend preserves identity");
+	assert.deepEqual(resend.observations.map((fact) => fact.key), first.observations.map((fact) => fact.key), "a resend preserves identity");
+	// cp-a0gs: both handoffs dropped (never confirmed): the third goes out at the same cadence, and arrival stops it.
 	advance(601_000);
-	assert.deepEqual((await s.post.ciTick()).observations, [], "never a third send");
+	const third = await s.post.ciTick();
+	assert.deepEqual(third.observations.map((fact) => fact.key), first.observations.map((fact) => fact.key), "a third handoff after two lost");
 	assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed").length, 1, "resends never duplicate the journal");
-	s.post.confirmCi(first.observations.map((fact) => fact.key));
+	s.post.confirmCi(third.observations.map((fact) => fact.key));
+	advance(601_000);
+	assert.deepEqual((await s.post.ciTick()).observations, [], "a confirmed fact is never sent again");
 	const observed = s.post.ciWatch.observedAt(live.jobId);
 	for (let failure = 1; failure <= 12; failure++) {
 		s.setGh({ routes: [{ match: "repos/example/demo/pulls/203", replies: [{ code: 1, stderr: "network unreachable" }] }] });
@@ -175,6 +179,19 @@ test("landing S02: watch delivery, restart and query cadence survive real forge 
 	const redArrival = await restarted.ciTick();
 	assert.equal(redArrival.observations[0]?.event, "ci_failed");
 	restarted.confirmCi(redArrival.observations.map((fact) => fact.key));
+	// A same-head rerun's result (red attempt 2, then green attempt 3) is handed off until it arrives, however many drop.
+	for (const [attempt, conclusion, event] of [[2, "failure", "ci_failed"], [3, "success", "ci_green"]] as const) {
+		s.setGh({ runs: [run(206, live.head, "completed", conclusion, { run_attempt: attempt })], routes: [] });
+		const sends: string[][] = [];
+		for (let handoff = 0; handoff < 3; handoff++) {
+			advance(900_000);
+			sends.push((await restarted.ciTick()).observations.filter((fact) => fact.event === event).map((fact) => fact.key));
+		}
+		assert.ok(sends.every((keys) => keys.length === 1 && keys[0] === sends[0]![0]), `attempt ${attempt} handed off three times: ${JSON.stringify(sends)}`);
+		restarted.confirmCi(sends[0]!);
+		advance(900_000);
+		assert.deepEqual((await restarted.ciTick()).observations, [], `attempt ${attempt} confirmed: no further send`);
+	}
 	await restarted.shutdown();
 	const redRestart = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, holdsParentLock: () => true });
 	try {
