@@ -102,12 +102,16 @@ CiEvidenceFile	type	2dd224c6281f725b	-
 CiEvidenceFileSchema	value	d2e4ce8c26e1f75a	d0baecbe91950f8c
 CiEvidenceResult	type	b86d453da3d0cd35	-
 CiEvidenceSource	type	f85a9c74abc52e9f	-
+CiFlakeEntry	type	5d201b9dd95be772	-
+CiFlakeEntrySchema	value	cd32ee1e2dab79b6	21e961dc7e3f0ad4
+CiFlakesFile	type	29a246f17e60c63b	-
+CiFlakesFileSchema	value	217366c804754bbd	1d175ec6f3b6d8ba
 CiObservation	type	f81257ecc4a40b96	-
 CiObservationSchema	value	e231afdbef994e24	cc742721465d9d91
 CiRerunEntry	type	dff8c63ccacf2551	-
-CiRerunEntrySchema	value	02379cd19d6e12db	2ead2973f12f5434
+CiRerunEntrySchema	value	a66ed962c88a6e2d	c310f7751ac8e2a6
 CiRerunsFile	type	b91368acf263725e	-
-CiRerunsFileSchema	value	e602eb469e487e8c	ee93b93cb99572ca
+CiRerunsFileSchema	value	e602eb469e487e8c	81b4ef069174b079
 CiWatchEvent	type	9e238ea3f8a46be6	-
 CiWatchEventSchema	value	c7d95bc45723a36a	9a56195b2606111d
 CiWatchFile	type	97ebcefe12e807f1	-
@@ -742,6 +746,7 @@ validateArmedDispatchFile	value	6c9b3cdca1ffd069	6f486bd6da2ab07f
 validateAwaitingFile	value	ba64c8072d1a84b5	17f0df12f3af7fdc
 validateAwaitingMergeWatchFile	value	7693a755ed8d1530	cbcc3bd8e657eaf7
 validateCiEvidenceFile	value	1e40af4d4c5c71fb	4884dd569c191617
+validateCiFlakesFile	value	7df72d021117f44d	6c7c4556a5118165
 validateCiRerunsFile	value	48ef0ee5800e1657	0ba257e4bdbc3e60
 validateCiWatchFile	value	90373be005783d4d	cb514c9e05f3a93e
 validateDispatchQueueFile	value	6a39d9be0da7613b	8b354ddca1cd114a

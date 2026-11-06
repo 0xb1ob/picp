@@ -1,11 +1,13 @@
 /** Behavior 05 landing e2e: forge observation, S14 PR binding, Actions/CI reads, cp_merged and teardown proof. Fixtures: landing-helpers.ts. */
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { build } from "esbuild";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
+import { CommandPost } from "../../src/command-post.ts";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
 import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
@@ -830,6 +832,125 @@ test(
 			assert.ok(setup.fact.includes(`("${step}"); reran`), setup.fact);
 			assert.equal(setup.calls.filter((call) => call === "run rerun 41 --failed").length, 1, step);
 		}
+	},
+);
+
+test(
+	"landing: a red head whose every listed failure is a known flake reruns once without spending the repair; unknown, unreadable or gate-only failures go to the parent",
+	{ skip: SKIP, timeout: 600_000 },
+	async (t) => {
+		// A package root that differs from this repo only in defaults/ci-flakes.json (synthetic fixture, not a seed).
+		const root = mkdtempSync(join(tmpdir(), "cp-flakes-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		for (const name of readdirSync(REPO_ROOT)) if (name !== "defaults") symlinkSync(join(REPO_ROOT, name), join(root, name));
+		mkdirSync(join(root, "defaults"));
+		for (const name of readdirSync(join(REPO_ROOT, "defaults"))) if (name !== "ci-flakes.json") symlinkSync(join(REPO_ROOT, "defaults", name), join(root, "defaults", name));
+		const flaky = { project: "demo", file: "tests/flaky.test.ts", test: "flaky case", text: "ECONNREFUSED", evidence: "synthetic e2e fixture" };
+		writeFileSync(join(root, "defaults/ci-flakes.json"), JSON.stringify({ schema_version: 1, entries: [flaky,
+			{ project: "other", file: "tests/other.test.ts", test: "other case", evidence: "synthetic e2e fixture" },
+			{ project: "demo", job: "gate", step: "Require every shard", evidence: "synthetic e2e fixture" }] }));
+		const s = await startStack(t, { packageRoot: root });
+		const c = await s.held("flake refused", 85);
+		const d = await s.held("flake rerun", 86);
+		const claimsFile = join(s.home, LAYOUT.ciRerunsFile);
+		const claims = () => (existsSync(claimsFile) ? (JSON.parse(readFileSync(claimsFile, "utf8")) as { entries: Array<Record<string, unknown>> }).entries : []);
+		const reruns = () => s.ghCalls().filter((call) => call.startsWith("run rerun"));
+		const shard = { id: 1, name: "shard 1", status: "completed", conclusion: "failure", steps: [{ name: "Checkout", status: "completed", conclusion: "success" }, { name: "Run suite shard", status: "completed", conclusion: "failure" }] };
+		const gate = { id: 2, name: "gate", status: "completed", conclusion: "failure", steps: [{ name: "Require every shard", status: "completed", conclusion: "failure" }] };
+		const at = "2026-11-06T10:00:00.0000000Z";
+		const log = (failures: Array<[string, string, string]>, lines: string[] = [], fail: number | null = failures.length) => [`✔ passes (1ms)`,
+			...(fail === null ? [] : [`ℹ fail ${fail}`]), "✖ failing tests:", "",
+			...failures.flatMap(([file, name, body]) => [`test at ${file}:12:1`, `✖ ${name} (5.1ms)`, `  ${body}`, ""]), ...lines].map((text) => `shard 1\tRun suite shard\t${at} ${text}`).join("\n");
+		const known: [string, string, string] = ["/home/runner/work/demo/demo/tests/flaky.test.ts", "flaky case", "Error: connect ECONNREFUSED 127.0.0.1:4100"];
+		const view = (id: number, attempt = 1) => `run view ${id} -R example/demo --attempt ${attempt} --log-failed`;
+		const advance = async (jobId: string, runs: RunRow[], jobs: Record<string, Array<Record<string, unknown>>>, routes: Route[] = []) => {
+			s.setGh({ runs, jobs, routes });
+			const result = await s.integrate(jobId);
+			assert.deepEqual(mergedCalls(result.calls), []);
+			return { ...result, fact: result.record.facts.find((entry) => entry.startsWith("ci rerun: ")) ?? "" };
+		};
+
+		// Refused, each on the failed attempt's own log: an unknown (another project's) test, a missing literal, an errored,
+		// empty or cut log, and a failed gate job alone. Nothing is claimed or rerun; the failure goes to the parent.
+		const red61 = [run(61, c.head, "completed", "failure")];
+		const refusals: Array<[Reply, RegExp, Array<Record<string, unknown>>?]> = [
+			[{ stdout: log([known, ["tests/other.test.ts", "other case", "boom"]]) }, /job shard 1 failed "other case" \(tests\/other\.test\.ts\), which no entry covers/],
+			[{ stdout: log([[known[0], known[1], "AssertionError: 1 !== 2"]]) }, /job shard 1 failed "flaky case" \(.*tests\/flaky\.test\.ts\), which no entry covers/],
+			[{ code: 1, stderr: "HTTP 410: logs expired" }, /gh run view 61 -R example\/demo --attempt 1 --log-failed failed: HTTP 410: logs expired/],
+			[{ stdout: "" }, /job shard 1's failed log has no complete "✖ failing tests:" block/],
+			[{ stdout: log([], [`test at tests/flaky.test.ts:12:1`]) }, /no complete "✖ failing tests:" block/],
+			[{ stdout: log([known]) }, /no failed job lists a failing test \(a gate job alone never qualifies\)/, [gate]],
+			// The block cleanly omits one (unknown) failure: the reporter's count disagrees, or is missing.
+			[{ stdout: log([known], [], 2) }, /lists 1 failing test\(s\) but reports ℹ fail 2 \(a partial log never matches\)/],
+			[{ stdout: log([known], [], null) }, /lists 1 failing test\(s\) but reports no ℹ fail count/],
+			// Any failed step besides the test-suite step (an `if: always()` one included) disqualifies the run.
+			[{ stdout: log([known]) }, /job shard 1 failed in "Run suite shard", "Resource sampler tail", not in its one test-suite step alone/,
+				[{ ...shard, steps: [...shard.steps, { name: "Resource sampler tail", status: "completed", conclusion: "failure" }] }, gate]],
+		];
+		for (const [reply, reason, jobs] of refusals) {
+			const refused = await advance(c.jobId, red61, { 61: jobs ?? [shard, gate] }, [{ match: view(61), replies: [reply] }]);
+			assert.notEqual(refused.record.next, "wait", refused.text);
+			assert.match(refused.fact, /^ci rerun: none — run 61: job shard 1 failed in "Run suite shard"|^ci rerun: none — run 61: job gate first failed/, refused.text);
+			assert.match(refused.fact, reason, refused.text);
+		}
+		assert.ok(s.ghCalls().every((call) => !call.includes("--log-failed") || call.includes("--attempt 1")), "never a log read without the attempt");
+		assert.deepEqual([reruns(), claims()], [[], []], "none of those reran or claimed");
+		// A crash between claim and outcome leaves `uncertain`: the next call settles it from the run's attempts
+		// (attempt 1 still red: not-started, spent; attempt 2: rerun-started, the parent's) and never reruns again.
+		const crashed = { job_id: c.jobId, head_sha: c.head, run_id: 61, step: "known flake: flaky case", at: isoTimestamp(), attempt: 1, outcome: "uncertain" };
+		writeFileSync(claimsFile, JSON.stringify({ schema_version: 1, entries: [crashed] }));
+		const notStarted = await advance(c.jobId, red61, { 61: [shard, gate] });
+		assert.match(notStarted.fact, /^ci rerun: settled the uncertain claim on run 61 as not-started; none — the one automatic rerun .* was spent/);
+		assert.equal(claims()[0]?.outcome, "refused");
+		writeFileSync(claimsFile, JSON.stringify({ schema_version: 1, entries: [crashed] }));
+		const started = await advance(c.jobId, [run(61, c.head, "completed", "failure", { run_attempt: 2 })], { 61: [shard, gate] });
+		assert.match(started.fact, /^ci rerun: settled the uncertain claim on run 61 as rerun-started; none — run 61 is on attempt 2: a second failure/);
+		assert.equal(claims()[0]?.outcome, "accepted");
+		assert.deepEqual(reruns(), [], "settling an uncertain claim never reruns");
+		rmSync(claimsFile);
+
+		// Every listed failure in every failed job is known (the gate job by its step): claimed, then rerun once.
+		const red71 = [run(71, d.head, "completed", "failure")];
+		const rerun = await advance(d.jobId, red71, { 71: [shard, gate] }, [{ match: view(71), replies: [{ stdout: log([known]) }] }]);
+		assert.equal(rerun.record.next, "wait", rerun.text);
+		assert.match(rerun.fact, /^ci rerun: known-flake failure in run 71 \("known flake: flaky case"\); reran the failed jobs once/);
+		assert.deepEqual(reruns(), ["run rerun 71 --failed"]);
+		assert.ok((s.ghCalls().findLast((call) => call.startsWith("claims-at-rerun")) ?? "").includes(d.head), "the claim was on disk before gh run rerun ran");
+		assert.deepEqual(claims().map(({ at: _at, ...entry }) => entry), [{ job_id: d.jobId, head_sha: d.head, run_id: 71, step: "known flake: flaky case", attempt: 1, outcome: "accepted" }]);
+		// The stale attempt-1 red waits (no log read, no rerun); the green rerun attempt reaches the review gate.
+		const stale = await advance(d.jobId, red71, { 71: [shard, gate] });
+		assert.equal(stale.record.next, "wait", stale.text);
+		assert.match(stale.fact, /run 71 attempt 1 was rerun at .*waiting, no repair spent/);
+		assert.equal(stale.calls.filter((call) => call.includes("--log-failed")).length, 0);
+		const green = await advance(d.jobId, [run(71, d.head, "completed", "success", { run_attempt: 2 })], {});
+		assert.equal(green.record.next, "review", green.text);
+
+		// A changed head has its own allowance; a refused rerun beside an accepted one is visible and the step waits.
+		const clone = mkdtempSync(join(tmpdir(), "cp-head-"));
+		git(clone, "clone", "--quiet", s.remote, "w");
+		git(join(clone, "w"), "checkout", "--quiet", d.jobId);
+		git(join(clone, "w"), "commit", "--quiet", "--allow-empty", "-m", "new head");
+		git(join(clone, "w"), "push", "--quiet", "origin", d.jobId);
+		const head = git(join(clone, "w"), "rev-parse", "HEAD");
+		rmSync(clone, { recursive: true, force: true });
+		const both = [run(81, head, "completed", "failure"), run(82, head, "completed", "failure")];
+		const flakeRoutes = [{ match: view(81), replies: [{ stdout: log([known]) }] }, { match: view(82), replies: [{ stdout: log([known]) }] }];
+		const partial = await advance(d.jobId, both, { 81: [shard], 82: [shard] }, [...flakeRoutes, { match: "run rerun 82", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }]);
+		assert.equal(partial.record.next, "wait", partial.text);
+		assert.match(partial.fact, /reran the failed jobs once .*; refused: 82: HTTP 403: forbidden/);
+		assert.deepEqual(claims().filter((entry) => entry.head_sha === head).map((entry) => [entry.run_id, entry.outcome]), [[81, "accepted"], [82, "refused"]]);
+
+		// After a restart the claims stand: the stale red still waits, and a red rerun attempt is the parent's, never rerun.
+		await s.post.shutdown();
+		const restarted = new CommandPost({ home: s.home, packageRoot: root, holdsParentLock: () => true });
+		t.after(() => restarted.shutdown());
+		const afterRestart = await restarted.integrate({ jobId: d.jobId });
+		assert.equal(afterRestart.next, "wait", afterRestart.facts.join("\n"));
+		s.setGh({ runs: [run(81, head, "completed", "failure", { run_attempt: 2 }), both[1]!] });
+		const second = await restarted.integrate({ jobId: d.jobId });
+		assert.notEqual(second.next, "wait", second.facts.join("\n"));
+		assert.match(second.facts.join("\n"), /run 81 is on attempt 2: a second failure is the parent's/);
+		assert.deepEqual(reruns(), ["run rerun 71 --failed", "run rerun 81 --failed", "run rerun 82 --failed"], "one rerun per run and head, ever");
 	},
 );
 

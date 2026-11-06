@@ -92,7 +92,6 @@ export class MockProvider {
 	readonly #server: Server;
 	readonly #scripts = new Map<string, ScriptState>();
 	readonly #requests: RecordedRequest[] = [];
-	readonly #openConnections = new Set<ServerResponse>();
 	#port = 0;
 
 	private constructor(server: Server) {
@@ -173,12 +172,10 @@ export class MockProvider {
 	}
 
 	async stop(): Promise<void> {
-		for (const res of this.#openConnections) {
-			res.destroy();
-		}
-		this.#openConnections.clear();
 		await new Promise<void>((resolve) => {
 			this.#server.close(() => resolve());
+			// Also drops requests still in flight: a worker's hang step that lands after stop() began held close() ~300 s.
+			this.#server.closeAllConnections();
 		});
 	}
 
@@ -273,8 +270,6 @@ export class MockProvider {
 
 	private respond(res: ServerResponse, modelId: string, step: ScriptStep, stream: boolean, request: RecordedRequest): void {
 		if (step.kind === "hang") {
-			this.#openConnections.add(res);
-			res.on("close", () => this.#openConnections.delete(res));
 			if (step.until) {
 				void step.until.then(() => {
 					if (!res.destroyed && !res.writableEnded) this.streamSteps(res, modelId, { kind: "text", text: "late" }, request);
