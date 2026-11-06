@@ -15,6 +15,7 @@ import { NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage } from "./claude-
 import { commitIdentityEnv } from "./claude-forge-tools.ts";
 import { implementerExclusions, nativeRole } from "./claude-roles.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
+import { VERDICT_TOOL } from "./claude-verdict.ts";
 import { type NativeTranscript, nativeTranscript, nativeTranscriptFile } from "./claude-transcript.ts";
 import { modelFamily, type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
 import { classifyTurn, nativeRunStop, startIdlePrompt, type TurnEnd } from "./claude-lifecycle.ts";
@@ -67,7 +68,10 @@ function observed(seen: NativeObservation | undefined): void {
 	write({ type: OBSERVATION_EVENT, ...seen, observed_at: Date.now(), ...(cliVersion ? { claude_version: cliVersion } : {}) });
 }
 
-/** SDK messages as the pi events the recorder, intake and bounds already watch; the report tool keeps pi's name. */
+/** picp's MCP report tools keep pi's names (`report_result`, `report_verdict`), so intake and awaitVerdict see them. */
+const toolName = (name: string): string => (name === REPORT_TOOL ? "report_result" : name === VERDICT_TOOL ? "report_verdict" : name);
+
+/** SDK messages as the pi events the recorder, intake and bounds already watch. */
 function relay(message: SDKMessage): void {
 	const seen = observe(message);
 	if (seen) turnSeen.push(seen);
@@ -83,7 +87,7 @@ function relay(message: SDKMessage): void {
 	// SAFETY: SDK content blocks are plain JSON objects; every field read below is checked or stringified.
 	for (const block of Array.isArray(content) ? (content as unknown as Array<Record<string, unknown>>) : []) {
 		if (block.type === "tool_use") {
-			const name = block.name === REPORT_TOOL ? "report_result" : String(block.name);
+			const name = toolName(String(block.name));
 			toolNames.set(String(block.id), name);
 			write({ type: "tool_execution_start", toolCallId: block.id, toolName: name, args: block.input });
 		} else if (block.type === "tool_result") {
@@ -131,12 +135,12 @@ interface Turn {
 
 /** One claude process: fresh on a dispatch, else a resume of the recorded session over its recorded baseline. */
 async function turn(prompt: string): Promise<Turn> {
-	const [kind, role] = [env.CP_KIND, env.CP_ROLE];
-	if (!((kind === "research" && role === "planner") || (kind === "ship" && role === "implementer"))) {
-		throw new Error(`native claude runs research/planner and ship/implementer jobs only, not ${kind}/${role}`);
+	const [kind, role] = [env.CP_KIND, env.CP_ROLE] as ["research" | "ship", "planner" | "gate-reviewer" | "implementer"];
+	if (!["research/planner", "research/gate-reviewer", "ship/implementer"].includes(`${kind}/${role}`)) {
+		throw new Error(`native claude runs research/planner, research/gate-reviewer and ship/implementer jobs only, not ${kind}/${role}`);
 	}
 	const [jobId, runDir, worktree, artifactPath] = [env.CP_JOB_ID, env.CP_RUN_DIR, env.CP_WORKTREE, env.CP_ARTIFACT_PATH];
-	if (!jobId || !runDir || !worktree || (env.CP_KIND === "research" && !artifactPath)) throw new Error("native claude worker started without its job identity");
+	if (!jobId || !runDir || !worktree || (role === "planner" && !artifactPath)) throw new Error("native claude worker started without its job identity");
 	const systemPrompt = readSystemPrompt();
 	let current = resuming ? readNativeSession(sessionFile) : freshSession(worktree);
 	const moved = resuming ? nativeSessionMoved(current, worktree) : undefined;
@@ -156,7 +160,7 @@ async function turn(prompt: string): Promise<Turn> {
 	turnSeen = [];
 	const resumed = resuming;
 	if (!transcript) {
-		transcript = nativeTranscript(nativeTranscriptFile(runDir, jobId), { jobId, cwd: worktree }, (name) => (name === REPORT_TOOL ? "report_result" : name));
+		transcript = nativeTranscript(nativeTranscriptFile(runDir, jobId), { jobId, cwd: worktree }, toolName);
 		write({ type: "native_transcript", transcript_file: transcript.file });
 	}
 	transcript.prompt(prompt, resumed);
@@ -199,13 +203,14 @@ async function turn(prompt: string): Promise<Turn> {
 	const runId = randomUUID();
 	// SAFETY: relay() sets finalResult during the run; the control-flow narrowing to undefined above is stale.
 	const isError = (finalResult as SDKResultMessage | undefined)?.is_error;
-	const end = classifyTurn({ reported: Boolean(result.report), resultSubtype: result.resultSubtype, isError, error: result.error, lockdown, observations: turnSeen });
+	const reported = Boolean(result.report ?? result.verdict);
+	const end = classifyTurn({ reported, resultSubtype: result.resultSubtype, isError, error: result.error, lockdown, observations: turnSeen });
 	const stop = nativeRunStop(end, maxTurns);
-	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: Boolean(result.report), result_subtype: result.resultSubtype ?? null, usage: usage ? "measured" : "unavailable", usage_status: measured.status, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...stop.fields });
+	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: reported, result_subtype: result.resultSubtype ?? null, usage: usage ? "measured" : "unavailable", usage_status: measured.status, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...stop.fields });
 	if (stop.line) process.stderr.write(`[native claude] ${stop.line}\n`);
-	process.stderr.write(`[native claude] exit ${result.exit?.code ?? result.exit?.signal ?? "none"}; lockdown ${lockdown}; report ${result.report ? "accepted" : "none"}${result.error ? `; ${result.error}` : ""}\n`);
+	process.stderr.write(`[native claude] exit ${result.exit?.code ?? result.exit?.signal ?? "none"}; lockdown ${lockdown}; report ${reported ? "accepted" : "none"}${result.error ? `; ${result.error}` : ""}\n`);
 	return {
-		reported: Boolean(result.report),
+		reported,
 		code: result.exit?.code || 1,
 		runId,
 		end,

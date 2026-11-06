@@ -4,13 +4,17 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
-import type { Delivery, JobKind, Role } from "../src/contracts.ts";
+import workerReporter, { VERDICT_FILE, VERDICT_RAW_FILE } from "../extensions/worker-reporter/index.ts";
+import { type Delivery, type JobKind, paths, type Role, type RoutingConfig } from "../src/contracts.ts";
+import { verdictReport } from "../src/drivers/claude-verdict.ts";
+import { resolveReviewerRoute } from "../src/reviewer-route.ts";
+import { ALWAYS_AVAILABLE } from "../src/routing.ts";
 import { nativeSpawn } from "../src/dispatch-driver.ts";
 import { nativeBaseEnv, nativeSelectionRefusal } from "../src/drivers/claude.ts";
 import { nativeRevivePrompt, nativeSessionMoved } from "../src/drivers/claude-followup.ts";
@@ -241,8 +245,8 @@ const WORKER = fileURLToPath(new URL("../src/drivers/claude-worker.ts", import.m
 const startWorker = (env: Record<string, string>) =>
 	spawnSync(process.execPath, [WORKER], { input: `${JSON.stringify({ id: 1, type: "prompt", message: "go" })}\n`, env: { PATH: process.env.PATH ?? "", ...env }, encoding: "utf8", timeout: 60_000 });
 
-// N4f: the worker takes the two pairs selection allows (research planner, ship implementer); any other pair, a missing
-// or empty role contract is a named start error, each exiting 1 before any claude process starts.
+// N4f/N4h: the worker takes the pairs selection allows (research planner, research gate-reviewer, ship implementer); any
+// other pair, a missing or empty role contract is a named start error, each exiting 1 before any claude process starts.
 test("claude-worker: a role/kind pair selection never allows and a missing or empty system prompt file are named start errors", () => {
 	const dir = mkdtempSync(join(tmpdir(), "cp-native-start-"));
 	try {
@@ -250,8 +254,10 @@ test("claude-worker: a role/kind pair selection never allows and a missing or em
 		for (const [kind, role] of [["ship", "planner"], ["research", "implementer"], ["ship", "gate-reviewer"]]) {
 			const refused = startWorker({ ...job, CP_KIND: kind!, CP_ROLE: role! });
 			assert.equal(refused.status, 1, refused.stderr);
-			assert.match(refused.stderr, new RegExp(`refused: native claude runs research/planner and ship/implementer jobs only, not ${kind}/${role}`));
+			assert.match(refused.stderr, new RegExp(`refused: native claude runs research/planner, research/gate-reviewer and ship/implementer jobs only, not ${kind}/${role}`));
 		}
+		const reviewer = startWorker({ ...job, CP_ARTIFACT_PATH: "", CP_KIND: "research", CP_ROLE: "gate-reviewer" });
+		assert.match(reviewer.stderr, /started without its system prompt file/, "a reviewer with no artifact passes the pair check");
 		const ship = startWorker({ ...job, CP_ARTIFACT_PATH: "", CP_KIND: "ship", CP_ROLE: "implementer" });
 		assert.equal(ship.status, 1, ship.stderr);
 		assert.match(ship.stderr, /started without its system prompt file/, "a ship implementer with no artifact passes the pair check");
@@ -315,7 +321,11 @@ test("N4f eligibility: research, ship and review map to their own switch; a disa
 	}
 	assert.match((await refusal("ship", "gate-reviewer", "pr"))?.why ?? "", /workers\.native_claude_review is off/);
 	toggle({ claude_review: true });
-	assert.deepEqual(await refusal("ship", "gate-reviewer", "pr"), { category: "ineligible", why: "the native reviewer path is not built yet; gate-reviewers run on pi" });
+	// N4h: claude_review on is a passing selection, a pipeline-owned subject included (its gate never takes sends).
+	assert.equal((await refusal("research", "gate-reviewer", "pr"))?.category, "cli_missing");
+	mkdirSync(dirname(join(home, paths.pipelineFile("cp-class"))), { recursive: true });
+	writeFileSync(join(home, paths.pipelineFile("cp-class")), "{}");
+	assert.equal((await refusal("research", "gate-reviewer", "pipeline"))?.category, "cli_missing");
 });
 
 test("N4f follow-ups: the revive prompt names the job's kind, a moved worktree refuses the session resume, the base rides the env", () => {
@@ -331,4 +341,79 @@ test("N4f follow-ups: the revive prompt names the job's kind, a moved worktree r
 	assert.deepEqual(nativeSpawn(decision, "release"), { driver: "claude", extraEnv: { CP_NATIVE_THINKING: "high", CP_BASE_BRANCH: "release" } });
 	assert.deepEqual(nativeSpawn({ ...decision, driver: "pi" }, "release"), {});
 	assert.deepEqual(nativeBaseEnv(" "), {});
+});
+
+/** pi's own `report_verdict` (the worker-reporter extension, registered for a gate-reviewer) bound to `runDir`. */
+function piVerdictTool(runDir: string): (payload: unknown) => Promise<{ text: string; isError: boolean }> {
+	const env = { CP_JOB_ID: "cp-rev", CP_KIND: "research", CP_DELIVERY: "pr", CP_RUN_DIR: runDir, CP_ROLE: "gate-reviewer", CP_WORKTREE: runDir };
+	const saved = Object.keys(env).map((key) => [key, process.env[key]] as const);
+	let execute: ((id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+	Object.assign(process.env, env);
+	try {
+		workerReporter({ on: () => {}, registerTool: (def: { name: string; execute: typeof execute }) => { if (def.name === "report_verdict") execute = def.execute; } } as never);
+	} finally {
+		for (const [key, value] of saved) value === undefined ? delete process.env[key] : (process.env[key] = value);
+	}
+	return async (payload) => {
+		try {
+			return { text: (await execute!("t", payload)).content.map((part) => part.text).join("\n"), isError: false };
+		} catch (error) {
+			return { text: (error as Error).message, isError: true };
+		}
+	};
+}
+
+// N4h: the native report_verdict and pi's run one handler, so the same calls give the same answers and files: an over-long
+// reason is clamped with the raw payload kept, a wrong job is refused by name, a different second call is refused.
+test("N4h report_verdict: native and pi clamp, check, refuse and write the same verdict files", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "cp-native-verdict-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const [piDir, nativeDir] = [join(root, "pi"), join(root, "native")];
+	const state = { refusals: [] as string[] };
+	const native = verdictReport({ job_id: "cp-rev", kind: "research", delivery: "pr", role: "gate-reviewer", runDir: nativeDir, worktree: nativeDir }, state);
+	const pi = piVerdictTool(piDir);
+	const flags = { destructive_scope: false, scope_growth: false, blocking_unknowns: false };
+	const calls = [
+		{ job_id: "cp-other", verdict: "pass", flags, reasons: ["ok"] },
+		{ job_id: "cp-rev", verdict: "pass", flags, reasons: ["x".repeat(450)] },
+		{ job_id: "cp-rev", verdict: "pass", flags, reasons: ["x".repeat(450)] },
+		{ job_id: "cp-rev", verdict: "revise", flags, reasons: ["changed"], revisions: ["r"] },
+	];
+	for (const call of calls) {
+		const [a, b] = [await pi(call), await native(call)];
+		assert.deepEqual(b, { text: a.text.replaceAll(piDir, nativeDir), isError: a.isError }, JSON.stringify(call).slice(0, 80));
+	}
+	assert.match(state.refusals[0] ?? "", /job_id/, "the wrong job is refused by name");
+	assert.match(state.refusals.at(-1) ?? "", /already filed/, "a different second call is refused");
+	const read = (dir: string, file: string) => JSON.parse(readFileSync(join(dir, file), "utf8")) as Record<string, unknown>;
+	assert.deepEqual({ ...read(nativeDir, VERDICT_FILE), received_at: 0 }, { ...read(piDir, VERDICT_FILE), received_at: 0 });
+	assert.deepEqual(read(nativeDir, VERDICT_RAW_FILE), read(piDir, VERDICT_RAW_FILE));
+	assert.equal((await native({ job_id: "cp-rev", verdict: "pass", flags, reasons: ["x".repeat(3_000)] })).isError, true, "pi's lenient bound holds");
+});
+
+// N4h: a reviewer goes native only for a `driver: "claude"` row with claude_review on and the slot free; the subject's own
+// pi driver never binds it. A fake `claude` on PATH makes the CLI check pass without the binary.
+test("N4h reviewer route: off is pi, on is claude, a pi row is pi, a live native worker holds the slot", async (t) => {
+	const home = mkdtempSync(join(tmpdir(), "cp-native-review-route-"));
+	const path = process.env.PATH;
+	t.after(() => { process.env.PATH = path; rmSync(home, { recursive: true, force: true }); });
+	mkdirSync(join(home, "bin"));
+	writeFileSync(join(home, "bin", "claude"), "#!/bin/sh\necho '2.1.318 (Claude Code)'\n", { mode: 0o755 });
+	process.env.PATH = `${join(home, "bin")}${delimiter}${path ?? ""}`;
+	mkdirSync(dirname(nativeConfigFile(home)), { recursive: true });
+	const config = (row: Record<string, unknown>) =>
+		({ schema_version: 1, allow: ["anthropic/*"], rubric: [{ id: "reviews", role: "gate-reviewer", model: "anthropic/claude-x", ...row }] }) as RoutingConfig;
+	const profile = { frontmatter: { name: "gate-reviewer", role: "gate-reviewer" } } as never;
+	const subject = { job_id: "cp-subj", kind: "ship", delivery: "pr", worker: { role: "implementer" } } as never;
+	const route = (row: Record<string, unknown>, live: string[] = []) => resolveReviewerRoute({ profile, jobId: "cp-subj", project: "demo", kind: "research" },
+		config(row), ALWAYS_AVAILABLE, undefined, { home, jobId: "cp-subj", record: subject, jobs: [subject], manager: { active: live.map((key) => ({ key, driver: "claude" })) } as never });
+	writeFileSync(nativeConfigFile(home), JSON.stringify({ claude_review: false }));
+	const off = await route({ driver: "claude" });
+	assert.deepEqual([off.driver, off.requested_driver], ["pi", "claude"]);
+	assert.match(off.driver_reason ?? "", /^switch: the switch workers\.native_claude_review is off/);
+	writeFileSync(nativeConfigFile(home), JSON.stringify({ claude_review: true }));
+	assert.equal((await route({ driver: "claude" })).driver, "claude");
+	assert.equal((await route({})).driver, undefined, "a row on pi never asks for claude");
+	const busy = await route({ driver: "claude" }, ["cp-other"]);
+	assert.match(`${busy.driver} ${busy.driver_reason}`, /^pi occupied: native concurrency is 1 and cp-other is live$/);
 });

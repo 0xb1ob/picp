@@ -62,7 +62,7 @@ import type { RunRecorder } from "./run-artifacts.ts";
 import { RunRegistry } from "./runs.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
-import { type DriverContext, driverFields, holdNativeSlot, nativeSpawn, observeNative, resolveDriverRoute } from "./dispatch-driver.ts";
+import { type DriverContext, driverFields, holdNativeSlot, liveNativeWorkers, nativeSpawn, observeNative, resolveDriverRoute } from "./dispatch-driver.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
 import { assertContinuationTask, continuityInputsBlock } from "./mandate-continuity.ts";
@@ -571,7 +571,7 @@ export class Dispatcher {
 			},
 			options.routing,
 			options.probe,
-			options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, jobs: options.fleet.read().jobs, reserve: true, ...(request.driver ? { explicit: request.driver } : {}) },
+			options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, jobs: options.fleet.read().jobs, reserve: true, nativeLive: liveNativeWorkers(options.manager, issue.id), ...(request.driver ? { explicit: request.driver } : {}) },
 		);
 
 		// Frozen on the record below; an invalid data/worker-bounds.json refuses before any lease.

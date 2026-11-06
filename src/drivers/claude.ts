@@ -65,15 +65,14 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 		return { category: "switch", why: `the native switch is unreadable (${(error as Error).message})` };
 	}
 	const nativeClass = nativeClassOf(input.kind, input.role, input.delivery);
-	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local or answer) and ship (role implementer, delivery pr or local) jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
+	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local or answer), ship (role implementer, delivery pr or local) and gate-reviewer jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
 	if (nativeClass === undefined) return ineligible;
 	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
-	if (existsSync(join(input.home, paths.pipelineFile(input.jobId)))) {
+	// A reviewer is one-shot and never sent to: the pipeline rule guards the planner's queued sends, not its gate (N4h).
+	if (nativeClass !== "claude_review" && existsSync(join(input.home, paths.pipelineFile(input.jobId)))) {
 		return { category: "pipeline", why: "pipeline-owned research stays on pi; only local and answer research run native" };
 	}
 	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
-	// N4h builds the reviewer path; until then claude_review gates nothing and a reviewer stays on pi.
-	if (nativeClass === "claude_review") return { category: "ineligible", why: "the native reviewer path is not built yet; gate-reviewers run on pi" };
 	const live = liveNativeJobs(input.jobs).filter((id) => id !== input.jobId);
 	if (live.length > 0) return { category: "occupied", why: `native concurrency is 1 and ${live.join(", ")} is live; tear it down first` };
 	try {
@@ -132,6 +131,14 @@ export const NATIVE_SHIP_ADDENDUM = [
 	"report_result once with head_sha = git rev-parse HEAD.",
 ].join("\n");
 
+/** The reviewer counterpart (N4h): read-only tools, the packet in the cwd, report_verdict as the one way to finish. */
+export const NATIVE_REVIEW_ADDENDUM = [
+	"Native reviewer: your tools are the Claude tools you were given (Read, Grep, Glob) plus report_verdict; ignore any",
+	"other tool names above. Read only the review packet in your working directory, then call report_verdict once.",
+].join("\n");
+const nativeAddendum = (env: NodeJS.ProcessEnv): string =>
+	env.CP_ROLE === "gate-reviewer" ? NATIVE_REVIEW_ADDENDUM : env.CP_KIND === "ship" ? NATIVE_SHIP_ADDENDUM : NATIVE_ADDENDUM;
+
 /**
  * Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir,
  * not the argv or env.
@@ -141,7 +148,7 @@ export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, system
 	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
-	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${env.CP_KIND === "ship" ? NATIVE_SHIP_ADDENDUM : NATIVE_ADDENDUM}\n`, { mode: 0o600 });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env)}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file } };
 }

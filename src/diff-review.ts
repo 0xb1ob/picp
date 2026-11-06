@@ -118,7 +118,9 @@ import { continuityInputsBlock } from "./mandate-continuity.ts";
 import { incompleteSubjectReasons, isCompletePass } from "./review-subject.ts";
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
 import { ProjectRegistry } from "./projects.ts";
-import { type ModelProbe, resolveWithCapacity, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
+import { type ModelProbe, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
+import { resolveReviewerRoute } from "./reviewer-route.ts";
+import { nativeSpawn } from "./dispatch-driver.ts";
 import { RunRecorder } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { Sender } from "./send.ts";
@@ -694,6 +696,7 @@ export class DiffReview {
 				model,
 				// Model and effort are one decision; the spawn gets both (cp-reviewer-routing).
 				...(route.decision.thinking ? { thinking: route.decision.thinking } : {}),
+				...nativeSpawn(route.decision),
 				brief,
 				sessionDir: join(home, LAYOUT.sessions),
 				sessionName: key,
@@ -954,7 +957,7 @@ export class DiffReview {
 	 */
 	async #route(profile: WorkerProfile, jobId: string, record: FleetRecord, override?: string, thinking?: ReviewerModelSelection["thinking"]): Promise<ReviewerRoute> {
 		const inputs = reviewerRoutingInputs(record);
-		const decision = await resolveWithCapacity(
+		const decision = await resolveReviewerRoute(
 			{
 				profile,
 				jobId,
@@ -968,6 +971,7 @@ export class DiffReview {
 			this.#options.routing,
 			this.#options.probe,
 			this.#options.capacity,
+			{ home: this.#options.home, jobId, record, jobs: this.#options.fleet?.read().jobs ?? [], manager: this.#options.manager },
 		);
 		return { decision, inputs };
 	}
