@@ -428,6 +428,34 @@ test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_r
 	assert.equal(h.claude.overrun(), 0);
 });
 
+test("N4i moved session: a revive from a changed worktree starts a fresh session led by the brief and logs native_session_moved", { skip, timeout: 420_000 }, async (t) => {
+	let id = "";
+	const h = await nativeHome(t, [
+		{ kind: "tool_use", calls: [{ name: "Read", input: { file_path: "/nonexistent" } }], beforeAnswer: () => new Promise<void>(() => {}) },
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(id)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(id, h.b.home) }] },
+		{ kind: "text", text: "Reported on a fresh session." },
+	]);
+	id = (await h.job()).id;
+	await h.b.run([h.dispatch(id)], h.env);
+	await waitFor(() => modelCalls(h.claude.requests).length, (n) => n >= 1, { timeoutMs: 60_000, what: "the native turn's first model call" });
+	await h.b.closeParents();
+	// The record says the session started elsewhere: the CLI keys sessions by cwd, so the resume must not run there.
+	const sessionFile = join(h.b.home, paths.runDir(id), NATIVE_SESSION_FILE);
+	const before = readNativeSession(sessionFile);
+	writeFileSync(sessionFile, `${JSON.stringify({ ...before, cwd: "/leases/moved/picp" })}\n`);
+	const calls = modelCalls(h.claude.requests).length;
+	const ends = (await h.b.run([tool("cp_revive", { job_id: id, confirm: true }), h.wait(id, "envelope_received", 1)], h.env)) as Tool[];
+	assert.notEqual(ends.find((end) => end.toolName === "cp_revive")?.isError, true, text(ends[0]));
+	const moved = readRunEvents(h.b.home, id).find((event) => event.type === "native_session_moved")?.payload as { from?: string } | undefined;
+	assert.equal(moved?.from, "/leases/moved/picp", readFileSync(h.events(id), "utf8").slice(-2000));
+	// A fresh session has no prior conversation, so the task text in its first prompt can only come from the brief.
+	const first = modelCalls(h.claude.requests).slice(calls).find((request) => Array.isArray(request.body.tools));
+	assert.ok(messages(first).includes("Report the repo") && messages(first).includes(nativeRevivePrompt("research").slice(0, 40)), messages(first));
+	assert.notEqual(readNativeSession(sessionFile).session_id, before.session_id, "the moved session was resumed");
+	assert.equal(readRunEvents(h.b.home, id).filter((event) => event.type === "envelope_received").length, 1);
+});
+
 // N3d's one live run: the operator's own claude settings (claude reads them; picp never does). Counts only.
 test("native live follow-up smoke: a research dispatch, then one idle cp_send resumes the same session", { skip: !LIVE_TESTS_ENABLED ? "set CP_LIVE_TESTS=1 to run live smokes" : !process.env.CP_LIVE_NATIVE_MODEL ? "set CP_LIVE_NATIVE_MODEL to the account's anthropic/claude-… id" : skip, timeout: 900_000 }, async (t) => {
 	const b = await dispatchS29(t);

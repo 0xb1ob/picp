@@ -13,7 +13,7 @@ import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai
 import type { Delivery, FleetRecord, JobKind, Role } from "../src/contracts.ts";
 import { nativeSpawn } from "../src/dispatch-driver.ts";
 import { assertNativeSelection, nativeAddendum, nativeBaseEnv, NativeDriverError, nativeMaxConcurrent, nativeSelectionRefusal, nativeSlotRefusal } from "../src/drivers/claude.ts";
-import { nativeRevivePrompt, nativeSessionMoved } from "../src/drivers/claude-followup.ts";
+import { nativeRevivePrompt, nativeReviveBase, nativeSessionMoved, writeNativeSession } from "../src/drivers/claude-followup.ts";
 import { readOnlyBashRefusal, secretPaths } from "../src/drivers/claude-bash-policy.ts";
 import { CLI_BUILTIN_AGENTS, type InitSurface, lockdownVerdict } from "../src/drivers/claude-lockdown.ts";
 import {
@@ -355,6 +355,19 @@ test("N4i ship addendum by delivery: pr pushes and opens the PR, local only comm
 	}
 	assert.match(nativeAddendum("ship", "local"), /commit with git in Bash and stop there\. Never call\s+git_push or pr_create/);
 	assert.match(nativeAddendum("research", "local"), /Write the research artifact/);
+});
+
+test("N4i revive base: the bound PR base wins, then the recorded dispatch base (non-default), then the project base", (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-native-base-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const file = join(dir, "native-claude");
+	const project = () => "main";
+	writeNativeSession(file, { driver: "claude", scratch_dir: "/tmp/cp-claude-native-abc123", cwd: dir, base: "release/2.x" });
+	assert.equal(nativeReviveBase("hotfix", file, project), "hotfix");
+	assert.equal(nativeReviveBase(undefined, file, project), "release/2.x");
+	writeNativeSession(file, { driver: "claude", scratch_dir: "/tmp/cp-claude-native-abc123", cwd: dir });
+	assert.equal(nativeReviveBase(undefined, file, project), "main", "a pre-N4i record falls back to the project base");
+	assert.equal(nativeReviveBase(undefined, join(dir, "absent"), project), "main");
 });
 
 test("N4f follow-ups: the revive prompt names the job's kind, a moved worktree refuses the session resume, the base rides the env", () => {

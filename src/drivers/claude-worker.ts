@@ -96,7 +96,8 @@ function relay(message: SDKMessage): void {
 /** A new session record and scratch dir; a previous record's scratch dir is removed first, never orphaned. */
 function freshSession(cwd: string): NativeSession {
 	if (existsSync(sessionFile)) removeNativeScratch(sessionFile);
-	const fresh: NativeSession = { driver: "claude", scratch_dir: mkdtempSync(join(tmpdir(), NATIVE_SCRATCH_PREFIX)), cwd, baseline: { ledger: {}, cost_usd: 0 } };
+	const base = env.CP_BASE_BRANCH?.trim();
+	const fresh: NativeSession = { driver: "claude", scratch_dir: mkdtempSync(join(tmpdir(), NATIVE_SCRATCH_PREFIX)), cwd, ...(base ? { base } : {}), baseline: { ledger: {}, cost_usd: 0 } };
 	writeNativeSession(sessionFile, fresh);
 	return fresh;
 }

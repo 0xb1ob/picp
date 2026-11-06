@@ -33,7 +33,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
-import { nativeDoorRefusal, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
+import { nativeDoorRefusal, nativeReviveBase, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
 import { observeNative } from "./native-availability-observer.ts";
 import { nativeBaseEnv, nativeThinkingEnv } from "./drivers/claude.ts";
 import { projectBaseBranch } from "./forge-runtime.ts";
@@ -583,7 +583,7 @@ export class Reviver {
 				...(plan.skills?.length ? { skills: plan.skills.map((s) => s.dir) } : {}),
 				sessionFile: plan.session_file,
 				// N3c: a native job respawns its native worker, which resumes the recorded Claude session.
-				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1", ...nativeThinkingEnv(plan.thinking), ...nativeBaseEnv(record.bound_pr?.base ?? projectBaseBranch(this.#options.home, record.project)) } } : {}),
+				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1", ...nativeThinkingEnv(plan.thinking), ...nativeBaseEnv(nativeReviveBase(record.bound_pr?.base, record.worker.session_file, () => projectBaseBranch(this.#options.home, record.project))) } } : {}),
 				// No `brief`: a revived pi worker resumes idle. `report_result` stays
 				// write-once (worker-reporter), so nothing here can double-report.
 			}));
