@@ -10,7 +10,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
-import { type Delivery, paths, type Usage } from "../contracts.ts";
+import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
 import { estimatedRunUsage, NATIVE_REPORTED_GRACE_MS, NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage, noteStreamedUsage, type StreamedUsage } from "./claude-usage.ts";
 import { commitIdentityEnv } from "./claude-forge-tools.ts";
 import { implementerExclusions, nativeRole } from "./claude-roles.ts";
@@ -39,6 +39,8 @@ const write = (record: Record<string, unknown>): void => void process.stdout.wri
 const toolNames = new Map<string, string>();
 const abort = new AbortController();
 const env = process.env;
+// A flat home (`~/.pi-command-post`) keeps state/ at its root: unconfigured, every home read missed (N4l).
+if (env.CP_HOME) configureLayout("multi", env.CP_HOME);
 /** The SDK turn cap per claude process; `CP_NATIVE_MAX_TURNS` overrides it with a positive integer only. */
 const NATIVE_MAX_TURNS = 500;
 const turnOverride = Number(env.CP_NATIVE_MAX_TURNS);

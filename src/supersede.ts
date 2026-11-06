@@ -180,6 +180,26 @@ export async function reopenEnvelopeSlot(options: ReopenOptions): Promise<Supers
 }
 
 /**
+ * Undo one supersession whose brief no worker took (a refused native resume): the archived envelope and rejection go
+ * back, with `reported_at`, `phase` and the generation count as before, so the job can integrate or be promoted again.
+ */
+export async function restoreEnvelopeSlot(options: Omit<ReopenOptions, "now"> & { supersession: Supersession; phase: FleetRecord["phase"] }): Promise<void> {
+	const { home, fleet, runs, jobId, supersession } = options;
+	const generation = supersession.generation;
+	archive(join(home, paths.supersededEnvelopeFile(jobId, generation)), join(home, paths.envelopeFile(jobId)));
+	archive(join(home, paths.supersededRejectionFile(jobId, generation)), join(home, paths.runDir(jobId), "envelope-rejected.json"));
+	await fleet.mutate((jobs) => {
+		const job = jobs.find((candidate) => candidate.job_id === jobId);
+		if (!job) throw new SupersedeError(`no fleet record for ${jobId}`);
+		job.reported_at = supersession.prior_reported_at;
+		job.phase = options.phase;
+		if (generation > 1) job.supersessions = generation - 1;
+		else delete job.supersessions;
+	});
+	runs.open(jobId).cp("envelope_restored", { job_id: jobId, generation, reason: options.reason });
+}
+
+/**
  * The last envelope this job filed: the live one, or — once a promote reopened
  * the slot — the newest archived generation. Supersession moves the record
  * aside so the worker can write again; it never destroys what the worker said,

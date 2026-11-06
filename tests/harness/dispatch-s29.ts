@@ -7,8 +7,8 @@ import type { CommandPost } from "../../src/command-post.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID, MockProvider, routeNamed, startPiChild, type ScriptStep } from "./index.ts";
 
-export async function dispatchS29(t: TestContext, options: { files?: Record<string, string>; emptyThinking?: boolean; supportedThinking?: readonly ThinkingLevel[] } = {}) {
-	const home = createScratchHome();
+export async function dispatchS29(t: TestContext, options: { files?: Record<string, string>; emptyThinking?: boolean; supportedThinking?: readonly ThinkingLevel[]; flat?: boolean } = {}) {
+	const home = createScratchHome({ flat: options.flat });
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", ...options.files } });
 	const scratch = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
 	const registry = new ProjectRegistry({ home: home.path });

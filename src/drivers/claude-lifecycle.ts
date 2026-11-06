@@ -40,6 +40,9 @@ export function nativeRunStop(end: TurnEnd, maxTurns: number): { fields: Record<
 	return { fields, line: `stopped: ${end.stop}${end.window ? ` (${end.window})` : ""}; a named failure, never a nudge` };
 }
 
+/** The idle-prompt refusal's closing words: the worker started no turn, so send.ts may restore a superseded envelope. */
+export const NOT_RESUMED = "Nothing was resumed.";
+
 /**
  * An idle prompt (`worker.send` skips send.ts admission): a resumed turn passes `admit` first, then `start` runs.
  * Returns the named refusal, in which case `start` never ran; a first, dispatched turn was admitted by dispatch.
@@ -53,7 +56,7 @@ export async function startIdlePrompt(
 		try {
 			await admit({ home: input.home, jobId: input.jobId, what: "resume" });
 		} catch (error) {
-			return `${(error as Error).message}. Nothing was resumed.`;
+			return `${(error as Error).message}. ${NOT_RESUMED}`;
 		}
 	}
 	start();

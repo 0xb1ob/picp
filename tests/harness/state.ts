@@ -6,7 +6,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { killParentHosts } from "./parent-hosts.ts";
@@ -26,8 +26,11 @@ export interface ScratchHome {
 	cleanup(): void;
 }
 
-export function createScratchHome(): ScratchHome {
-	const path = mkdtempSync(join(tmpdir(), "cp-home-"));
+/** `flat` names the home `.pi-command-post`, the standard home's runtime-root-is-home layout (`runtimeDirFor`). */
+export function createScratchHome(options: { flat?: boolean } = {}): ScratchHome {
+	const root = mkdtempSync(join(tmpdir(), "cp-home-"));
+	const path = options.flat ? join(root, ".pi-command-post") : root;
+	if (options.flat) mkdirSync(path);
 	return {
 		path,
 		/**
@@ -44,7 +47,7 @@ export function createScratchHome(): ScratchHome {
 		cleanup() {
 			killParentHosts(path); // a detached host never outlives its home (testleak-44z)
 			try {
-				rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+				rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 			} catch {
 				// Swallowed by design. See above.
 			}

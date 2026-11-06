@@ -226,6 +226,9 @@ export function applyEvent(state: ProjectionState, event: RunEvent): ProjectionS
 				// "reported", which is precisely the state nobody could see.
 				status.reported = false;
 				break;
+			case "envelope_restored":
+				status.reported = true;
+				break;
 			case "failure":
 				status.failure = payload as unknown as Failure;
 				break;

@@ -55,6 +55,8 @@ export const CP_EVENT_KINDS = [
 	 * reported instead of silently lost (cp-held-cannot-report).
 	 */
 	"envelope_superseded",
+	/** A refused native resume took no brief, so the superseded envelope went back with `reported_at` and phase (N4l). */
+	"envelope_restored",
 	/**
 	 * A valid promotion (`cp_send` with `task`/`taskFile`, mode `prompt`)
 	 * replaced the frozen original task this job was dispatched with
