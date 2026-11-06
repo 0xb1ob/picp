@@ -154,6 +154,7 @@ Isolation: every run gets a `mktemp -d` scratch dir (dirs mode 0700) outside the
 `settingSources: []`, `strictMcpConfig`, `managedSettings: { disableAllHooks: true }`, no plugins, skills or agents,
 `Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an allow-list (`PATH`, `LANG`, `LC_ALL`,
 `LC_CTYPE`, `TZ`) plus the explicit provider variables; a host `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL` never reaches it.
+N4m: `managedSettings` also sets `strictKnownMarketplaces: []` (env `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1`), so the headless plugin reconcile never installs the passed settings' `enabledPlugins` into a kept scratch for a resumed follow-up.
 
 ### Step-2 gates (before any wiring)
 

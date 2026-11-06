@@ -228,6 +228,45 @@ test("G2: a resumed session's usage is counted once across both runs; an interru
 	});
 });
 
+test("N4m: a resumed follow-up in the kept scratch sees the first run's surface, not the settings' enabled plugin", { skip, timeout: 240_000 }, async (t) => {
+	await withFixture(async ({ root, run }) => {
+		// The operator's HOME: a git marketplace holding one plugin with one skill, enabled in the settings file.
+		const home = join(root, "operator-home");
+		const market = join(home, "market");
+		for (const dir of [".claude-plugin", "plugins/demo/.claude-plugin", "plugins/demo/skills/hello"]) mkdirSync(join(market, dir), { recursive: true });
+		writeFileSync(join(market, ".claude-plugin/marketplace.json"), JSON.stringify({ name: "seeded", owner: { name: "op" }, plugins: [{ name: "demo", source: "./plugins/demo", description: "d" }] }));
+		writeFileSync(join(market, "plugins/demo/.claude-plugin/plugin.json"), JSON.stringify({ name: "demo", version: "1.0.0", description: "d" }));
+		writeFileSync(join(market, "plugins/demo/skills/hello/SKILL.md"), "---\nname: hello\ndescription: MARKER-PLUGIN-SKILL\n---\nhi\n");
+		const git = (...args: string[]) => execFileSync("git", ["-C", market, "-c", "user.name=op", "-c", "user.email=op@example.invalid", ...args]);
+		execFileSync("git", ["init", "-q", market]);
+		git("add", "-A");
+		git("commit", "-qm", "seed");
+		const settings = join(home, ".claude", "settings.json");
+		mkdirSync(join(home, ".claude"), { recursive: true });
+		writeFileSync(settings, JSON.stringify({ enabledPlugins: { "demo@seeded": true }, extraKnownMarketplaces: { seeded: { source: { source: "git", url: `file://${market}` } } } }));
+		const scratchDir = join(root, "..", `${root.split("/").pop()}-n4m`);
+		mkdirSync(scratchDir, { mode: 0o700 });
+		try {
+			// Each turn stays up a few seconds, long enough for the CLI's background plugin reconcile to finish.
+			const slow = (text: string): ClaudeStep => ({ kind: "text", text, beforeAnswer: () => sleep(4_000) });
+			const provider = await startClaudeMockProvider([slow("first"), slow("second"), slow("third")]);
+			const first = await run(provider, { scratchDir, userSettings: settings });
+			const runs = [first];
+			// Unfixed, the reconcile clones the marketplace in run 1, installs the plugin in run 2, and run 3 loads it.
+			for (let i = 0; i < 2; i++) runs.push(await run(provider, { scratchDir, userSettings: settings, resume: { sessionId: first.sessionId ?? "" } }));
+			await provider.close();
+			t.diagnostic(`seen: ${JSON.stringify(runs.map((result) => result.lockdown?.seen))}`);
+			for (const result of runs) assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal ?? result.error);
+			assert.deepEqual(runs.map((result) => result.lockdown?.seen), runs.map(() => first.lockdown?.seen));
+			assert.deepEqual(runs.map((result) => result.sessionId), runs.map(() => first.sessionId), "the follow-ups did not resume");
+			assert.equal(provider.requests.some((request) => JSON.stringify(request.body).includes("MARKER-PLUGIN-SKILL")), false);
+			assert.deepEqual(readdirSync(join(scratchDir, "config", "plugins")).filter((name) => ["cache", "marketplaces"].includes(name)), []);
+		} finally {
+			rmSync(scratchDir, { recursive: true, force: true });
+		}
+	});
+});
+
 test("R1: Bash and Read never reach the settings env, /proc environ or the settings file; no secret reaches the model", { skip, timeout: 180_000 }, async (t) => {
 	await withFixture(async ({ root, worktree, run }) => {
 		const secret = `sentinel-${randomBytes(12).toString("hex")}`;
