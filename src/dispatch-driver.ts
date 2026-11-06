@@ -2,7 +2,7 @@
  * Native routing S1: which driver a dispatch runs on. A rubric row's `driver` is a preference, an explicit request is
  * strict, and a started job keeps its driver (D1). Only local/answer research may run native (D2).
  */
-import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision } from "./contracts.ts";
+import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision, type RoutingDriver } from "./contracts.ts";
 import {
 	assertNativeEffort, liveNativeJobs, nativeBaseEnv, nativeMaxConcurrent, nativeModelId, NativeDriverError, nativeSelectionRefusal, type NativeRefusal,
 	nativeSlotRefusal, nativeThinkingEnv,
@@ -20,8 +20,8 @@ export interface DriverContext {
 	delivery: Delivery;
 	role: Role;
 	jobs: readonly FleetRecord[];
-	/** `cp_dispatch driver`: strict, refused rather than falling back. */
-	explicit?: NativeDriver;
+	/** `cp_dispatch driver`: strict, refused rather than falling back; `pi` pins the job off native routing. */
+	explicit?: RoutingDriver;
 	/** Admission (not preview): take the home's one native slot before the async spawn. */
 	reserve?: boolean;
 	/** Native workers live in this parent that the fleet does not list (reviewers, N4h); each holds the native slot. */
@@ -50,6 +50,11 @@ export async function resolveDriverRoute(
 ): Promise<RoutingDecision> {
 	const prior = ctx.jobs.find((job) => job.job_id === ctx.jobId);
 	const locked = prior && !isScriptFleetRecord(prior) ? (prior.worker.driver ?? "pi") : undefined;
+	if (ctx.explicit === "pi") {
+		if (locked === "claude") throw new NativeDriverError(`refused: ${ctx.jobId} started on claude and a started job keeps its driver; dispatch a new job to run pi`);
+		const pi = await resolveWithCapacity(route, config, probe, capacity);
+		return { ...pi, requested_driver: "pi", driver: "pi", driver_reason: "explicit: cp_dispatch driver pi" };
+	}
 	if (locked === "pi" && ctx.explicit) {
 		throw new NativeDriverError(`refused: ${ctx.jobId} started on pi and a started job keeps its driver; dispatch a new job to run native`);
 	}

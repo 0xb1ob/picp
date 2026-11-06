@@ -1,0 +1,1 @@
+- `cp_dispatch driver: "pi"` pins one job to pi, bypassing a rubric row's native (claude) preference; a job already started on claude refuses it.
