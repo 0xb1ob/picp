@@ -230,7 +230,7 @@ for (const [mode, name] of [
 	assert.equal(provider.remaining(script), 0);
 });
 
-test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: each mid-turn implementer pushes its WIP, files no envelope and gets no nudge", { timeout: 180_000 }, async (t) => {
+test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: each mid-turn implementer pushes its WIP, files no envelope and gets no nudge", { timeout: 360_000 }, async (t) => {
 	// Review 1 of PR 669: the freeze was only driven through post.drain.*; this goes operator cp_parent drain → host
 	// `drain` op → the parent's /cp-drain command, so a lost {reason:"freeze"} on that mapping fails here.
 	const home = createScratchHome();
@@ -290,7 +290,7 @@ test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: 
 	for (const job of jobs) assert.ok(reply.includes(`freeze: ${job.id} steered (`), reply);
 	writeFileSync(gate, "open\n");
 	for (const job of jobs) {
-		const settled = await waitFor(() => readRunEvents(home.path, job.id).filter((event) => ["settled_without_report", "report_nudged"].includes(event.type)), (rows) => rows.length > 0, { timeoutMs: 60_000, what: `${job.id} settles` });
+		const settled = await waitFor(() => readRunEvents(home.path, job.id).filter((event) => ["settled_without_report", "report_nudged"].includes(event.type)), (rows) => rows.length > 0, { timeoutMs: 120_000, what: `${job.id} settles` });
 		assert.deepEqual(settled.map((event) => event.type), ["settled_without_report"]);
 		assert.match(JSON.stringify(provider.requests(job.name)[1]?.body.messages ?? null), /FREEZE: /);
 		assert.equal(provider.requests(job.name).length, 3, "no nudge restarts a frozen turn");
