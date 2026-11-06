@@ -1,0 +1,1 @@
+- Native ship selection (N4f): a ship implementer runs on the Claude CLI when its routing row says `driver: "claude"` and `data/native.json` `claude_ship` is on (off by default); `claude_review` and `max_concurrent` are validated but change nothing yet, dispatch passes the base branch as `CP_BASE_BRANCH`, and a moved worktree refuses the old session's resume by name.

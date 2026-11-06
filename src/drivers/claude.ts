@@ -47,9 +47,10 @@ export interface NativeSelection {
 	env?: NodeJS.ProcessEnv;
 }
 
-/** The switch a job's role/kind/delivery falls under, or undefined when no native class takes it (N4f). */
+/** The switch a job's role/kind/delivery falls under, or undefined when no native class takes it (N4f). Research
+ * delivery is checked after the pipeline rule, so pipeline-owned research is named as such (D2). */
 export function nativeClassOf(kind: JobKind, role: Role, delivery: Delivery): NativeClass | undefined {
-	if (role === "planner" && kind === "research" && RESEARCH_DELIVERIES.includes(delivery)) return "claude_research";
+	if (role === "planner" && kind === "research") return "claude_research";
 	if (role === "implementer" && kind === "ship" && SHIP_DELIVERIES.includes(delivery)) return "claude_ship";
 	return role === "gate-reviewer" ? "claude_review" : undefined;
 }
@@ -64,13 +65,13 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 		return { category: "switch", why: `the native switch is unreadable (${(error as Error).message})` };
 	}
 	const nativeClass = nativeClassOf(input.kind, input.role, input.delivery);
-	if (nativeClass === undefined) {
-		return { category: "ineligible", why: `only research (role planner, delivery local or answer) and ship (role implementer, delivery pr or local) jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
-	}
+	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local or answer) and ship (role implementer, delivery pr or local) jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
+	if (nativeClass === undefined) return ineligible;
 	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
 	if (existsSync(join(input.home, paths.pipelineFile(input.jobId)))) {
 		return { category: "pipeline", why: "pipeline-owned research stays on pi; only local and answer research run native" };
 	}
+	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
 	// N4h builds the reviewer path; until then claude_review gates nothing and a reviewer stays on pi.
 	if (nativeClass === "claude_review") return { category: "ineligible", why: "the native reviewer path is not built yet; gate-reviewers run on pi" };
 	const live = liveNativeJobs(input.jobs).filter((id) => id !== input.jobId);

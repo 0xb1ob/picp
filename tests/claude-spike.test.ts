@@ -302,6 +302,7 @@ test("N4f eligibility: research, ship and review map to their own switch; a disa
 		nativeSelectionRefusal({ home, jobId: "cp-class", driver: "claude", kind, role, delivery, jobs: [], env: { PATH: "" } });
 	toggle({ claude_research: true });
 	assert.equal((await refusal("research", "planner", "local"))?.category, "cli_missing");
+	assert.match((await refusal("research", "planner", "pr"))?.why ?? "", /this is research\/planner\/pr$/);
 	assert.match((await refusal("ship", "implementer", "pr"))?.why ?? "", /^the switch workers\.native_claude_ship is off \(data\/native\.json claude_ship\)$/);
 	toggle({ claude_ship: true });
 	assert.equal((await refusal("ship", "implementer", "pr"))?.category, "cli_missing");

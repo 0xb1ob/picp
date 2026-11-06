@@ -544,5 +544,33 @@ on that PR or `run view <id> [--log-failed]` in this repo; `pr checks` and a sta
 worker process, then the ci-wait repeat refusal answers. Every output passes `redactGithubTokens` and is capped at 20,000
 characters. The worker also reads `user.name`/`user.email` from the worktree's git config and passes them as
 `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, so `git commit` works under the scratch HOME; no token, HOME or credential helper is
-passed. The same slice makes `git checkout -- <path>` and `git restore` paths honour `exclude_paths`. Dispatch does not
-set `CP_BASE_BRANCH` yet; selection stays research-only until N4f.
+passed. The same slice makes `git checkout -- <path>` and `git restore` paths honour `exclude_paths`. N4f sets
+`CP_BASE_BRANCH` at spawn (below).
+
+## Native ship jobs (N4f)
+
+**The switch.** `data/native.json` key `claude_ship` (no Settings row; N4j was cut) is OFF by default. It changes
+nothing on its own: an implementer runs native only when its routing row (or the dispatch) says `driver: "claude"`,
+the job is `kind:ship` with delivery `pr` or `local`, and `claude_ship` is on. Off, a claude row falls back to pi with
+`driver_reason` `switch: the switch workers.native_claude_ship is off …`; an explicit `driver: "claude"` is refused
+with no lease. The other keys: `claude_research` (unchanged), `claude_review` (validated, gates nothing until N4h; a
+gate-reviewer stays on pi) and `max_concurrent` (integer 1–4, default 1, validated and stored; concurrency stays 1
+until N4i). Any other key, a non-boolean switch or an out-of-range count is refused by name, by every reader.
+
+**What runs.** The native implementer gets the profile body plus a ship addendum (forge tools, commit in Bash, push only
+with `git_push`, `pr_create` for the draft, then `report_result` with `head_sha`). Dispatch passes the job's base
+branch (the PR base for a bound PR, else the preflight base) as `CP_BASE_BRANCH`, the only new child env; a revive
+passes the bound PR's base or the project's `base_branch`. `pr_create` targets it and `git_push` refuses it.
+
+**Follow-ups.** A CI-repair `cp_send` to the job's own native implementer (same kind) is admitted and resumes the same
+session. A kind-changing promotion of a native research worker (a new brief via `task`/`task_file`) is refused by name:
+its tools and policy were fixed at spawn. The revive prompt names the kind ("Continue the implementation …" for ship).
+
+**Park→resume.** An `awaiting_merge` resume can re-lease the worktree at a new path, and the Claude CLI keys sessions by
+cwd. The session record now keeps its `cwd`; a resume from a different worktree is refused by name
+(`native_session_moved` in the run log) and the job continues on a fresh session led by its brief. A pre-N4f record has
+no `cwd` and resumes as before.
+
+**Rollback.** Set `claude_ship` false. New ship dispatches go to pi at once; jobs already started keep their driver (D1:
+no pi fallback mid-job), and their resumes and revives are refused until the switch is back on or they are torn down.
+Rows stay pi until the routing flip: this slice leaves the home's `data/native.json` and `data/routing.json` alone.

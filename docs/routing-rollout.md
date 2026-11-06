@@ -190,7 +190,8 @@ the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-driv
    Back up `data/routing.json` first (`cp -p data/routing.json data/routing.json.bak-<stamp>`), then check it with
    `/doctor`: `models.planner` reports `driver=claude <model>; pi fallback …`.
 2. **The switch.** Dashboard Settings → Native workers, or `data/native.json` `{"claude_research": true}`. Only local
-   and answer research runs native, one job at a time; pipeline research, reviews, gates and ship jobs stay pi.
+   and answer research runs native, one job at a time; pipeline research, reviews, gates and ship jobs stay pi. Ship
+   implementers have their own switch, `claude_ship` (off by default; [native-drivers.md](native-drivers.md#native-ship-jobs-n4f)).
 3. **What to watch.**
    - Job detail's Driver fact: `claude, effort high` for a native job, `pi (preferred claude: <reason>)` for a fallback.
    - The Quota line's separate Claude item (shown only while the switch is ON): `Claude ok`, `Claude limited until
