@@ -20,7 +20,7 @@ import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
 	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status",
-	"full-match-diff", "full-match-commands", "full-match-thread-sends", "full-match-thread-ui", "reports-cards"];
+	"full-match-diff", "full-match-commands", "project-sidebar", "reports-cards"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -32,11 +32,9 @@ const say = (id: string, at: string, who: string, text: string, over: Partial<Se
 const tool = (id: string, at: string, name: string, text: string, summary?: string): SessionEntry => ({ ...say(id, at, "Assistant", text), kind: "tool", name, ...(summary ? { summary } : {}) });
 /** Full match S2 shows job suffixes, so its ids end in four characters like real picp ids; S3 reuses its data. */
 const S5 = args.stage === "full-match-status", S7 = args.stage === "full-match-diff", S6 = args.stage === "full-match-commands";
-/** Full match S9: dashboard sends carry an explicit thread; two entries are thread members, drawn like any other. */
-const S9 = args.stage === "full-match-thread-sends";
-/** Full match S11: two named threads (one with a long name), the tabs, the rail and the `#` picker. */
-const S11 = args.stage === "full-match-thread-ui", THREAD_A = "th-0123456789abcdef", THREAD_B = "th-fedcba9876543210";
-const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7 || S6 || S9 || S11;
+/** The sidebar's registered project rows (one long name), picp selected; they replaced the retired thread rail. */
+const PS = args.stage === "project-sidebar", LONG_PROJECT = "billing-and-invoices-for-the-picp-drawer-slice-long-enough-to-ellipsize";
+const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7 || S6 || PS;
 /** Reports card titles: both Reports grids with long titles, plus S3's Jobs list as the unchanged control. */
 const RC = args.stage === "reports-cards";
 const JOB = S2 || RC ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
@@ -60,8 +58,8 @@ const entries: SessionEntry[] = [
 	tool("t1", "2026-10-14T09:13:00Z", "bash", "git log --oneline -3"),
 	tool("t2", "2026-10-14T09:13:05Z", "read", "viewer-app/screens/sessions.css"),
 	say("e3", "2026-10-14T09:14:00Z", "Assistant", "The theme lives on `.shell-sessions` only, so Overview keeps its palette:\n\n```css\n.shell-sessions { color-scheme: light; background: var(--background); }\n```"),
-	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp", ...(S9 || S11 ? { thread_id: THREAD_A } : {}) }),
-	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one.", S9 || S11 ? { thread_id: THREAD_A } : {}),
+	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp", ...(PS ? { projects: ["picp"] } : {}) }),
+	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one."),
 	wake,
 	tool("k1", "2026-10-15T08:03:31Z", "thinking", "Let me verify the precedence claim before answering.", "Let me verify the precedence claim: docs say parent.json overrides CP_PARENT_MODEL"),
 	tool("k2", "2026-10-15T08:03:35Z", "bash", "Arguments\n{\"command\":\"rg -n Models docs\"}\n\nResult\n## Models", "## Models"),
@@ -173,12 +171,12 @@ const job = { generated_at: GENERATED, awaiting_count: 0, description: null, man
 	job: { id: JOB, project: "picp", title: "Sessions chat v2 PR 2", phase: "done", model: null, script_path: null, elapsed_seconds: null, limit_seconds: null, head: null, ci: null, review: null, review_attempts: 0, routing: null, note: null, ledger_status: "closed", ledger_disagrees: false, mandate_id: null, cost_usd: null, pr_url: null, pr_status: null, finished_at: GENERATED, finished_today: false, merge_sha: null, failure: null, summary: "Steps card and the Job transcript link.", blockers: [], context: null } } as unknown as JobResponse;
 const jobTranscript: JobTranscriptResponse = { entries: [say("j1", "2026-10-15T08:00:00Z", "Worker", "Reading the task file."), tool("j2", "2026-10-15T08:00:05Z", "read", "Arguments\n{}\n\nResult\nok", "Read the plan")], truncated: false, warning: null, from: null, to: null };
 /** GETs the app makes but this fixture leaves empty: answered 404, like a viewer without that feature. */
-const ABSENT = new Set(["/api/version", "/api/push", "/api/devices/notices", "/api/skills", "/api/workspace/status", "/api/threads"]);
+const ABSENT = new Set(["/api/version", "/api/push", "/api/devices/notices", "/api/skills", "/api/workspace/status"]);
 
 const scratch = mkdtempSync(join(tmpdir(), "cp-sessions-v2-fixture-"));
 const profile = mkdtempSync(join(tmpdir(), "cp-sessions-v2-chrome-"));
 const streams = new Set<ServerResponse>();
-const posts: string[] = [], unexpected: string[] = [], sent: Record<string, unknown>[] = [];
+const posts: string[] = [], unexpected: string[] = [];
 let chrome: ChildProcess | undefined;
 let reportGone = false;
 const diffShas: Record<string, string> = {};
@@ -261,7 +259,7 @@ try {
 			done(JOB, "Sessions chat v2 PR 2", "2026-10-15T15:47:00Z", 2.05, { pr_url: "https://github.com/o/picp/pull/700", pr_status: "merged" }),
 			done("cp-parent-perf-audit-68u3", "Audit cp-parent turn latency, responsiveness, and performance", "2026-10-15T12:25:00Z", 5.22),
 			done("cp-tool-addition-400-research-with-a-very-long-identifier-tp0b", "Research the tool_addition 400 and draft an issue", "2026-10-15T12:11:00Z", 4.5),
-			done("cp-threads-aware-cdc2", "Pass dashboard thread tags through messages and bind created jobs to their thread", "2026-10-15T10:45:00Z", 2.49, { pr_url: "https://github.com/o/picp/pull/158", pr_status: "merged" }),
+			done("cp-reply-splits-cdc2", "Split operator replies into per-project sections for the chat filter", "2026-10-15T10:45:00Z", 2.49, { pr_url: "https://github.com/o/picp/pull/158", pr_status: "merged" }),
 			done("cp-sweep-held-ci-hsze", "Sweep item 14 B1: bounded red-CI repair while the integration hold parks", "2026-10-15T10:26:00Z", 2.67, { pr_url: "https://github.com/o/picp/pull/157", pr_status: "merged" }),
 			done("cp-viewer-fonts-f0nt", "Self-host the viewer fonts", "2026-10-15T09:58:00Z", null, { model: null }),
 			row("cp-flaky-shard-fl4k", "picp", "failed", "Rerun the flaky shard", { finished_today: true, finished_at: "2026-10-15T09:40:00Z", cost_usd: 0.12 }),
@@ -313,28 +311,12 @@ try {
 		snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS, audit: [], available_models: [], models_error: null, models_loading: false };
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
 	if (args.stage === "m3-composer") routes[`/api/job/${JOB}`] = { ...job, ask_reference: { kind: "job", project: "picp", job_id: JOB }, evidence_lookup: { supported: true, why: "fixture" } };
-	// Full match S11: a long-named thread with e4/e5, the working job and its Started from chat row; a short second one.
-	if (S11) {
-		const long = "Billing and invoices for the picp drawer slice, a thread name long enough to ellipsize";
-		routes["/api/operator/control"] = { ...control, threads: true };
-		routes["/api/threads"] = { generated_at: GENERATED, available: true, reason: null, bindings: [], join_diagnostics: { multi_origin: 0, unknown_thread: 0, malformed: 0, unreadable: [] },
-			threads: [{ id: THREAD_A, name: long, created_at: GENERATED, renamed_at: null }, { id: THREAD_B, name: "Release", created_at: GENERATED, renamed_at: null }],
-			joins: [{ thread_id: THREAD_A, jobs: [{ id: "cp-transcript-steps-t7ah", title: "Restyle the transcript steps", state: "in_progress", created_at: GENERATED }], asks: [], omitted: 0,
-				started_from_chat: [{ job_id: "cp-transcript-steps-t7ah", title: "Restyle the transcript steps so a long job title keeps to one line", state: "in_progress", created_at: GENERATED, source_send_id: "dc-20261015080200-00000001" }] },
-			{ thread_id: THREAD_B, jobs: [], asks: [], started_from_chat: [], omitted: 0 }] };
-	}
+	if (PS) sessions.projects = ["atlas", LONG_PROJECT, "picp"];
 	server.on("request", (req, res) => {
 		const path = new URL(req.url ?? "/", "http://fixture").pathname;
 		const send = (status: number, type: string, data: string | Uint8Array) => { res.writeHead(status, { "content-type": type, "content-security-policy": APP_CSP, "cache-control": "no-store" }); res.end(data); };
 		// Full match S6: this fixture's session is an older cp-bridge, so a command gets the restart-required refusal.
 		const oldBridge = '{"error":"unsupported: this session\'s cp-bridge predates dashboard commands; restart the session (⋮ → Restart session) or send the text as a message"}';
-		if (S9 && req.method === "POST" && path === "/api/operator/message") {
-			posts.push(`POST ${path}`);
-			let raw = "";
-			req.on("data", (chunk) => (raw += chunk));
-			req.on("end", () => { sent.push(JSON.parse(raw) as Record<string, unknown>); send(202, "application/json", JSON.stringify({ id: sent.at(-1)!.client_id, state: "delivered", deliver: "prompt" })); });
-			return;
-		}
 		if (req.method !== "GET") { posts.push(`${req.method} ${path}`); return S6 && path === "/api/operator/message" ? send(409, "application/json", oldBridge) : send(405, "application/json", '{"error":"fixture is read-only"}'); }
 		// PR 5: a message arrives while the reader is scrolled up — appended here, announced on the stream like the viewer's.
 		if (path === "/fixture/new-message") {
@@ -356,7 +338,7 @@ try {
 			for (const stream of streams) stream.write("event: refresh\ndata: overview\n\n");
 			return send(200, "application/json", "{}");
 		}
-		if ((S5 || S7 || S6 || S9) && path === "/api/workspace/status") {
+		if ((S5 || S7 || S6) && path === "/api/workspace/status") {
 			return send(200, "application/json", JSON.stringify({ ...(stale ? status(3 * 1440, null) : status(12, 58)), ...(claude ? { claude: claudeItem } : {}) }));
 		}
 		// Full match S7: the recorded head moves to the oversized commit or an absent object; /api/diff is the real viewer's.
@@ -814,13 +796,12 @@ try {
 				strip: innerWidth < 900 ? shown(".session-strip-count, .session-strip-job").map(e => e.textContent).join(" ") : null,
 				jobs: shown(".session-heading .workspace-jobs-open kbd").length ? q(".workspace-jobs-open").textContent + " " + q(".workspace-jobs-open").title : null,
 				drawer_width: Math.round(q(".workspace-sessions[open]")?.getBoundingClientRect().width ?? 0),
-				small: shown(".session-filter-menu > summary, .workspace-jobs-open, .workspace-context-open, .session-bar-icon, .workspace-sessions .shell-icon-nav > a, .workspace-sessions .shell-rail-search")
+				small: shown(".workspace-jobs-open, .workspace-context-open, .session-bar-icon, .workspace-sessions .shell-icon-nav > a, .workspace-sessions .shell-rail-search")
 					.filter(e => { const r = e.getBoundingClientRect(); return (innerWidth < 900 && r.height < 44) || r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className).join() }; })()`;
 		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .shell-icon-nav")`];
-		const filter: Step = [`document.querySelector(".session-filter-menu > summary").click()`, `!!document.querySelector(".session-filter-menu[open] select")`];
 		const header: Step = [`(() => { document.querySelector(".workspace-context-open").click(); document.querySelector(".workspace-jobs-open").focus(); })()`,
 			`!document.querySelector("aside.workspace-context") && document.activeElement === document.querySelector(".workspace-jobs-open")`];
-		// The committed six are desktop, phone, 899, 900, drawer and header-jobs; 1279 and filter stay in the artifacts.
+		// The committed six are desktop, phone, 899, 900, drawer and header-jobs; 1279 stays in the artifacts.
 		const shotsS: [string, number, number, Step[], object][] = [
 			["desktop", 1440, 1000, [], { inspector: true, sheet: false, heading: 48, rail: "Chat,Jobs,More", jobs: "Jobs⌘J Jobs (Ctrl/⌘ J)", small: "" }],
 			["header-jobs", 1440, 1000, [header], { inspector: false, sheet: false, heading: 48, jobs: "Jobs⌘J Jobs (Ctrl/⌘ J)", small: "" }],
@@ -830,7 +811,6 @@ try {
 				strip: "1 working · pr3", small: "" }],
 			["899", 899, 1000, [], { inspector: false, sheet: false, heading: 45, bar: 53, small: "" }],
 			["drawer", 390, 844, [drawer], { drawer: "Chat,Jobs,More", drawer_width: 317, small: "" }],
-			["filter", 390, 844, [filter], { sheet: false, small: "" }],
 		];
 		for (const [name, width, height, steps, want] of shotsS) {
 			await capture(`full-match-shell-${name}`, transcript, width, height, "dark", loaded, "bottom", steps);
@@ -1153,57 +1133,33 @@ try {
 		}
 		if (posts.join() !== "POST /api/operator/message") throw new Error(`full-match-commands sent ${posts.join(", ") || "nothing"}: only the one explicit Submit sends`);
 	}
-	if (S9) {
-		// Full match S9. Negative controls: a composer that omits `thread_id` (or sends the page's selection) fails `thread`;
-		// a drawn member id or thread chrome fails `shown`; a long draft that widens the page fails `outside`.
-		const long = "Please check the held PR for the drawer slice and whether a very long message keeps wrapping inside its bubble";
-		const look = `({ shown: document.body.innerText.includes("th-0123456789abcdef") || !!document.querySelector("[data-thread], .thread-chip"),
-			outside: document.documentElement.scrollWidth > innerWidth, draft: document.querySelector(".operator-composer textarea")?.value.length ?? null })`;
-		const type: Step = [`(() => { const t = document.querySelector(".operator-composer textarea"); t.value = ${JSON.stringify(long)}; t.dispatchEvent(new Event("input", { bubbles: true })); })()`,
-			`document.querySelector(".operator-composer textarea").value.length === ${long.length} && !document.querySelector(".operator-composer-send").disabled`];
-		const submit: Step = [`document.querySelector(".operator-composer-send").click()`, `document.querySelector(".operator-composer textarea").value === ""`];
-		for (const [name, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
-			await capture(`full-match-thread-sends-${name}`, transcript, width, height, "dark", loaded, "bottom", [type, submit]);
-			const got = { ...await evaluate(look), thread: JSON.stringify([sent.at(-1)?.text, sent.at(-1) && "thread_id" in sent.at(-1)! ? sent.at(-1)!.thread_id : "absent"]) };
-			console.log(`measured ${name} ${JSON.stringify(got)}`);
-			Object.assign(shots.at(-1)!, got);
-			const want = { shown: false, outside: false, draft: 0, thread: JSON.stringify([long, null]) };
-			const off = Object.entries(want).filter(([k, v]) => got[k as keyof typeof got] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k as keyof typeof got])} (want ${JSON.stringify(v)})`);
-			if (off.length) throw new Error(`full-match-thread-sends-${name}: ${off.join("; ")}`);
-		}
-		if (posts.join() !== "POST /api/operator/message,POST /api/operator/message") throw new Error(`full-match-thread-sends sent ${posts.join(", ") || "nothing"}: one send per capture`);
-	}
-	if (S11) {
-		// Full match S11. Negative controls: a selection keeping untagged rows fails `rows`; tabs or the `#` chip that grow
-		// with a long name widen the page (capture throws) or fail `tab`/`chip`; a rail row that wraps fails `rail`.
-		const selected = `${transcript}&thread=${THREAD_A}`, ready = ".thread-tab[aria-current=page] + .thread-tab, .thread-tab[aria-current=page]";
-		const look = `({ rows: ["Long words must wrap", "Morning. Where is"].map(t => document.querySelector(".session-entries").innerText.includes(t)).join(),
-			heading: document.querySelector(".session-heading-id strong")?.textContent ?? null, tabs: [...document.querySelectorAll(".thread-tab a")].map(a => a.textContent.slice(0, 24)),
-			tab: Math.round(document.querySelector(".thread-tab[aria-current=page]")?.getBoundingClientRect().width ?? 0), chip: Math.round(document.querySelector(".operator-composer-hash")?.getBoundingClientRect().width ?? 0),
-			rail: [...document.querySelectorAll(".thread-row")].filter(r => r.getClientRects().length).map(r => Math.round(r.getBoundingClientRect().height)),
-			picker: [...document.querySelectorAll("#operator-composer-command-menu button")].map(b => b.getAttribute("aria-pressed") + " " + b.querySelector("code").textContent.slice(0, 20)) })`;
-		const picker: Step = [`document.querySelector(".operator-composer-hash").click()`, `!!document.querySelector("#operator-composer-command-menu[aria-label='Send to thread']")`];
+	if (PS) {
+		// Negative controls: a wrapping row fails `rows`, an unclipped long name `long`, a header dropdown `filter`, a picp
+		// selection keeping untagged entries `shown`, any thread chrome `thread`; a name widening the page throws.
+		const selected = `${transcript}&project=picp`, ready = ".project-row[aria-current=page]";
+		const look = `(() => { const shown = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
+			const rows = shown(".project-row"), long = rows.find(r => r.title === ${JSON.stringify(LONG_PROJECT)})?.querySelector(".project-row-name");
+			return { rows: rows.map(r => Math.round(r.getBoundingClientRect().height)).join(), current: shown(".project-row[aria-current=page]").map(r => r.textContent).join(),
+				long: long ? long.scrollWidth > long.clientWidth : null, filter: document.querySelectorAll('select[aria-label="Filter by project"], .session-filter-menu').length,
+				shown: ["Long words must wrap", "Morning. Where is"].map(t => document.querySelector(".session-entries").innerText.includes(t)).join(),
+				thread: document.querySelectorAll("[class*=thread-], .operator-composer-hash").length }; })()`;
 		// Resting: the drawer's dialog focuses its first control, so blur it (no focus ring in the shot).
-		const drawerT: Step = [`document.querySelector(".workspace-sessions-open").click()`, `(document.activeElement.blur(), !!document.querySelector(".workspace-sessions[open] .thread-row"))`];
-		const shotsT: Array<[string, string, number, number, Step[], Record<string, unknown>]> = [
-			["desktop", selected, 1440, 1000, [], { rows: "true,false", heading: "# Billing and invoices for the picp drawer slice, a thread name long enough to ellipsize" }],
-			["picker-desktop", selected, 1440, 1000, [picker], { rows: "true,false" }],
-			["phone", selected, 390, 844, [], { rows: "true,false" }],
-			["picker-phone", selected, 390, 844, [picker], { rows: "true,false" }],
-			["drawer", selected, 390, 844, [drawerT], { rows: "true,false" }],
-			["all-desktop", transcript, 1440, 1000, [], { rows: "true,true", heading: "Operator" }],
+		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `(document.activeElement.blur(), !!document.querySelector(".workspace-sessions[open] .project-row"))`];
+		const shotsP: Array<[string, string, number, Step[], Record<string, unknown>]> = [
+			["desktop", selected, 1440, [], { rows: "36,36,36,36", current: "#picp", long: true, filter: 0, shown: "true,false", thread: 0 }],
+			["all-desktop", transcript, 1440, [], { current: "#All projects", filter: 0, shown: "true,true", thread: 0 }],
+			["phone", selected, 390, [], { rows: "", filter: 0, shown: "true,false", thread: 0 }],
+			["drawer", selected, 390, [drawer], { rows: "36,36,36,36", current: "#picp", long: true, thread: 0 }],
 		];
-		for (const [name, hash, width, height, steps, want] of shotsT) {
-			await capture(`full-match-thread-ui-${name}`, hash, width, height, "dark", ready, "bottom", steps);
+		for (const [name, hash, width, steps, want] of shotsP) {
+			await capture(`project-sidebar-${name}`, hash, width, width < 900 ? 844 : 1000, "dark", ready, "bottom", steps);
 			const got = await evaluate(look);
 			console.log(`measured ${name} ${JSON.stringify(got)}`);
 			Object.assign(shots.at(-1)!, got);
 			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
-			if (got.tab > 220 || got.chip > 220) off.push(`tab ${got.tab}px / chip ${got.chip}px over 220`);
-			if (got.rail.some((h: number) => h > 40)) off.push(`rail rows ${got.rail.join(",")} wrap`);
-			if (off.length) throw new Error(`full-match-thread-ui-${name}: ${off.join("; ")}`);
+			if (off.length) throw new Error(`project-sidebar-${name}: ${off.join("; ")}`);
 		}
-		if (posts.length) throw new Error(`full-match-thread-ui sent ${posts.join(", ")}: picking a thread never sends`);
+		if (posts.length) throw new Error(`project-sidebar sent ${posts.join(", ")}: picking a project never sends`);
 	}
 	if (RC) {
 		// Structural selectors, so the same measure reads the cards before and after their own classes.
@@ -1226,7 +1182,7 @@ try {
 		Object.assign(shots.at(-1)!, { jobs: await evaluate(`[".job-row-flight", ".job-row-done"].map(s => Math.round(document.querySelector(s).getBoundingClientRect().height))`) });
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
-	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, ...(S9 ? { sent } : {}), shots }, null, 2)}\n`);
+	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);
 	await cdp("Browser.close").catch(() => {});
 	ws.close();
 	console.log(`${shots.length} screenshots in ${out} (${version.product})`);

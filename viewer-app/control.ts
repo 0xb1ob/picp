@@ -1,4 +1,4 @@
-import type { ControlCommandBody, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, OperatorUploadResponse, SkillsResponse, ThreadWriteResponse } from "../src/viewer/api-types.ts";
+import type { ControlCommandBody, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, OperatorUploadResponse, SkillsResponse } from "../src/viewer/api-types.ts";
 import type { Restarting } from "./restart-control.ts";
 import { type Held, readDelta } from "./resource.ts";
 
@@ -91,18 +91,6 @@ export async function queueControl(fetch: Fetch, token: string, body: {op: "edit
  if (reply?.state === "sent" && typeof reply.text === "string") return {state: "sent", text: reply.text};
  if (response.ok && (reply?.state === "queued" || reply?.state === "cancelled")) return {state: reply.state};
  return {error: typeof reply?.error === "string" ? reply.error : `HTTP ${response.status}`};
-}
-
-export const OPERATOR_THREADS_URL = "/api/operator/threads";
-/** Full match S11: New thread through the operator session, the registry's one writer; a retried client_id replays. */
-export async function createThread(fetch: Fetch, token: string, name: string, client_id: string): Promise<ThreadWriteResponse | {error: string}> {
- try {
-  const response = await fetch(OPERATOR_THREADS_URL, {method: "POST", headers: {"content-type": "application/json", "x-cp-control-token": token}, body: JSON.stringify({op: "create", client_id, name})});
-  if (response.ok) return await response.json() as ThreadWriteResponse;
-  return {error: await failure(response)};
- } catch {
-  return {error: "Could not reach this home"};
- }
 }
 
 /** The page may send: control on, and either a session serving it (its token) or none (held, the inbox token). */

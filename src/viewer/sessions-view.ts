@@ -4,6 +4,7 @@ import type { JobTranscriptResponse, SessionEntry, SessionsResponse, SessionTier
 import { listBoards } from "./boards.ts";
 import { INBOX_REPLAY_PREFIX, isAskId, parseDashboardText, readUploadMetadata } from "./control-files.ts";
 import { applyThreadMembership } from "./named-threads-view.ts";
+import { registeredProjects } from "./fleet-view.ts";
 import { operatorSessionsFile, readOperatorSessions } from "./operator-sessions.ts";
 import { askDetails, evidenceLink } from "./decision-views.ts";
 import { localPaths } from "./linkify.ts";
@@ -329,7 +330,7 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
   generated_at: new Date(now).toISOString(), selected: "you", session_id: selected?.id ?? null,
   parent: rows.parent, workers, entries, title: "Operator ↔ you", subtitle: "Full transcript", warnings, truncated,
   transcript: true, operator_session: selected?.id ?? null, operator_sessions: files.map((file) => ({id:file.id,at:file.at})),
-  open_asks: askDetails(state,d.awaiting.items,now,d), pr_chips,
+  open_asks: askDetails(state,d.awaiting.items,now,d), pr_chips, projects: [...new Set(registeredProjects(state))].sort(),
  };
 }
 
