@@ -122,7 +122,7 @@ import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integ
 import { HeldContinuation } from "./held-continuation.ts";
 import { readReviewMergeWindow } from "./review-merge-window.ts";
 import { IntegrationHolds } from "./integration-hold.ts";
-import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
+import { CI_FLAKES_FILE, CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
 import { HeldRelease } from "./held-release.ts";
 import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
 import { ArmedDispatches } from "./dependency-dispatch.ts";
@@ -593,7 +593,7 @@ export class CommandPost {
 			},
 			awaiting: () => this.awaiting,
 			handoff: makeHandoff({ registry: this.registry, awaiting: () => this.awaiting, runs: this.runs, park: (jobId, facts) => this.awaitingMerge.park(jobId, facts) }), // merge_policy by record.project; a handed-off PR parks
-			infraRerun: (input) => maybeRerunInfra({ ...input, home: options.home, store: new CiRerunStore(options.home) }), // unload-parent PR2: one rerun per job+head
+			infraRerun: (input) => maybeRerunInfra({ ...input, home: options.home, store: new CiRerunStore(options.home), flakesFile: join(options.packageRoot, CI_FLAKES_FILE) }), // one rerun per job+head
 			mainCiScope: (project) => resolveMainCiScope({ project, mandates: () => this.mandates.list(), now: isoTimestamp(), login: () => this.ghLogin() }), // cp-oc0m
 		});
 		this.drain = new DrainControl({ home: options.home, fleet: this.fleet, busy: () => this.manager.quiesce().busy, head: (jobId) => this.reportedHeadSha(jobId), owns: () => this.#ownsHome(), steer: (jobId, message) => this.send({ jobId, message, mode: "steer" }),

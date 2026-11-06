@@ -1,0 +1,18 @@
+{
+	"schema_version": 1,
+	"entries": [
+		{
+			"project": "picp",
+			"file": "tests/e2e/service-update-p14e.test.ts",
+			"test": "P14e-update-verify: busy, deferred, down",
+			"text": "the rollback's verify fails alike",
+			"evidence": "https://github.com/0xb1ob/picp/actions/runs/42175046791 attempt 1, test-shard (7): daemon ECONNREFUSED in the rollback verify"
+		},
+		{
+			"project": "picp",
+			"job": "test",
+			"step": "Require every shard and the checks",
+			"evidence": ".github/workflows/ci.yml: the required gate fails whenever a shard does (run 42175046791 attempt 1)"
+		}
+	]
+}

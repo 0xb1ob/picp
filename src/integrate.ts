@@ -490,9 +490,9 @@ export class Integrator {
 		/** Set only when the repository itself answered "no workflows" (`src/ci-configured.ts`). */
 		let noCi: CiConfiguredVerdict | undefined;
 		if (ci.ci === "failed") {
-			const rerun = await this.#options.infraRerun?.({ jobId, head, runs: runsParsed, cwd, run: (dir, bin, args, opts) => this.#run(dir, bin, args, opts) });
+			const rerun = await this.#options.infraRerun?.({ jobId, head, runs: runsParsed, cwd, run: (dir, bin, args, opts) => this.#run(dir, bin, args, opts), project: record.project, prUrl });
 			if (rerun) facts.push(rerun.fact);
-			if (rerun?.rerun) return this.#write({ jobId, branch, step: "ci", next: "wait", facts, prUrl, headSha: head, reason: `${jobId}: ${rerun.fact}. Nothing was merged; the new attempt's CI fact resumes this.` });
+			if (rerun?.rerun || rerun?.wait) return this.#write({ jobId, branch, step: "ci", next: "wait", facts, prUrl, headSha: head, reason: `${jobId}: ${rerun.fact}. Nothing was merged; the new attempt's CI fact resumes this.` });
 			return this.#resolve({
 				jobId,
 				branch,
