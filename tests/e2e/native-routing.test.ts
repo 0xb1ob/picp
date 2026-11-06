@@ -159,7 +159,10 @@ test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned plan
 });
 
 test("S1 config: an unknown driver or a non-anthropic claude model refuses with no lease; a started job keeps its driver", { skip, timeout: 300_000 }, async (t) => {
-	const h = await routedHome(t, [{ kind: "text", text: "No report from me." }, { kind: "text", text: "Still no report." }]);
+	// N4e: an unreported clean turn now settles idle, so the locked job ends by its turn limit (CP_NATIVE_MAX_TURNS=1).
+	const bash = { kind: "tool_use" as const, calls: [{ name: "Bash", input: { command: "ls" } }] };
+	const h = await routedHome(t, [bash, bash]);
+	const limited = { ...h.env, CP_NATIVE_MAX_TURNS: "1" };
 	const routingFile = join(h.b.home, LAYOUT.routingFile);
 	const [codex, badModel, minimal, locked] = await Promise.all([h.job(), h.job(), h.job(), h.job()]);
 	h.toggle(true);
@@ -173,7 +176,7 @@ test("S1 config: an unknown driver or a non-anthropic claude model refuses with 
 		{ kind: "tool_calls", calls: [dispatch(minimal.id)] },
 		write(h.routing()),
 		{ kind: "tool_calls", calls: [dispatch(locked.id)] },
-	], h.env)) as Tool[];
+	], limited)) as Tool[];
 	const [first, second, third, fourth] = ends.filter((end) => end.toolName === "cp_dispatch");
 	assert.equal(first?.isError, true, text(first));
 	assert.match(text(first), /violates the routing contract/);
@@ -194,7 +197,7 @@ test("S1 config: an unknown driver or a non-anthropic claude model refuses with 
 		{ kind: "tool_calls", calls: [dispatch(locked.id)] },
 		tool("bash", { command: `echo '{"claude_research":true}' > "${join(h.b.home, LAYOUT.data, "native.json")}"` }),
 		tool("cp_revive", { job_id: locked.id, confirm: true }),
-	], h.env)) as Tool[];
+	], limited)) as Tool[];
 	const redispatch = again.find((end) => end.toolName === "cp_dispatch");
 	assert.equal(redispatch?.isError, true, text(redispatch));
 	assert.match(text(redispatch), /cannot run on the native claude driver/);
@@ -236,13 +239,16 @@ test("S1 carry: a native primary missing from a plain allowlist falls back with 
 
 test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; a started native job never moves", { skip, timeout: 600_000 }, async (t) => {
 	const reset = Math.floor(Date.now() / 1000) + 3600;
+	// N4e: an unreported clean turn settles idle for a nudge, so the jobs that must end unreported end by turn limit.
+	const ls = { kind: "tool_use" as const, calls: [{ name: "Bash", input: { command: "ls" } }] };
 	const h = await routedHome(t, [
 		{ kind: "text", text: "Spent.", limit: { status: "rejected", claim: "five_hour", resetsAt: reset } },
-		{ kind: "text", text: "Ran after the reset.", limit: { status: "allowed", claim: "seven_day", resetsAt: reset } },
+		{ ...ls, limit: { status: "allowed", claim: "seven_day", resetsAt: reset } },
 		{ kind: "text", text: "Spent again.", limit: { status: "rejected", claim: "five_hour", resetsAt: reset * 1000 } },
 		{ kind: "auth_error" },
-		{ kind: "text", text: "Ran after sign-in." },
+		ls,
 	], { subscriber: true });
+	h.env = { ...h.env, CP_NATIVE_MAX_TURNS: "1" } as typeof h.env;
 	const file = nativeAvailabilityFile(h.b.home);
 	const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 	const runAlone = async (id: string, extra: Record<string, unknown> = {}) => { await h.b.closeParents(); return (await h.b.run([{ kind: "tool_calls", calls: [dispatch(id, extra)] }], h.env)) as Tool[]; };
@@ -332,8 +338,11 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 test("S3 carry: real opus and sonnet turns clear no-reset blocks by family; seven_day_overage_included clears on either", { skip, timeout: 600_000 }, async (t) => {
 	// A millisecond-magnitude reset is stored as no reset (F1), so each 429 leaves a sticky block.
 	const spent = (claim: string): ClaudeStep => ({ kind: "text", text: "Spent.", limit: { status: "rejected", claim, resetsAt: (Math.floor(Date.now() / 1000) + 3600) * 1000 } });
-	const h = await routedHome(t, [spent("seven_day_opus"), spent("seven_day_overage_included"), { kind: "text", text: "Sonnet ran." },
-		spent("seven_day_overage_included"), { kind: "text", text: "Opus ran." }], { subscriber: true });
+	// N4e: a clean unreported turn (the one that clears blocks) settles idle; its nudged resume ends by turn limit.
+	const nudged: ClaudeStep = { kind: "tool_use", calls: [{ name: "Bash", input: { command: "ls" } }] };
+	const h = await routedHome(t, [spent("seven_day_opus"), spent("seven_day_overage_included"), { kind: "text", text: "Sonnet ran." }, nudged,
+		spent("seven_day_overage_included"), { kind: "text", text: "Opus ran." }, nudged], { subscriber: true });
+	h.env = { ...h.env, CP_NATIVE_MAX_TURNS: "1" } as typeof h.env;
 	const [opus, sonnet] = [`${FAKE_NATIVE_MODEL}-opus`, `${FAKE_NATIVE_MODEL}-sonnet`];
 	routeNativeModel(h.b.home, [opus, sonnet]);
 	h.toggle(true);

@@ -168,7 +168,8 @@ export function forgeTools(job: ForgeJob, env: NodeJS.ProcessEnv = process.env, 
 	return [push, fetch, prCreate, prEdit, ghRead];
 }
 
-/** The worktree's commit identity as `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, so `git commit` works in the scratch-HOME child. */
+/** The worktree's commit identity as `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, so `git commit` works in the scratch-HOME
+ * child. */
 export function commitIdentityEnv(worktree: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
 	const get = (key: string): string => {
 		try {

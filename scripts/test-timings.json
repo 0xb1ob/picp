@@ -21,6 +21,7 @@
 	"tests/claude-binary-stub.test.ts": 4,
 	"tests/claude-followup.test.ts": 4,
 	"tests/claude-forge-tools.test.ts": 4,
+	"tests/claude-lifecycle.test.ts": 4,
 	"tests/claude-ship-policy.test.ts": 4,
 	"tests/claude-spike.test.ts": 29,
 	"tests/contract-injection.test.ts": 24,

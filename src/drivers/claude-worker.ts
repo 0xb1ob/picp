@@ -1,7 +1,7 @@
 /**
- * The native Claude research worker process (N3b; follow-ups N3c). It speaks the pi RPC lines dispatch reads
- * (`get_state`, `prompt`, `follow_up`, then events), runs each turn through `runClaudeSpike` with every N3a gate on,
- * and exits on stdin end or SIGTERM. A turn that ends without an accepted report exits non-zero, so the job fails.
+ * The native Claude research worker process (N3b; follow-ups N3c; lifecycle N4e). It speaks the pi RPC lines dispatch
+ * reads (`get_state`, `prompt`, `follow_up`, then events), runs each turn through `runClaudeSpike` with every N3a gate
+ * on, and exits on stdin end or SIGTERM. A clean unreported turn settles idle; a named stop exits non-zero.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -17,6 +17,7 @@ import { implementerExclusions, nativeRole } from "./claude-roles.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
 import { type NativeTranscript, nativeTranscript, nativeTranscriptFile } from "./claude-transcript.ts";
 import { modelFamily, type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
+import { classifyTurn, nativeRunStop, startIdlePrompt, type TurnEnd } from "./claude-lifecycle.ts";
 import {
 	assertNativeResume,
 	claimFollowUps,
@@ -52,6 +53,7 @@ let session: NativeSession | undefined;
 let transcript: NativeTranscript | undefined;
 
 let observe = turnObserver();
+let turnSeen: NativeObservation[] = [];
 let cliVersion: string | undefined;
 /** Relays one sanitized availability observation (S2) for the parent's snapshot; never SDK auth or error text. */
 function observed(seen: NativeObservation | undefined): void {
@@ -66,7 +68,9 @@ function observed(seen: NativeObservation | undefined): void {
 
 /** SDK messages as the pi events the recorder, intake and bounds already watch; the report tool keeps pi's name. */
 function relay(message: SDKMessage): void {
-	observed(observe(message));
+	const seen = observe(message);
+	if (seen) turnSeen.push(seen);
+	observed(seen);
 	transcript?.relay(message);
 	if (message.type === "result") finalResult = message;
 	if (message.type === "system" && message.subtype === "init" && session && session.session_id !== message.session_id) {
@@ -113,6 +117,7 @@ interface Turn {
 	reported: boolean;
 	code: number;
 	runId: string;
+	end: TurnEnd;
 	/** This turn's measured usage, for the turn-end budget check before the run log has recorded it. */
 	pending?: Usage;
 }
@@ -130,6 +135,7 @@ async function turn(prompt: string): Promise<Turn> {
 	const ledger = baseline ? new Map(Object.entries(baseline.ledger)) : undefined;
 	finalResult = undefined;
 	observe = turnObserver();
+	turnSeen = [];
 	const resumed = resuming;
 	if (!transcript) {
 		transcript = nativeTranscript(nativeTranscriptFile(runDir, jobId), { jobId, cwd: worktree }, (name) => (name === REPORT_TOOL ? "report_result" : name));
@@ -173,14 +179,18 @@ async function turn(prompt: string): Promise<Turn> {
 	}
 	const counts = { seen: result.lockdown?.seen, extra: result.lockdown?.extra };
 	const runId = randomUUID();
-	const turnLimit = result.resultSubtype === "error_max_turns";
-	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: Boolean(result.report), result_subtype: result.resultSubtype ?? null, usage: usage ? "measured" : "unavailable", usage_status: measured.status, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...(turnLimit ? { stop: "max_turns" } : {}) });
-	if (turnLimit) process.stderr.write(`[native claude] stopped at the turn limit (${maxTurns} turns)\n`);
+	// SAFETY: relay() sets finalResult during the run; the control-flow narrowing to undefined above is stale.
+	const isError = (finalResult as SDKResultMessage | undefined)?.is_error;
+	const end = classifyTurn({ reported: Boolean(result.report), resultSubtype: result.resultSubtype, isError, error: result.error, lockdown, observations: turnSeen });
+	const stop = nativeRunStop(end, maxTurns);
+	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: Boolean(result.report), result_subtype: result.resultSubtype ?? null, usage: usage ? "measured" : "unavailable", usage_status: measured.status, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...stop.fields });
+	if (stop.line) process.stderr.write(`[native claude] ${stop.line}\n`);
 	process.stderr.write(`[native claude] exit ${result.exit?.code ?? result.exit?.signal ?? "none"}; lockdown ${lockdown}; report ${result.report ? "accepted" : "none"}${result.error ? `; ${result.error}` : ""}\n`);
 	return {
 		reported: Boolean(result.report),
 		code: result.exit?.code || 1,
 		runId,
+		end,
 		...(usage ? { pending: { input: usage.input, output: usage.output, cache_read: usage.cacheRead, cache_write: usage.cacheWrite, total_tokens: usage.totalTokens, cost_usd: usage.cost.total } } : {}),
 	};
 }
@@ -204,12 +214,13 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 	return queued;
 }
 
-/** Turns until no admitted follow-up is queued; settles when any turn reported, else returns the failing exit code. */
+/** Turns until no admitted follow-up is queued; settles when any turn reported or the last ended clean, else fails. */
 async function serve(first: string): Promise<number> {
 	busy = true;
 	write({ type: "agent_start" });
 	let reported = false;
 	let code = 1;
+	let end: TurnEnd | undefined;
 	try {
 		const runDir = env.CP_RUN_DIR ?? "";
 		let claimed = claimFollowUps(runDir);
@@ -224,13 +235,15 @@ async function serve(first: string): Promise<number> {
 			if (claimed.length > 0) write({ type: "native_followup_delivered", count: claimed.length });
 			reported ||= ran.reported;
 			code = ran.code;
-			claimed = await dueFollowUps(ran);
+			end = ran.end;
+			// A named stop takes no queued follow-up: another turn would be the nudge the stop forbids.
+			claimed = end.kind === "stop" && end.stop !== "other" ? [] : await dueFollowUps(ran);
 			prompt = claimed.length > 0 ? claimed.join("\n\n") : undefined;
 		}
 	} finally {
 		busy = false;
 	}
-	if (!reported) return code;
+	if (!reported && end?.kind !== "settle") return code;
 	write({ type: "agent_settled" });
 	return 0;
 }
@@ -255,14 +268,24 @@ function command(line: string): void {
 		return reply({ success: true, data: { disposition: "queued" } });
 	}
 	if (message !== undefined && request.type === "prompt") {
-		// "resuming" is admitted and starting, not yet run: a resume that throws is journaled as native_resume_failed.
-		reply({ success: true, data: { disposition: resuming ? "resuming" : "started" } });
-		run = serve(message).catch((error: unknown) => {
-			if (resuming) write({ type: "native_resume_failed", reason: (error as Error).message });
-			process.stderr.write(`[native claude] refused: ${(error as Error).message}\n`);
-			return 1;
+		// Admission holds the door: a prompt arriving meanwhile queues; a refusal is the reply and no turn starts.
+		busy = true;
+		const start = () => {
+			// "resuming" is admitted and starting, not yet run: a resume that throws is journaled as native_resume_failed.
+			reply({ success: true, data: { disposition: resuming ? "resuming" : "started" } });
+			run = serve(message).catch((error: unknown) => {
+				if (resuming) write({ type: "native_resume_failed", reason: (error as Error).message });
+				process.stderr.write(`[native claude] refused: ${(error as Error).message}\n`);
+				return 1;
+			});
+			void run.then((code) => (code === 0 ? undefined : process.exit(code)));
+		};
+		void startIdlePrompt({ home: env.CP_HOME ?? "", jobId, resumed: resuming }, start).then((refused) => {
+			if (refused === undefined) return;
+			busy = false;
+			process.stderr.write(`[native claude] ${refused}\n`);
+			reply({ success: false, error: refused });
 		});
-		void run.then((code) => (code === 0 ? undefined : process.exit(code)));
 		return;
 	}
 	const why = request.type === "steer" ? nativeDoorRefusal(jobId, "steer") : `${jobId}: the native worker takes no ${String(request.type)} while idle; send a prompt`;
