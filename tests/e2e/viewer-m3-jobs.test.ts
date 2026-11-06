@@ -50,7 +50,7 @@ function seed(stateDir: string, home: string, extra = false) {
 	put(join(LAYOUT.runs, "cp-park/review-1.json"), { schema_version: 1, job_id: "cp-park", attempt: 1, verdict: "pass", cause: "ok", reasons: ["GUIDE-NOTE"], model: "rev/model-1",
 		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, decided_at: iso(150), head_sha: "b".repeat(40), diff_stat: { files: 3, truncated: false } });
 	put(join(LAYOUT.runs, "cp-merged/merge.json"), { job_id: "cp-merged", pr_url: "https://github.com/o/r/pull/2", merge_commit_sha: "c".repeat(40), merged_at: iso(30) });
-	// Full match S4: cp-other's run is working; cp-park has a worker session for its Log and a report.md;
+	// Full match S4: cp-other's run is working; cp-park has a worker session for its Transcript and a report.md;
 	// cp-live is a script.
 	put(join(LAYOUT.runs, "cp-other/status.json"), { phase: "working", started_at: iso(60) });
 	const worker = join(stateDir, "sessions", "cp-park.jsonl"), at = (minutes: number, message: object) => JSON.stringify({ type: "message", timestamp: iso(minutes), message });
@@ -230,7 +230,7 @@ function activate(tab: Tab, link: Element) {
 	return followed;
 }
 
-test("M3-jobs-reply-log: a reply's job link opens Log in the pane and keeps Chat; modified clicks and the direct URL keep the route", { timeout: 180_000 }, async (t) => {
+test("M3-jobs-reply-log: a reply's job link opens the job's Transcript in the pane and keeps Chat; modified clicks and the direct URL keep the route", { timeout: 180_000 }, async (t) => {
 	const d = await start(t, REPLIES);
 	const filtered = `${CHAT}&untagged=1`;
 	const tab = await openTab(t, d.port, filtered, new Map(), undefined, {}, true);
@@ -245,7 +245,7 @@ test("M3-jobs-reply-log: a reply's job link opens Log in the pane and keeps Chat
 		return tab.find(".session-steps-link", (a) => a.getAttribute("href") === `#job/${job}?tab=transcript`);
 	};
 	const pane = (job: string) => tab.find(`.sessions > section.workspace-job[aria-label='Job ${job}']`);
-	// Full match S4: a reply's link opens the Log view; a drawer pick keeps the embedded job page's Details.
+	// A reply's link opens the embedded job page's Transcript tab (the chat Log tab is gone); a drawer pick its Details.
 	const tabOf = () => tab.find(".workspace-job .workspace-log").then((el) => el.getAttribute("data-view") === "details" ? tab.$(".workspace-job .job-detail-embedded")?.getAttribute("data-tab") : el.getAttribute("data-view"));
 	const closed = () => until(() => tab.$(".workspace-job"), (el) => el === null, "the pane to close");
 
@@ -256,7 +256,7 @@ test("M3-jobs-reply-log: a reply's job link opens Log in the pane and keeps Chat
 	await settle();
 	assert.deepEqual([followed, !!tab.$(".sessions"), tab.window.location.hash], [false, true, filtered], "an unmodified primary click is the chat's: .sessions and the route stay");
 	await pane("cp-park");
-	assert.deepEqual([await tabOf(), tab.$(".session-transcript") === transcript], ["log", true], "the job's Log opens beside the same chat");
+	assert.deepEqual([await tabOf(), tab.$(".session-transcript") === transcript], ["transcript", true], "the job's Transcript opens beside the same chat");
 	assert.ok(focused() === tab.$('.workspace-job button[aria-label="Close job"]'), "focus moves into the pane");
 	assert.equal(escape(tab), true);
 	await closed();
@@ -266,7 +266,7 @@ test("M3-jobs-reply-log: a reply's job link opens Log in the pane and keeps Chat
 	const rollup = await tab.find("a.session-rollup-job");
 	assert.equal(activate(tab, rollup), false);
 	await pane("cp-live");
-	assert.deepEqual([await tabOf(), !!tab.$(".sessions")], ["log", true], "the rollup's job link opens the same pane");
+	assert.deepEqual([await tabOf(), !!tab.$(".sessions")], ["transcript", true], "the rollup's job link opens the same pane");
 	tab.click(tab.$('.workspace-job button[aria-label="Close job"]')!);
 	await closed();
 	assert.ok(focused() === rollup);
@@ -311,7 +311,7 @@ test("M3-jobs-reply-log: a reply's job link opens Log in the pane and keeps Chat
 	assert.deepEqual([tab.$(".sessions"), tab.$(".job-detail-embedded")], [null, null], "the full route, not the pane");
 });
 
-test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files and Details; the Ask footer drafts P1, never sends", { timeout: 180_000 }, async (t) => {
+test("M3-jobs-log (full match S4): a reply's link opens the job's Transcript with Report, Files and Details; the Ask footer drafts P1, never sends", { timeout: 180_000 }, async (t) => {
 	// cp-orphan has a fleet record but no ledger project, so the server gives it no Ask reference (owner validation).
 	const d = await start(t, [...REPLIES.slice(0, -1), wake(12, "cp-orphan", "ORPHAN woke"), ...bash(12, "c3"), REPLIES.at(-1)!]);
 	const fleet = join(d.home, LAYOUT.fleetFile), record = JSON.parse(readFileSync(fleet, "utf8")) as { jobs: object[] };
@@ -330,15 +330,19 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 	const texts = (selector: string) => tab.$$(`.workspace-job ${selector}`).map((e) => e.textContent);
 	// Each tab carries frame 8's segment label and frame 2's document label; CSS shows one per width.
 	const view = (key: string) => tab.click(tab.$(`.workspace-log-tabs [data-view="${key}"]`)!);
+	// The pane opens on Details (the job's Transcript tab); the identity and Ask footer sit on Report, Files and Diff.
+	const footed = async (on: Tab) => on.click(await on.find('.workspace-job .workspace-log-tabs [data-view="report"]'));
 	const transcript = tab.$(".session-transcript") as Element & { scrollTop: number };
 	transcript.scrollTop = 160;
 	assert.equal(activate(tab, link), false, "an unmodified click on the reply's link is the chat's");
-	const rows = await until(() => texts(".workspace-log-row"), (r) => r.length > 0, "the Log");
-	assert.deepEqual(rows, ["Parent · LOG-BRIEF fix the route", "Read(src/route.ts)└ Read 3 lines", "Ran 1 shell command• npm testPASS tests/route.test.ts",
-		"Update(src/route.ts)└ Added 2 lines, removed 1 line- b+ c+ d", "• LOG-SAY the route is fixed"], "frames 2/8 wording from the recorded calls, in order; S7: the edit's own block");
-	assert.deepEqual([texts(".workspace-job-name > *"), texts(".workspace-job-phase"), texts(".workspace-log-who p"), texts(".workspace-log-tab-short"), texts(".workspace-log-tab-doc"), texts(".workspace-log-live")],
-		[["Title cp-park", "cp-park"], ["With the team"], ["role not recorded · model not recorded · thinking not recorded", "not recorded"], ["Log", "Report", "Files", "Diff", "Details"],
-			[">_cp-park", "report.md", "Files", "Diff", "Details"], []], "title, id and phase; unrecorded facts say so; segment and document tabs, Diff since S7; live only while working");
+	const run = await tab.find(".workspace-job .job-detail-embedded[data-tab=transcript] .tool-run-solid button");
+	tab.click(run);
+	const rows = await until(() => texts(".jt-tool"), (r) => r.length > 0, "the Transcript's tool run");
+	assert.deepEqual([texts(".jt-brief .md"), rows, texts(".jt-say .md")], [["LOG-BRIEF fix the route"], ["Read(src/route.ts)└ Read 3 lines", "Ran 1 shell command• npm testPASS tests/route.test.ts",
+		"Update(src/route.ts)└ Added 2 lines, removed 1 line- b+ c+ d"], ["LOG-SAY the route is fixed"]], "the job's Transcript tab, with the recorded calls worded in order and the edit's own block");
+	assert.deepEqual([texts(".workspace-job-name > *"), texts(".workspace-job-phase"), texts(".workspace-log-tab-short"), texts(".workspace-log-tab-doc"), texts(".workspace-log-live")],
+		[["Title cp-park", "cp-park"], ["With the team"], ["Report", "Files", "Diff", "Details"], ["report.md", "Files", "Diff", "Details"], []],
+		"title, id and phase; segment and document tabs with no second transcript tab; live only while working");
 	assert.equal(tab.$$(".workspace-job textarea, .workspace-job form").length, 0, "no composer of its own: the entry only links into Chat");
 	const more = tab.$(".workspace-job details.workspace-job-more")!, summary = more.querySelector("summary")!;
 	assert.deepEqual([summary.getAttribute("aria-label"), more.querySelector(".workspace-job-more-sheet a")!.getAttribute("href"), tab.$(".workspace-job .workspace-full")!.getAttribute("href")],
@@ -348,6 +352,7 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 
 	view("report");
 	await tab.find(".workspace-log-report");
+	assert.deepEqual(texts(".workspace-log-who p"), ["role not recorded · model not recorded · thinking not recorded", "not recorded"], "unrecorded facts say so");
 	assert.match(tab.$(".workspace-log-report")!.textContent!, /REPORT-BODY/, "the report reads through the report page's own endpoint");
 	rmSync(join(d.home, LAYOUT.state, "artifacts/cp-park/report.md"));
 	view("files");
@@ -359,8 +364,6 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 	view("details");
 	await tab.find(".workspace-job .review-guide");
 	assert.deepEqual([/GUIDE-NOTE/.test(tab.$(".workspace-job .review-guide")!.textContent!), texts(".job-tab").includes("Timeline")], [true, true], "P2 guide and Timeline kept");
-	view("log");
-	await tab.find(".workspace-log-row");
 
 	assert.equal(escape(tab), true);
 	await until(() => tab.$(".workspace-job"), (el) => el === null, "Escape to close the pane");
@@ -371,8 +374,8 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 	const rollup = await tab.find("a.session-rollup-job");
 	assert.equal(activate(tab, rollup), false);
 	await tab.find(".sessions > section.workspace-job[aria-label='Job cp-live'] .workspace-log");
+	await footed(tab);
 	assert.equal((await until(() => texts(".workspace-log-who p"), (p) => p.length > 0, "cp-live's facts"))[0], "role not recorded · script scripts/live-check.sh · thinking not recorded");
-	view("report");
 	assert.equal((await tab.find(".workspace-job [role=status]", (s) => s.textContent !== "Loading")).textContent, "Report unavailable · no report.md recorded", "no report.md: unavailable");
 	tab.click(tab.$('.workspace-job button[aria-label="Close job"]')!);
 	await until(() => tab.$(".workspace-job"), (el) => el === null, "close still works");
@@ -380,6 +383,7 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 
 	// P1 owner validation: a job without its own reference offers no Ask at all, never another record's.
 	assert.equal(activate(tab, await stepsLink("cp-orphan")), false);
+	await footed(tab);
 	const orphan = await tab.find(".workspace-job .workspace-log-ask");
 	assert.deepEqual([orphan.textContent, !!tab.$(".workspace-job .workspace-log-entry"), !!tab.$(".workspace-job .evidence-ask")], ["Ask unavailable · no recorded reference for this job", false, false],
 		"no reference of its own: unavailable");
@@ -387,6 +391,7 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 	await until(() => tab.$(".workspace-job"), (el) => el === null, "the orphan pane to close");
 
 	activate(tab, link);
+	await footed(tab);
 	const ask = await tab.find(".workspace-log-readonly a.evidence-ask");
 	const writes = () => tab.requests.filter((r) => r.method !== "GET" && r.method !== "HEAD").map((r) => r.path);
 	const before = writes();
@@ -405,6 +410,7 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 	phone.type(await phone.find(".operator-composer textarea"), "KEEP-DRAFT");
 	phone.click(phone.$$(".session-steps .session-tools").find((b) => b.getAttribute("title") === "cp-park")!);
 	activate(phone, await phone.find(".session-steps-link", (a) => a.getAttribute("href") === "#job/cp-park?tab=transcript"));
+	await footed(phone);
 	const entry = await phone.find(".workspace-log-entry input");
 	assert.equal(entry.getAttribute("placeholder"), "Ask the Operator about this job…");
 	phone.type(entry, "WHY-SLOW is the route slow?");

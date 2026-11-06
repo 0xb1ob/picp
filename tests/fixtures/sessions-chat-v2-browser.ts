@@ -514,8 +514,8 @@ try {
 		for (const theme of ["dark", "light"] as const) {
 			await capture(`${stage}-steps-${theme}-1440x1100`, transcript, 1440, 1100, theme, loaded, "bottom", [[`${notice}; ${pill}`, `!!document.querySelector(".session-steps-open .session-notice-rest")`], centre]);
 			if (stage === "pr2") await capture(`pr2-job-transcript-phone-${theme}-390x844`, transcript, 390, 844, theme, loaded, "bottom", [[pill, `!!document.querySelector(".session-steps-link")`],
-				// Full match S4: the reply's link opens the pane's Log, not the job page's Transcript (`full-match-log`).
-				[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".workspace-job .workspace-log[data-view=log] .workspace-log-row")`]]);
+				// The reply's link opens the pane on the job page's own Transcript tab.
+				[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".workspace-job .job-detail-embedded[data-tab=transcript] .job-transcript")`]]);
 		}
 		if (stage === "pr2") {
 			await capture("pr2-notice-only-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[notice, `!!document.querySelector(".session-steps .session-notice-rest") && !document.querySelector(".session-steps-open")`], centre]);
@@ -749,7 +749,7 @@ try {
 		// A real reply-link click keeps Chat mounted and opens the embedded Transcript; then the surfaces' measured boxes.
 		// Negative control: without the reply callback the click leaves for the job route and the log steps time out.
 		const log: Step[] = [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-link")`],
-			[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".sessions > .workspace-job .workspace-log[data-view=log] .workspace-log-row") && location.hash === ${JSON.stringify(transcript)}`]];
+			[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".sessions > .workspace-job .job-detail-embedded[data-tab=transcript] .job-transcript") && location.hash === ${JSON.stringify(transcript)}`]];
 		const jobs: Step = [`document.querySelector(".workspace-jobs-open").click()`, `document.querySelectorAll(".workspace-jobs[open] .workspace-jobs-row").length === 4`];
 		const context: Step = [`document.querySelector(".workspace-context-open").click()`, `!!document.querySelector("dialog.workspace-context-sheet[open] .workspace-context-ask")`];
 		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .session-choice")`];
@@ -939,23 +939,23 @@ try {
 		if (posts.length) throw new Error(`full-match-jobs sent ${posts.join(", ")}: the drawer only reads`);
 	}
 	if (stage === "full-match-log") {
-		// Full match S4 (frames 2/8), reached by a real click on the reply's job link. Negative controls: a link that follows
-		// the route fails `pane`, no Diff tab `tabs`, a coloured tool name or phase `tones`, an empty report `report`.
+		// Full match S4 (frames 2/8), reached by a real click on the reply's job link, which lands on the job's Transcript tab.
+		// Negative controls: a link that follows the route fails `pane`, no Diff tab `tabs`, a coloured phase `tones`,
+		// an empty report `report`.
 		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
 			const color = s => q(s) ? getComputedStyle(q(s)).color : null, seen = s => all(s).map(e => e.innerText.replace(/\\s+/g, " ").trim());
 			return { pane: box("section.workspace-job"), chat: !!q(".sessions .session-transcript"), tabs: seen(".workspace-log-tab").join(), live: seen(".workspace-log-live").join(),
 				name: seen(".workspace-job-name > *").join(" | "), phase: seen(".workspace-job-phase").join(), more: all(".workspace-job-more > summary").length, full: seen(".workspace-job-bar > .workspace-full").join(),
-				who: all(".workspace-log-who p").map(p => p.textContent).join(" | "), rows: all(".workspace-log-row").length, mono: q(".workspace-log-lines") ? getComputedStyle(q(".workspace-log-lines")).fontFamily.includes("Mono") : null,
-				labels: seen(".workspace-log-tool > p").join(" | "), tones: [color(".workspace-log-tool b"), color(".workspace-job-phase")].join(" | "),
+				who: all(".workspace-log-who p").map(p => p.textContent).join(" | "), transcript: !!q(".workspace-job .job-detail-embedded[data-tab=transcript] .job-transcript"), tones: color(".workspace-job-phase"),
 				ask: seen(".workspace-log-readonly").join() || (all(".workspace-log-entry input")[0]?.placeholder ?? null), chip: !!q(".evidence-chip"), draft: q(".operator-composer textarea")?.value ?? null,
 				report: q(".workspace-log-report h1, .workspace-log-report h2")?.textContent ?? q(".workspace-job [role=status]")?.textContent ?? null, ring: !!document.activeElement?.matches(":focus-visible"),
 				measure: { head: box(".session-heading"), bar: box(".workspace-job-bar"), tabrow: box(".workspace-log-bar"), tab: box(".workspace-log-tab"), line: box(".workspace-job-head"), who: box(".workspace-log-who"),
-					row: box(".workspace-log-row"), foot: box(".workspace-log-ask"), entry: box(innerWidth < 900 ? ".workspace-log-entry" : ".workspace-log-readonly"), close: box(".workspace-close"), full: box(".workspace-full") },
+					transcript: box(".workspace-job .job-transcript"), foot: box(".workspace-log-ask"), entry: box(innerWidth < 900 ? ".workspace-log-entry" : ".workspace-log-readonly"), close: box(".workspace-close"), full: box(".workspace-full") },
 				small: innerWidth < 900 ? all(".workspace-job-bar button, .workspace-job-more > summary, .workspace-log-tab, .workspace-log-send").filter(e => e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent).join() : "",
-				outside: all(".workspace-job button, .workspace-job a, .workspace-job code, .workspace-log-row").filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className || e.textContent).join() }; })()`;
+				outside: all(".workspace-job button, .workspace-job a, .workspace-job code, .workspace-job .job-transcript > *").filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className || e.textContent).join() }; })()`;
 		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-link")`];
-		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `document.querySelectorAll(".workspace-log-row").length === 7`];
+		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".workspace-job .job-detail-embedded[data-tab=transcript] .job-transcript")`];
 		// Captures are the resting state: the pane's opening focus on × / back is moved off, so no ring shows.
 		const rest: Step = ["document.activeElement?.blur()", "true"];
 		const report: Step = [`document.querySelector('.workspace-log-tab[data-view="report"]').click()`, `!!document.querySelector(".workspace-log-report, .workspace-log-empty")`];
@@ -964,17 +964,16 @@ try {
 			`document.querySelector(".workspace-log-send").getAttribute("href").includes("draft=")`];
 		const ask: Step = [`document.querySelector(".workspace-log-send").click()`, `!!document.querySelector(".evidence-chip")`];
 		const gone: Step = [`fetch("/fixture/report-gone")`, "true"];
-		const tones = "rgb(237, 237, 237) | rgb(180, 180, 180)", who = "implementer · fixture-model · high | picp worktree", phone = "Log,Report,Files,Diff,Details";
-		const desk = `>_ ${JOB},report.md,Files,Diff,Details`, line = "Ran 1 shell command";
-		const logged = { chat: true, phase: "Working", who, rows: 7, mono: true, tones, ring: false, small: "", outside: "" };
+		const tones = "rgb(180, 180, 180)", who = "implementer · fixture-model · high | picp worktree", phone = "Report,Files,Diff,Details";
+		const desk = "report.md,Files,Diff,Details";
+		const logged = { chat: true, phase: "Working", transcript: true, tones, ring: false, small: "", outside: "" };
 		const readonly = `Read-only. Steer this job from the chat with @${JOB}`;
 		// The committed five: desktop, desktop-report, phone, phone-ask and unavailable (dark, picp only).
 		const shotsL: [string, number, number, Step[], object][] = [
-			["desktop", 1440, 1000, [steps, reply, rest], { ...logged, pane: "919 0 521 963", tabs: desk, live: "", more: 0, full: "Full page", ask: readonly,
-				labels: `Read(viewer-app/components/WorkspaceSurfaces.tsx) | ${line} | Update(viewer-app/components/workspace-log-with-a-very-long-file-name-that-wraps.css) | ${line}` }],
-			["desktop-report", 1440, 1000, [steps, reply, report, rest], { tabs: desk, report: "Embedded job log", ring: false, outside: "" }],
-			["phone", 390, 844, [steps, reply, rest], { ...logged, pane: "0 0 390 844", tabs: phone, live: "live · 6m", more: 1, full: "", ask: "Ask the Operator about this job…" }],
-			["phone-ask", 390, 844, [steps, reply, rest, type, ask], { pane: null, chip: true, draft: typed, outside: "" }],
+			["desktop", 1440, 1000, [steps, reply, rest], { ...logged, pane: "919 0 521 963", tabs: desk, live: "", more: 0, full: "Full page", who: "", ask: null }],
+			["desktop-report", 1440, 1000, [steps, reply, report, rest], { tabs: desk, who, ask: readonly, report: "Embedded job log", ring: false, outside: "" }],
+			["phone", 390, 844, [steps, reply, rest], { ...logged, pane: "0 0 390 844", tabs: phone, live: "live · 6m", more: 1, full: "", who: "", ask: null }],
+			["phone-ask", 390, 844, [steps, reply, report, rest, type, ask], { pane: null, chip: true, draft: typed, outside: "" }],
 			["unavailable", 1440, 1000, [gone, steps, reply, report, rest], { tabs: desk, report: "Report unavailable · report.md could not be read", ask: readonly, ring: false, outside: "" }],
 		];
 		for (const [name, width, height, run, want] of shotsL) {
@@ -1005,7 +1004,7 @@ try {
 		const open: Step = [`(() => { document.querySelector(".workspace-jobs-open").click(); setTimeout(() => document.activeElement?.blur(), 0); })()`,
 			`!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row") && document.activeElement === document.body`];
 		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-link")`];
-		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `document.querySelectorAll(".workspace-log-row").length === 7`];
+		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".workspace-job .job-detail-embedded[data-tab=transcript] .job-transcript")`];
 		const stale: Step = [`fetch("/fixture/status-stale")`, `/observed 3d ago/.test(document.querySelector(".workspace-status").innerText)`];
 		const live = "today $100.12 · 1 working · 33 done viewer connected";
 		const text = `anthropic 58% 5h · 41% wk openai-codex 52% 5h · 37% wk observed 12m ago ${live}`;
@@ -1058,10 +1057,11 @@ try {
 					.some(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }) }; })()`;
 		const at = (state: string): Step => [`fetch("/fixture/diff-${state}")`, "true"];
 		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-link")`];
-		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `document.querySelectorAll(".workspace-log-row").length === 7`];
+		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".workspace-job .job-detail-embedded[data-tab=transcript] .job-transcript")`];
 		const diff: Step = [`document.querySelector('.workspace-log-tab[data-view="diff"]').click()`, `!!document.querySelector(".workspace-log-diff-view > .workspace-log-diff, .workspace-log-diff-view > [role=status]:not(:empty)") && !/^Loading/.test(document.querySelector(".workspace-log-diff-view, .workspace-job [role=status]")?.innerText ?? "Loading")`];
 		const rest: Step = ["document.activeElement?.blur()", "true"];
-		const update: Step = [`document.querySelector(".workspace-log-edit").scrollIntoView({ block: "center" })`, "true"];
+		const update: Step = [`(() => { document.querySelectorAll(".workspace-job .job-transcript .tool-run-solid > button").forEach(b => b.click()); setTimeout(() => document.querySelector(".workspace-log-edit")?.scrollIntoView({ block: "center" }), 0); })()`,
+			`!!document.querySelector(".workspace-log-edit")`];
 		const shas = `base ${diffShas.base} · envelope | head ${diffShas.head} · envelope`, tones = "rgb(95, 211, 154) | rgb(16, 41, 29) | rgb(138, 138, 138) | rgb(27, 27, 27) | rgb(147, 180, 245)";
 		const meta = `Recorded base...head of ${JOB} in the picp clone; not the live worktree or PR`;
 		// The page's six sockets are held by its streams, so the refusals are probed from here, on the same server.
@@ -1073,10 +1073,10 @@ try {
 		const forge = " · Files on the forge";
 		// The committed six: desktop-diff, desktop-log-update, phone-diff, unavailable, truncated, phone-unavailable.
 		const shotsD: [string, number, number, Step[], object][] = [
-			["desktop-diff", 1440, 1000, [at("head"), steps, reply, diff, rest], { ...shown, tabs: `>_ ${JOB},report.md,Files,Diff,Details` }],
+			["desktop-diff", 1440, 1000, [at("head"), steps, reply, diff, rest], { ...shown, tabs: "report.md,Files,Diff,Details" }],
 			["desktop-log-update", 1440, 1000, [at("head"), steps, reply, rest, update], { ring: false, outside: false,
 				edit: "- .workspace-log-tab { color: var(--dim); } | + .workspace-log-bar { display: flex; } | + .workspace-log-tab { color: var(--muted); } | + .workspace-log-live { margin-left: auto; }" }],
-			["phone-diff", 390, 844, [at("head"), steps, reply, diff, rest], { ...shown, tabs: "Log,Report,Files,Diff,Details" }],
+			["phone-diff", 390, 844, [at("head"), steps, reply, diff, rest], { ...shown, tabs: "Report,Files,Diff,Details" }],
 			["unavailable", 1440, 1000, [at("gone"), steps, reply, diff, rest], { ring: false, outside: false, cut: null,
 				shas: `base ${diffShas.base} · envelope | head ${"f".repeat(40)} · envelope`, unavailable: `Diff unavailable · git could not read the recorded shas: <git error>${forge}` }],
 			["truncated", 1440, 1000, [at("big"), steps, reply, diff, rest], { ring: false, outside: false, unavailable: null,

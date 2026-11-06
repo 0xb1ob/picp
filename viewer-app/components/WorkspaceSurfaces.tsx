@@ -34,11 +34,11 @@ export interface ChatContext {
 
 type JobTab = Parameters<typeof JobDetail>[0]["initial"];
 const capital = (text: string) => text[0]!.toUpperCase() + text.slice(1);
-/** One job beside the chat (desktop) or over it (phone): a reply's link opens its Log, a drawer pick its Details. */
+/** One job beside the chat (desktop) or over it (phone), on Details: a reply's link opens the job's Transcript tab. */
 function JobPane({id, tab, onClose, worker}: {id: string; tab: JobTab; onClose: () => void; worker: SessionsResponse["workers"][number] | undefined}) {
  const resource = useScreenData<JobResponse>(`/api/job/${encodeURIComponent(id)}`, "/api/stream?view=job");
  const close = useRef<HTMLButtonElement>(null), more = useRef<HTMLDetailsElement>(null);
- const [view, setView] = useState<LogView>(tab === "transcript" ? "log" : "details");
+ const [view, setView] = useState<LogView>("details");
  useEffect(() => { close.current?.focus(); }, [id]);
  const job = resource.data?.job;
  // The phone's ⋯ menu (S1's popover): Escape closes it before the pane, as does a tap outside it.
