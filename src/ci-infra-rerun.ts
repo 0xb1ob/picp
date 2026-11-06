@@ -251,7 +251,7 @@ export interface InfraRerunOutcome {
 export interface InfraRerunPorts {
 	home: string;
 	store: CiRerunStore;
-	/** The known-flake registry; passed by PR integration only, it also selects outcome claims and the stale wait. */
+	/** The known-flake registry; only PR integration passes it (main CI stays infra-only). */
 	flakesFile?: string;
 	now?: () => Date;
 }
@@ -289,17 +289,15 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
 	} catch {
 		return skip("the drain record is unreadable (fail closed)");
 	}
-	// Main CI passes no `flakesFile` and keeps its original path: legacy claims, no outcome settle, no stale wait.
-	const pr = input.flakesFile !== undefined;
-	const readClaims = (): CiRerunEntry[] | string => {
-		try {
-			return input.store.claims(input.jobId, input.head);
-		} catch (error) {
-			return firstLine((error as Error).message);
-		}
-	};
-	let claims = pr ? readClaims() : [];
-	if (typeof claims === "string") return skip(claims);
+	// Infra claims keep the legacy shape and path; only known-flake claims carry an outcome to settle or wait on.
+	let read: CiRerunEntry[] | string;
+	try {
+		read = input.store.claims(input.jobId, input.head);
+	} catch (error) {
+		read = firstLine((error as Error).message);
+	}
+	// An unreadable claim file is refused where it always was, after the run checks below.
+	let claims = typeof read === "string" ? [] : read;
 	const uncertain = claims.filter((entry) => entry.outcome === "uncertain");
 	if (uncertain.length > 0) {
 		const started = (entry: CiRerunEntry) => input.runs.some((run) => run.databaseId === entry.run_id && shaMatches(run.headSha, input.head) && (run.attempt ?? 0) > (entry.attempt ?? 1));
@@ -323,10 +321,9 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
 	if (unidentified) return skip("a failed run has no id or attempt to rerun by");
 	const repeated = failed.find((run) => (run.attempt ?? 0) >= 2);
 	if (repeated) return skip(`run ${repeated.databaseId} is on attempt ${repeated.attempt}: a second failure is the parent's`);
-	if (!pr) claims = readClaims();
-	if (typeof claims === "string") return skip(claims);
+	if (typeof read === "string") return skip(read);
 	const claimed = claims[0];
-	if (claimed) return skip(`the one ${pr ? "automatic" : "infra"} rerun for ${input.head.slice(0, 12)} was spent at ${claimed.at} (run ${claimed.run_id})`);
+	if (claimed) return skip(`the one ${claimed.outcome === undefined ? "infra" : "automatic"} rerun for ${input.head.slice(0, 12)} was spent at ${claimed.at} (run ${claimed.run_id})`);
 	const policy = flakePolicy(input);
 	const steps: Array<{ id: number; attempt: number; step: string; flake: boolean }> = [];
 	for (const run of failed) {
@@ -351,7 +348,7 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
 	const at = isoTimestamp((input.now ?? (() => new Date()))());
 	try {
 		// Claim first: a crash or a gh fault after this line never earns a second rerun.
-		input.store.claim(steps.map(({ id, attempt, step }) => ({ job_id: input.jobId, head_sha: input.head, run_id: id, step, at, ...(pr ? { attempt, outcome: "uncertain" as const } : {}) })));
+		input.store.claim(steps.map(({ id, attempt, step, flake }) => ({ job_id: input.jobId, head_sha: input.head, run_id: id, step, at, ...(flake ? { attempt, outcome: "uncertain" as const } : {}) })));
 	} catch (error) {
 		return skip(`the claim could not be written: ${firstLine((error as Error).message)}`);
 	}
@@ -365,7 +362,7 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
 		else refused.push(`${id}: ${firstLine(rerun.stderr || rerun.stdout)}`);
 	}
 	try {
-		if (pr) input.store.settle(input.jobId, input.head, outcomes);
+		if (steps.some((entry) => entry.flake)) input.store.settle(input.jobId, input.head, outcomes);
 	} catch (error) {
 		facts.push(`outcome not recorded (${firstLine((error as Error).message)}); the next call settles the uncertain claim from the run's attempts`);
 	}

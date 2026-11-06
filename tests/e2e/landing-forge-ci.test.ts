@@ -812,11 +812,9 @@ test(
 		assert.deepEqual(reruns(), ["run rerun 41 --failed"]);
 		const atRerun = s.ghCalls().find((call) => call.startsWith("claims-at-rerun")) ?? "";
 		assert.ok(atRerun.includes(a.jobId) && atRerun.includes(a.head), `the claim was on disk before gh run rerun ran: ${atRerun}`);
-		assert.deepEqual(claims().map(({ at: _at, ...entry }) => entry), [{ job_id: a.jobId, head_sha: a.head, run_id: 41, step: "Install treehouse", attempt: 1, outcome: "accepted" }]);
-		// The rerun attempt still read red after gh accepted the rerun is stale evidence: it waits and spends no repair.
+		assert.deepEqual(claims().map(({ at: _at, ...entry }) => entry), [{ job_id: a.jobId, head_sha: a.head, run_id: 41, step: "Install treehouse" }]);
 		const again = await advance(a.jobId, red(), infra);
-		assert.equal(again.record.next, "wait", again.text);
-		assert.match(again.fact, /run 41 attempt 1 was rerun at .*; its new attempt is not observed yet — waiting, no repair spent/);
+		assert.match(again.fact, /the one infra rerun for .* was spent at /);
 		assert.equal(again.calls.filter((call) => call.includes("actions/runs/41/attempts/1/jobs")).length, 1, "only the CI read asks for jobs");
 		assert.deepEqual(reruns(), ["run rerun 41 --failed"], "no second rerun");
 
@@ -834,21 +832,6 @@ test(
 			assert.ok(setup.fact.includes(`("${step}"); reran`), setup.fact);
 			assert.equal(setup.calls.filter((call) => call === "run rerun 41 --failed").length, 1, step);
 		}
-		// A legacy claim (no outcome) is spent. A crash between claim and outcome leaves `uncertain`: the next call settles
-		// it from the run's attempts (attempt 1 still red: not-started; attempt 2: rerun-started) and never reruns again.
-		const legacy = { job_id: a.jobId, head_sha: a.head, run_id: 41, step: "Checkout", at: isoTimestamp() };
-		const claimed = (entry: Record<string, unknown>) => writeFileSync(claimsFile, JSON.stringify({ schema_version: 1, entries: [entry] }));
-		claimed(legacy);
-		assert.match((await advance(a.jobId, red(), infra)).fact, /^ci rerun: none — the one automatic rerun for .* was spent at /);
-		claimed({ ...legacy, attempt: 1, outcome: "uncertain" });
-		const notStarted = await advance(a.jobId, red(), infra);
-		assert.match(notStarted.fact, /^ci rerun: settled the uncertain claim on run 41 as not-started; none — the one automatic rerun .* was spent/);
-		assert.equal(claims()[0]?.outcome, "refused");
-		claimed({ ...legacy, attempt: 1, outcome: "uncertain" });
-		const started = await advance(a.jobId, red({ run_attempt: 2 }), infra);
-		assert.match(started.fact, /^ci rerun: settled the uncertain claim on run 41 as rerun-started; none — run 41 is on attempt 2: a second failure/);
-		assert.equal(claims()[0]?.outcome, "accepted");
-		assert.equal(reruns().length, 6, "settling an uncertain claim never reruns");
 	},
 );
 
@@ -912,6 +895,19 @@ test(
 		}
 		assert.ok(s.ghCalls().every((call) => !call.includes("--log-failed") || call.includes("--attempt 1")), "never a log read without the attempt");
 		assert.deepEqual([reruns(), claims()], [[], []], "none of those reran or claimed");
+		// A crash between claim and outcome leaves `uncertain`: the next call settles it from the run's attempts
+		// (attempt 1 still red: not-started, spent; attempt 2: rerun-started, the parent's) and never reruns again.
+		const crashed = { job_id: c.jobId, head_sha: c.head, run_id: 61, step: "known flake: flaky case", at: isoTimestamp(), attempt: 1, outcome: "uncertain" };
+		writeFileSync(claimsFile, JSON.stringify({ schema_version: 1, entries: [crashed] }));
+		const notStarted = await advance(c.jobId, red61, { 61: [shard, gate] });
+		assert.match(notStarted.fact, /^ci rerun: settled the uncertain claim on run 61 as not-started; none — the one automatic rerun .* was spent/);
+		assert.equal(claims()[0]?.outcome, "refused");
+		writeFileSync(claimsFile, JSON.stringify({ schema_version: 1, entries: [crashed] }));
+		const started = await advance(c.jobId, [run(61, c.head, "completed", "failure", { run_attempt: 2 })], { 61: [shard, gate] });
+		assert.match(started.fact, /^ci rerun: settled the uncertain claim on run 61 as rerun-started; none — run 61 is on attempt 2: a second failure/);
+		assert.equal(claims()[0]?.outcome, "accepted");
+		assert.deepEqual(reruns(), [], "settling an uncertain claim never reruns");
+		rmSync(claimsFile);
 
 		// Every listed failure in every failed job is known (the gate job by its step): claimed, then rerun once.
 		const red71 = [run(71, d.head, "completed", "failure")];

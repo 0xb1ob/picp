@@ -1049,8 +1049,9 @@ rule applies unchanged: a send is a hand-off to pi's `followUp` queue, not
 evidence of arrival, so a fact is written to `announced` only when the `cp-ci`
 message is **observed landing in the parent's context** (`ciKeysFromMessage`,
 the `message_start`/`context` hooks). Until then it is in-memory in-flight and
-is derived and sent again every `CI_WATCH_DELIVERY_RETRY_SECONDS` until it
-arrives or is no longer derived (a moved head, a job out of the watch set). A duplicate
+is derived and sent again after `CI_WATCH_DELIVERY_RETRY_SECONDS`, then at most
+every 10 minutes until it arrives or is no longer derived (a moved head, a job out
+of the watch set). A duplicate
 CI notice is idempotent and visible; a lost one is invisible, which is the whole
 reason this exists. `announced` is **persisted** — the deliberate inversion of
 `WedgedWatch`'s in-memory memory, because a still-wedged call is news again to a
@@ -3598,11 +3599,11 @@ its `✖ failing tests:` block (node's spec reporter) is listed and their number
 equals the reporter's `ℹ fail N`, read by `gh run view <id> -R <repo> --attempt
 <attempt> --log-failed`; an errored, empty, expired, cut or miscounted log
 refuses. Workers add entries only from a
-confirmed failed-attempt log. A claim records `attempt` and `outcome`
+confirmed failed-attempt log. A known-flake claim records `attempt` and `outcome`
 (`uncertain` → `accepted`/`refused`; absent is a legacy, spent claim): the next
 call on that head settles an `uncertain` one from the run's attempts and never
-reruns, and an accepted rerun whose attempt still reads red waits. Main CI's
-claims keep the legacy shape and its original path.
+reruns, and an accepted rerun whose attempt still reads red waits. Infra-only
+claims (PR and main CI) keep the legacy shape and their original path.
 
 **Serial per project.** Every continuation step and every manual `cp_integrate`
 share one lane per project, so a second PR's step reads the base the first merge

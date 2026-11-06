@@ -534,6 +534,9 @@ export interface CiWatchTick {
 	disabled?: string;
 }
 
+/** After the one quick resend, an unconfirmed fact is re-sent no faster than this: a slow arrival is not a lost one. */
+const CI_WATCH_REDELIVERY_MS = 600_000;
+
 /** `gh` is not in REQUIRED_TOOLS, so its absence is a degrade, not a crash. */
 const MISSING_GH = /\bENOENT\b|command not found|not found in \$?PATH|no such file or directory/i;
 
@@ -543,10 +546,10 @@ export class CiWatch {
 	readonly #cadence: CiWatchCadence;
 	readonly #retryMs: number;
 	/**
-	 * Sent, unconfirmed facts by `cp-ci` key (in memory: a restart has no transport). Re-sent every `retryMs` until
-	 * confirmed or no longer derived; the old one-resend cap lost a rerun's result when both handoffs dropped (cp-a0gs).
+	 * Sent, unconfirmed facts by `cp-ci` key (in memory: a restart has no transport). Re-sent once after `retryMs`, then
+	 * every CI_WATCH_REDELIVERY_MS until confirmed or no longer derived: the old one-resend cap lost a rerun's result.
 	 */
-	readonly #inFlight = new Map<string, { sentAt: number }>();
+	readonly #inFlight = new Map<string, { sentAt: number; sends: number }>();
 	#tick: Promise<CiWatchTick> | undefined;
 	#disabled: string | undefined;
 	#disabledNotified = false;
@@ -695,9 +698,10 @@ export class CiWatch {
 		for (const observation of derived) {
 			if (announced.has(observation.key)) continue;
 			const existing = this.#inFlight.get(observation.key);
-			if (existing !== undefined && millis - existing.sentAt < this.#retryMs) continue;
+			const wait = (existing?.sends ?? 0) >= 2 ? Math.max(this.#retryMs, CI_WATCH_REDELIVERY_MS) : this.#retryMs;
+			if (existing !== undefined && millis - existing.sentAt < wait) continue;
 			const isResend = existing !== undefined;
-			this.#inFlight.set(observation.key, { sentAt: millis });
+			this.#inFlight.set(observation.key, { sentAt: millis, sends: (existing?.sends ?? 0) + 1 });
 			due.push(observation);
 			if (!isResend) {
 				try {
