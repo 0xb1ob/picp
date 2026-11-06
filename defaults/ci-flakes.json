@@ -10,6 +10,20 @@
 		},
 		{
 			"project": "picp",
+			"file": "tests/e2e/dispatch-s29.test.ts",
+			"test": "S29: public validation refuses unavailable routing, effort, skills and inactive jobs",
+			"text": "waiting for worker script untouched",
+			"evidence": "https://github.com/0xb1ob/picp/actions/runs/42188730223 attempt 1, test-shard (10): the worker script wait timed out (also run 42132325529)"
+		},
+		{
+			"project": "picp",
+			"file": "tests/e2e/schedules.test.ts",
+			"test": "P13c runner reports: answer and script runs are torn down in code with one result card and no wake; a local run whose teardown is refused wakes the parent once per process",
+			"text": "waiting for the refused teardown's wake",
+			"evidence": "https://github.com/0xb1ob/picp/actions/runs/42194057618 attempt 1, test-shard (1): the refused teardown's wake wait timed out"
+		},
+		{
+			"project": "picp",
 			"job": "test",
 			"step": "Require every shard and the checks",
 			"evidence": ".github/workflows/ci.yml: the required gate fails whenever a shard does (run 42175046791 attempt 1)"
