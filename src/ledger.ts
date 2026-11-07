@@ -119,6 +119,11 @@ export function parseJobLabels(labels: readonly string[] = []): Partial<JobLabel
 	return parsed;
 }
 
+/** The one refusal for a deferred job: dispatch gives it before any lease, `claim` for one deferred mid-dispatch. */
+export function deferredRefusal(id: string): string {
+	return `${id} is deferred; review its task and authority, then use cp_job update status=open when authorized`;
+}
+
 /**
  * Fail-closed read of a job's labels. Dispatch calls this before anything is
  * leased: a job that does not say which project and which delivery it is, is
@@ -600,7 +605,7 @@ export class Ledger {
 
 	/** Dispatch claim: in_progress + the worker alias that holds it. Never a deferred job: reopening one is explicit. */
 	async claim(id: string, assignee: string): Promise<Job> {
-		if ((await this.show(id)).status === "deferred") throw new LedgerError(`${id} is deferred; review its task and authority, then use cp_job update status=open when authorized`);
+		if ((await this.show(id)).status === "deferred") throw new LedgerError(deferredRefusal(id));
 		return this.update(id, { status: "in_progress", assignee });
 	}
 

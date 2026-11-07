@@ -142,6 +142,9 @@ for (const base of ["main", "trunk"]) {
 	});
 }
 
+// Scenario: Given jobs that are unroutable, over-effort, bad-skill, blocked, closed, deferred or unlabelled,
+// When cp_dispatch runs for each, Then each is refused with no lease, branch, spawned worker or model request.
+// Regression: a deferred job was refused only at the post-spawn ledger claim, so its worker could reach the model.
 test("S29: public validation refuses unavailable routing, effort, skills and inactive jobs", { timeout: 120_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	const forbidden = join(b.agent.path, "skills", "pi-subagents");
@@ -179,11 +182,12 @@ test("S29: public validation refuses unavailable routing, effort, skills and ina
 		assert.equal(ends[i]!.isError, true);
 		assert.match(JSON.stringify(ends[i]!.result), variants[i]!.expected);
 		const id = variants[i]!.job_id;
-		if (id !== deferred.id && existsSync(join(b.home, paths.eventsFile(id)))) {
+		if (existsSync(join(b.home, paths.eventsFile(id)))) {
 			await waitFor(() => readRunEvents(b.home, id), (seen) => !seen.some((event) => event.type === "spawned"), { what: `no spawned event for ${id}` });
 		}
 	});
-	await waitFor(() => readFleet(b.home).jobs, (jobs) => jobs.length === 0, { what: "empty fleet" });
+	// No refusal writes a fleet file; before the deferred fix that one dispatch created it.
+	await waitFor(() => existsSync(join(b.home, LAYOUT.fleetFile)) ? readFleet(b.home).jobs : [], (jobs) => jobs.length === 0, { what: "empty fleet" });
 	await waitFor(() => b.provider.remaining("worker"), (left) => left === 1, { what: "worker script untouched" });
 	for (const job of [ordinary, blocked, deferred]) assert.equal(git(b.clone, "branch", "--list", job.id), "");
 });
