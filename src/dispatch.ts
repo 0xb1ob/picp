@@ -917,7 +917,6 @@ function assertDispatchable(issue: Job): void {
 	if (issue.status === "deferred") throw new DispatchError(deferredRefusal(issue.id));
 }
 
-
 async function safely(fn: () => Promise<unknown>): Promise<void> {
 	try {
 		await fn();
