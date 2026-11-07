@@ -48,7 +48,7 @@ import type { FleetStore } from "./fleet.ts";
 import type { EnvelopeIntake } from "./intake.ts";
 import type { LeaseManager } from "./leases.ts";
 import type { SettleWatcher } from "./settle.ts";
-import { type Job, type Ledger, requireJobLabels } from "./ledger.ts";
+import { deferredRefusal, type Job, type Ledger, requireJobLabels } from "./ledger.ts";
 import { formatPreflight, type Preflight, type PreflightResult } from "./preflight.ts";
 // The routing-input resolution lives with the other intake heuristics
 // (`inferScopeAndRisk`) in pipeline.ts, because the pipeline needs it too and a
@@ -914,8 +914,8 @@ function assertDispatchable(issue: Job): void {
 	if (issue.status === "closed") {
 		throw new DispatchError(`${issue.id} is ${issue.status}; reopen it before dispatching`);
 	}
+	if (issue.status === "deferred") throw new DispatchError(deferredRefusal(issue.id));
 }
-
 
 async function safely(fn: () => Promise<unknown>): Promise<void> {
 	try {

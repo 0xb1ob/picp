@@ -8874,7 +8874,9 @@ write-back tick, the legacy `/cp-jobs` JSONL importer and auto-linking on `cp_jo
 tracker line. Existing `state/tracker-sync.json` and `state/tracker-tasks/` stay on
 disk unread and untouched. A `deferred` job is never claimed (`Ledger.claim`:
 `<id> is deferred; review its task and authority, then use cp_job update status=open
-when authorized`); reopening it is an explicit native update. The parent restarts
+when authorized`); `cp_dispatch` and its `dry_run` refuse one with that message before any
+lease, branch or worker, and the claim still refuses a job deferred mid-dispatch.
+Reopening it is an explicit native update. The parent restarts
 after this lands so a running sync timer stops.
 
 **Conversation intake (autonomy-programme-cur.4.3).** Work arrives as prose.
