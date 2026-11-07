@@ -143,7 +143,8 @@ for (const base of ["main", "trunk"]) {
 }
 
 // Scenario: Given jobs that are unroutable, over-effort, bad-skill, blocked, closed, deferred or unlabelled,
-// When cp_dispatch runs for each, Then each is refused with no lease, branch, spawned worker or model request.
+// When cp_dispatch (and a deferred dry_run) runs for each,
+// Then each is refused with no lease, branch, spawned worker or model request.
 // Regression: a deferred job was refused only at the post-spawn ledger claim, so its worker could reach the model.
 test("S29: public validation refuses unavailable routing, effort, skills and inactive jobs", { timeout: 120_000 }, async (t) => {
 	const b = await dispatchS29(t);
@@ -173,6 +174,7 @@ test("S29: public validation refuses unavailable routing, effort, skills and ina
 		{ job_id: blocked.id, expected: /is blocked by/ },
 		{ job_id: closed.id, expected: /is closed/ },
 		{ job_id: deferred.id, expected: /is deferred/ },
+		{ job_id: deferred.id, dry_run: true, expected: /is deferred/ },
 		{ job_id: legacy.id, expected: /not dispatchable/ },
 	];
 	routeNamed(b.home, ["mock/not-installed"]);
