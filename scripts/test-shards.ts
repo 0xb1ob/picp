@@ -48,16 +48,41 @@ function loadTable(): Record<string, number> {
 }
 const discover = (): string[] => globSync(GLOB).sort();
 
-/** Top-level (unindented) spec lines carry per-test or per-suite wall time; credit each to the file naming it. */
-export function timingsFromSpecLog(log: string, sources: Record<string, string>): Record<string, number> {
-	const out: Record<string, number> = Object.fromEntries(Object.keys(sources).map((f) => [f, 0]));
+/** Whether a file declares a spec name: as a literal, or as a template literal whose `${}` slots match any text. */
+function declares(source: string): (name: string) => boolean {
+	const templates = [...source.matchAll(/`([^`]*\$\{[^`]*)`/g)]
+		.map((m) => m[1]!.split(/\$\{[^}]*\}/))
+		.filter((parts) => parts.join("").length >= 8)
+		.map((parts) => new RegExp(`^${parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".+")}$`, "su"));
+	return (name) => source.includes(name) || templates.some((re) => re.test(name));
+}
+
+/**
+ * Credits each top-level spec line of a `gh run view --log` to its job's shard (rebuilt from the run's `table`): the
+ * reporter prints files whole in `startOrder`, so a line goes to the next file declaring it, else stays (`unmatched`).
+ */
+export function timingsFromRunLog(
+	log: string,
+	files: readonly string[],
+	table: Record<string, number>,
+	sources: Record<string, string>,
+): { timings: Record<string, number>; unmatched: number } {
+	const ms: Record<string, number> = Object.fromEntries(files.map((f) => [f, 0]));
+	const orders = assignShards(files, table).map((s) => startOrder(s, table));
+	const named = Object.fromEntries(files.map((f) => [f, declares(sources[f] ?? "")]));
+	const cursor = orders.map(() => 0);
+	let unmatched = 0;
 	for (const line of log.split("\n")) {
-		const m = line.replace(/^.*?\d{4}-\d\d-\d\dT[\d:.]+Z /, "").match(/^[✔✖▶] (.+) \(([\d.]+)ms\)\s*$/u);
-		if (!m) continue;
-		const owner = Object.keys(sources).find((f) => sources[f]!.includes(m[1]!));
-		if (owner) out[owner] = Math.round(out[owner]! + Number(m[2]));
+		const m = /^test-shard \((\d+)\)\t[^\t]*\t\S+ [✔✖▶﹣] (.+?) \(([\d.]+)ms\)(?: # .*)?\s*$/u.exec(line);
+		const k = Number(m?.[1]) - 1;
+		const order = orders[k];
+		if (!m || !order || order.length === 0) continue;
+		const next = order.findIndex((f, i) => i >= cursor[k]! && named[f]!(m[2]!));
+		if (next < 0) unmatched++;
+		else cursor[k] = next;
+		ms[order[cursor[k]!]!]! += Number(m[3]);
 	}
-	return out;
+	return { timings: Object.fromEntries(Object.entries(ms).map(([f, v]) => [f, Math.round(v)])), unmatched };
 }
 
 function shardFiles(arg: string | undefined, table: Record<string, number>): string[] {
@@ -101,15 +126,17 @@ if (import.meta.main) {
 		}
 		console.log(`${all.length} files in ${shards.length} shards: ${shards.map((s) => s.length).join("/")}`);
 	} else if (cmd === "gen" && arg) {
+		// Run at the log's commit: its file list and table rebuild the shards that run used.
 		const files = discover();
-		const sources = Object.fromEntries(files.map((f) => [f, readFileSync(f, "utf8")]));
-		const t = timingsFromSpecLog(readFileSync(arg, "utf8"), sources);
-		const med = median(Object.values(t).filter((v) => v > 0));
 		const prior = loadTable();
+		const sources = Object.fromEntries(files.map((f) => [f, readFileSync(f, "utf8")]));
+		const { timings: t, unmatched } = timingsFromRunLog(readFileSync(arg, "utf8"), files, prior, sources);
+		const med = median(Object.values(t).filter((v) => v > 0));
 		for (const f of files) if (!t[f]) t[f] = prior[f] === 0 ? 0 : Math.round(med);
 		writeFileSync(TABLE, `${JSON.stringify(Object.fromEntries(Object.entries(t).sort()), null, "\t")}\n`);
+		console.log(`${unmatched} spec line(s) named no later file of their shard and stayed with the current one`);
 	} else {
-		console.error(`usage: test-shards.ts files <1..${SHARDS}> | run <1..${SHARDS}> | check | gen <spec-log>`);
+		console.error(`usage: test-shards.ts files <1..${SHARDS}> | run <1..${SHARDS}> | check | gen <gh-run-log>`);
 		process.exit(2);
 	}
 }
