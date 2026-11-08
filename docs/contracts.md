@@ -6997,7 +6997,8 @@ and shows as plain text. `state/operator/threads.jsonl` and `state/operator/name
 never read or written. A send body carrying `thread` or `thread_id` is an unknown field (400), nothing journaled.
 
 Instead, the operator transcript's sidebar lists "All projects" then each registered project (`projects` on
-`/api/sessions`, from `data/projects.json`); a row sets the `project=` hash filter (viewer-app.md, Project rows).
+`/api/sessions`, from `data/projects.json`) that a loaded entry of the selected session file is attributed to, plus a
+`project=` selection outside them until cleared; a row sets the `project=` hash filter (viewer-app.md, Project rows).
 
 ### Remote devices (remote dashboard PR 1)
 

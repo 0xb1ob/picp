@@ -591,17 +591,17 @@ test("M1-sections: a project shows only its sections, the original toggle the un
 	assert.deepEqual(reads(), ["/api/sessions?view=you&transcript=1"], "a selection change re-reads nothing and keeps the screen mounted");
 
 	const rows = tab.$$(ROWS).map((a) => a.textContent);
-	assert.deepEqual(rows, ["#All projects", ...["atlas", ...MANY, "picp", "solo"].map((n) => `#${n}`)], "All, then every registered name sorted, none truncated");
+	assert.deepEqual(rows, ["#All projects", ...["atlas", ...MANY, "picp"].map((n) => `#${n}`)], "All, then the session's registered names sorted, none truncated; solo has none");
 	assert.equal(tab.$('select[aria-label="Filter by project"]'), null, "one filter control: no header dropdown");
 	await choose(tab, "p17");
 	await until(() => tab.$$(".session-bubble").length, (n) => n === 1, "a large tag set matches any one of its names");
-	await choose(tab, "solo");
+	tab.go(`${FULL}&project=solo`);
 	await until(() => shown(tab), (text) => /No loaded entries for solo/.test(text), "a registered project with no messages");
-	assert.equal(chosen(tab), "solo");
+	assert.equal(chosen(tab), "solo", "the selection keeps a row outside the session");
 
 	const renamed = await d.open(`${FULL}&project=old-name`);
 	await renamed.waitText(/No loaded entries for old-name/);
-	assert.deepEqual([chosen(renamed), renamed.$$(".session-bubble").length], [undefined, 0], "an unknown or renamed name stays in the hash, explicitly empty");
+	assert.deepEqual([chosen(renamed), renamed.$$(".session-bubble").length], ["old-name", 0], "an unknown or renamed name stays in the hash and its row, explicitly empty");
 	const reloaded = await tab.reopen(`${FULL}&project=atlas`);
 	await reloaded.waitText(/sidecar target/);
 	assert.equal(chosen(reloaded), "atlas", "reload keeps the selection");

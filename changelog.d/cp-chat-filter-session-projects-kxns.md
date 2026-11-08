@@ -1,0 +1,1 @@
+- Dashboard chat: the sidebar's project rows list only the registered projects the selected operator session's loaded messages are attributed to (plus "All projects", and a `project=` selection outside them until cleared); a project's first reply adds its row, and another session file recomputes them.
