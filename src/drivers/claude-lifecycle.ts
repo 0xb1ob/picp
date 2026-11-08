@@ -22,7 +22,7 @@ export interface TurnFacts {
 	frozen?: boolean;
 }
 
-/** One finished turn's end; a named stop (lockdown, auth, a rejected window) wins over every other unreported outcome. */
+/** One finished turn's end; a named stop (lockdown, auth, a rejected window) wins over every unreported outcome. */
 export function classifyTurn(facts: TurnFacts): TurnEnd {
 	if (facts.reported) return { kind: "reported" };
 	if (facts.frozen) return { kind: "frozen" };

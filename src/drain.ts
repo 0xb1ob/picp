@@ -305,7 +305,7 @@ export class DrainControl {
 	}
 
 	/**
-	 * Steer each mid-turn implementer of a freeze drain to push its WIP and end its turn (a native one is checkpointed);
+	 * Steer each mid-turn implementer of a freeze drain to push its WIP and end its turn (a native one is checkpointed).
 	 * One line per key. Reviewers and planners are named, never steered: a review re-runs, a planner's session is its work.
 	 */
 	async freeze(): Promise<string[]> {
