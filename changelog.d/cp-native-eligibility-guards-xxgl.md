@@ -1,0 +1,1 @@
+- Native routing: an `ops` profile job and a job naming per-job skills now fall back to pi as `ineligible` with the reason named, instead of running on the native Claude driver.
