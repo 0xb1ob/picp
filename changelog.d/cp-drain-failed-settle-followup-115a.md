@@ -1,0 +1,1 @@
+- A failed job's death wake-up is now durable before a drain can report drained: `FailureAnnouncer` journals a bare notice right after `markFailed`, then refines that same entry in place once the worktree inspect finishes (`DurableWakeupInput.replace`), so a restart on that drain no longer loses the death.

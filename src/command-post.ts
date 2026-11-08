@@ -872,27 +872,23 @@ export class CommandPost {
 		}
 	}
 
-	#journalDurable(input: {
-		id: string;
-		kind: "death" | "bound" | "recovery";
-		job_id?: string;
-		content: string;
-		keys?: string[];
-		generation?: number;
-	}): void {
+	#journalDurable(input: DurableWakeupInput): boolean {
 		try {
-			if (!this.durableWakeups.enqueue(input)) return;
+			if (!this.durableWakeups.enqueue(input)) return false;
 		} catch (error) {
 			const reason = (error as Error).message.split("\n")[0] ?? "unknown";
 			console.error(`cp: durable wake-up ${input.id} rejected: ${reason}`);
+			// A failed refine leaves the bare notice pending; a drop notice beside it would be noise.
+			if (input.replace) return false;
 			try {
 				const fallback = `DURABLE NOTICE DROPPED — ${input.kind} ${input.id.slice(0, 120)} was rejected (${reason.slice(0, 200)}); see /status`;
-				if (!this.durableWakeups.enqueue({ id: boundedWakeupId(`rejected:${input.id}`), kind: input.kind, content: fallback })) return;
+				if (!this.durableWakeups.enqueue({ id: boundedWakeupId(`rejected:${input.id}`), kind: input.kind, content: fallback })) return false;
 			} catch {
-				return;
+				return false;
 			}
 		}
 		this.#options.onDurableWakeup?.();
+		return true;
 	}
 
 	/**

@@ -45,6 +45,9 @@ type Finding = { check: string; severity: string; what: string; detail?: string;
 type Answer = { status: number; body?: string; headers?: Record<string, string> };
 
 const until = <T>(read: () => T | Promise<T>, ok: (value: T) => boolean, what: string) => poll(read, ok, what, 60_000);
+/** The parent's sweep clock for a post, in whole seconds: its VAPID JWT expires VAPID_EXPIRY_SECONDS after it. */
+const sweptAt = (post: Post): number =>
+	JSON.parse(Buffer.from(/^vapid t=[\w-]+\.([\w-]+)\./.exec(String(post.headers.authorization))![1]!, "base64url").toString()).exp - VAPID_EXPIRY_SECONDS;
 
 /** A scratch home, a stand-in push service and (after `start`) a real parent whose clock `advance` moves. */
 async function rig(t: TestContext, { configured = true, scale = SCALE } = {}) {
@@ -221,11 +224,11 @@ test("P22-push-retry: retryable answers back off 30/60/120/240 s and fail after 
 	for (const [index, wait] of [30, 60, 120, 240].entries()) {
 		const record = await s.settled(raised.id, (item) => item.attempts === index + 1, `attempt ${index + 1}`);
 		assert.equal(record.status, "pending");
-		const tried = s.posts.at(-1)!.at;
-		assert.ok(Math.abs(Date.parse(record.next_attempt_at!) - tried - wait * 1000) < 2_000, `backs off ${wait}s: ${record.next_attempt_at}`);
+		// One sweep reading: next_attempt_at is it plus the backoff, truncated to the second like the JWT's exp.
+		assert.equal(Date.parse(record.next_attempt_at!), (sweptAt(s.posts[index]!) + wait) * 1000, `backs off ${wait}s: ${record.next_attempt_at}`);
 		s.advance(wait);
 		await s.settled(raised.id, (item) => item.attempts === index + 2, `attempt ${index + 2}`);
-		assert.ok(s.posts.at(-1)!.at >= Date.parse(record.next_attempt_at!), `not before ${wait}s`);
+		assert.ok(sweptAt(s.posts[index + 1]!) * 1000 >= Date.parse(record.next_attempt_at!), `not before ${wait}s`);
 	}
 	const failed = await s.settled(raised.id);
 	assert.deepEqual([failed.status, failed.attempts, s.posts.length], ["failed", 5, 5]);
