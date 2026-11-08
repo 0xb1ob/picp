@@ -88,7 +88,14 @@ for (const live of [true, false]) {
 	});
 }
 
-const threadOfThisProcess = (): number => Number(readdirSync("/proc/self/task").find((tid) => Number(tid) !== process.pid));
+const threadOfThisProcess = (): number => {
+	const tid = Number(readdirSync("/proc/self/task").find((id) => Number(id) !== process.pid));
+	// The Tgid branch is only exercised if the probed id is a live thread, not a process of its own.
+	assert.match(readFileSync(`/proc/${tid}/status`, "utf8"), new RegExp(`^Tgid:\\s+${process.pid}$`, "m"));
+	assert.notEqual(tid, process.pid);
+	assert.equal(process.kill(tid, 0), true, "kill(tid, 0) alone cannot tell a thread from a process");
+	return tid;
+};
 
 // Scenario: a lock names a pid that is alive but is not the process that wrote it
 //   Given state/parent.lock names a live thread of another process, or a live process that started after started_at

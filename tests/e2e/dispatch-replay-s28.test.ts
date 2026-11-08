@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { LAYOUT } from "../../src/contracts.ts";
+import { isoTimestamp, LAYOUT } from "../../src/contracts.ts";
 import { ScheduleRunStore } from "../../src/schedule-runs.ts";
 import { policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
@@ -32,7 +32,7 @@ for (const [kind, variant, title] of [
 			mkdirSync(dirname(file), { recursive: true });
 			const before = variant === "corrupt" ? "{ not json" : JSON.stringify({ schema_version: 1, entries });
 			writeFileSync(file, before);
-			if (variant === "foreign-owner") writeFileSync(join(home.path, LAYOUT.parentLock), JSON.stringify({ schema_version: 1, pid: process.pid, started_at: at, home: home.path }));
+			if (variant === "foreign-owner") writeFileSync(join(home.path, LAYOUT.parentLock), JSON.stringify({ schema_version: 1, pid: process.pid, started_at: isoTimestamp(), home: home.path }));
 			if (variant === "scheduler-fault") {
 				const runs = new ScheduleRunStore({ home: home.path });
 				const policy = policyFromLegacy({ id: "sch-123456", name: "S28 result", project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job: { title: "S28 result", kind: "research", delivery: "answer" } }, {

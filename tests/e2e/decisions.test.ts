@@ -166,7 +166,7 @@ test("decisions: /cp-ask keeps the question verbatim, refuses bad arguments befo
 	const locked = createScratchHome();
 	t.after(() => locked.cleanup());
 	mkdirSync(join(locked.path, LAYOUT.state), { recursive: true });
-	writeFileSync(join(locked.path, LAYOUT.state, "parent.lock"), JSON.stringify({ schema_version: SCHEMA_VERSION, pid: process.pid, home: locked.path, started_at: new Date().toISOString() }));
+	writeFileSync(join(locked.path, LAYOUT.state, "parent.lock"), JSON.stringify({ schema_version: SCHEMA_VERSION, pid: process.pid, home: locked.path, started_at: isoTimestamp() }));
 	const fenced = await child(t, locked, COMMAND_POST_EXTENSION, [
 		{ kind: "tool_calls", calls: [{ id: "ask", name: "cp_ask", args: { project: "demo", question: "Where is the pool?" } }] },
 		{ kind: "text", text: "refused" },

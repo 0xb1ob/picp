@@ -335,7 +335,7 @@ test("P14-version-lock: a live holder's lock without a commit, or with a malform
 		const home = createScratchHome();
 		t.after(() => teardownHome(home));
 		const state = stateOf(home.path);
-		const since = state.iso(5).replace(/\.\d+Z$/, "Z");
+		const since = state.iso(0).replace(/\.\d+Z$/, "Z");
 		state.write("parent.lock", { schema_version: 1, pid: process.pid, started_at: since, home: home.path, ...(commit ? { commit } : {}) });
 		const parent = await session(t, home.path, COMMAND_POST_EXTENSION, {}, [{ kind: "text", text: "noted" }]);
 		try {
