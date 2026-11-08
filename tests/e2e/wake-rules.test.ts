@@ -14,7 +14,8 @@ import { REPO_ROOT, readRunEvents, startPiChild } from "../harness/index.ts";
 import { JOB as CI_JOB, PR, seedHeldHome } from "../harness/held-home.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { CiWatchStore } from "../../src/ci-watch.ts";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { LeaseManager } from "../../src/leases.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { enableTreehouse } from "../harness/treehouse.ts";
@@ -218,6 +219,49 @@ test("S20: a wakeups.json.lock left by a dead process is reclaimed at once", (t)
 	assert.ok(Date.now() - started < 2_500, `enqueue took ${Date.now() - started}ms behind a dead holder's lock`);
 	assert.deepEqual(new DurableWakeupOutbox({ home: home.path }).read().pending.map((e) => e.id), ["after-crash"]);
 	assert.deepEqual(readdirSync(join(lock, "..")).filter((name) => name.startsWith("wakeups.json.lock")), []);
+});
+
+// Scenario: Given three processes writing wakes, When dead-pid wakeups.json.locks keep appearing between their writes,
+// Then every wake survives and no writer throws DurableWakeupError. Pins the guarded reclaim: a waiter deletes only
+// the stale lock it re-inspected under wakeups.json.lock.reclaim, never another writer's fresh lock.
+test("S20: three writers contending on dead-pid locks lose no wake", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const lock = join(home.path, LAYOUT.wakeupsFile) + ".lock";
+	const go = join(home.path, "go");
+	const dead = `${JSON.stringify({ pid: spawnSync(process.execPath, ["-e", ""]).pid, started_at: isoTimestamp(), nonce: "crashed" })}\n`;
+	mkdirSync(join(lock, ".."), { recursive: true });
+	writeFileSync(lock, dead);
+	const script = `const { DurableWakeupOutbox } = await import(process.env.OUTBOX_SRC);
+		const { existsSync } = await import("node:fs");
+		while (!existsSync(process.env.GO));
+		const outbox = new DurableWakeupOutbox({ home: process.env.OUTBOX_HOME });
+		for (let i = 0; i < 100; i++) outbox.enqueue({ id: process.env.TAG + "-" + i, kind: "recovery", content: "x" });`;
+	const writers = ["a", "b", "c"].map((tag) => new Promise<string>((resolve) => {
+		const env = { ...process.env, OUTBOX_SRC: pathToFileURL(join(REPO_ROOT, "src/wakeup-outbox.ts")).href, OUTBOX_HOME: home.path, GO: go, TAG: tag };
+		const child = spawn(process.execPath, ["--input-type=module", "-e", script], { env });
+		let stderr = "";
+		child.stderr.on("data", (chunk) => { stderr += chunk; });
+		child.on("close", (code) => resolve(`${tag} exit ${code}${stderr ? `: ${stderr.slice(0, 2000)}` : ""}`));
+	}));
+	let planted = 1;
+	let running = true;
+	const exits = Promise.all(writers).finally(() => { running = false; });
+	writeFileSync(go, "");
+	while (running) {
+		try {
+			writeFileSync(lock, dead, { flag: "wx" });
+			planted += 1;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 1));
+	}
+	assert.deepEqual(await exits, ["a exit 0", "b exit 0", "c exit 0"]);
+	const ids = new DurableWakeupOutbox({ home: home.path }).read().pending.map((e) => e.id);
+	const expected = ["a", "b", "c"].flatMap((tag) => Array.from({ length: 100 }, (_, i) => `${tag}-${i}`));
+	assert.deepEqual([...ids].sort(), expected.sort(), `planted ${planted} dead-pid locks`);
+	assert.ok(planted > 1, `only the initial dead-pid lock was planted`);
 });
 
 test("S20: a failed next refresh wakes with a reason and is not retried during its cache minute", { timeout: 120_000 }, async (t) => {
