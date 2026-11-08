@@ -233,7 +233,7 @@ test("S21: a rejected envelope and an observed worker loop emit durable deaths",
 			process.kill(pid, "SIGKILL");
 		}
 		const entries = await waitFor(() => f.post.durableWakeups.pending().filter((entry) => entry.job_id === jobId),
-			(rows) => rows.some((entry) => entry.keys?.includes(cls)), { timeoutMs: 10_000, what: `${cls} durable death` }).catch((error) => {
+			(rows) => rows.some((entry) => entry.keys?.includes(cls) && !/inspection pending/.test(entry.content)), { timeoutMs: 10_000, what: `${cls} durable death` }).catch((error) => {
 				throw new Error(`${error.message}; fleet=${JSON.stringify(f.post.fleet.require(jobId))}`);
 			});
 		if (cls === "envelope_invalid") {
