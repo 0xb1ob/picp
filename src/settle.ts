@@ -322,6 +322,8 @@ export class SettleWatcher {
 	/** cp-mub7: per-job "the outer ladder is spent on this settle" reads, set by `watch`'s fourth argument. */
 	readonly #retryExhausted = new Map<string, () => string | undefined>();
 	readonly #quotaClaim = new Map<string, () => string | undefined>();
+	/** In-flight jobs whose outcome is already in the run log; what remains (announce, stop) holds no drain. */
+	readonly #recorded = new Set<string>();
 
 	constructor(options: SettleWatcherOptions) {
 		this.#options = options;
@@ -369,16 +371,19 @@ export class SettleWatcher {
 		};
 	}
 
-	/** Jobs whose settle is still being decided; a drain counts them as survivors until the decision is recorded. */
+	/** Jobs whose settle is still being decided; a drain counts them as survivors until the outcome is in the run log. */
 	get settling(): string[] {
-		return [...this.#inFlight.keys()];
+		return [...this.#inFlight.keys()].filter((jobId) => !this.#recorded.has(jobId));
 	}
 
 	/** One settle, decided. Idempotent per job while a decision is in flight. */
 	async settled(jobId: string, worker: NudgeableWorker): Promise<SettleOutcome> {
 		const existing = this.#inFlight.get(jobId);
 		if (existing) return existing;
-		const promise = this.#settled(jobId, worker).finally(() => this.#inFlight.delete(jobId));
+		const promise = this.#settled(jobId, worker).finally(() => {
+			this.#inFlight.delete(jobId);
+			this.#recorded.delete(jobId);
+		});
 		this.#inFlight.set(jobId, promise);
 		return promise;
 	}
@@ -601,6 +606,7 @@ export class SettleWatcher {
 		};
 		const recorder = this.#options.runs.open(jobId);
 		recorder.markFailure(failure);
+		this.#recorded.add(jobId);
 		await this.#options.fail(jobId, failure);
 		const outcome: SettleOutcome = {
 			action: "recorded",
@@ -627,6 +633,7 @@ export class SettleWatcher {
 		const at = isoTimestamp((this.#options.now ?? (() => new Date()))());
 		const recorder = this.#options.runs.open(jobId);
 		recorder.cp("settled_without_report", { settles, reason: why, at, ...(work ? { work } : {}) });
+		this.#recorded.add(jobId);
 		// cp-0dhw: the bound is spent and there is work on disk. Its own event, so
 		// the one line a human has to act on is not buried in a generic record.
 		if (unreportedWorkPresent(work) && settles > MAX_RECOVERY_PROMPTS) {
