@@ -1,7 +1,7 @@
 # S03b executed production controls
 
 The first-batch controls below share one snapshot base (S03b-parked excepted). All mutations were restored immediately.
-Command: `npm run test:one -- --test-name-pattern='landing S03: startup snapshots' tests/e2e/landing-s03.test.ts`.
+Command: `npm run test:one -- --test-name-pattern='landing S03: startup snapshots' tests/e2e/landing-s03-parent.test.ts`.
 Fixed run: 3 cases passed, 0 failed/skipped (30.60 seconds).
 
 ## S03b-snapshot-generation (declaration 78)
@@ -24,7 +24,7 @@ The re-read lets the queued job reach the forge before the remote mismatch stops
 ## S03b-parked (declaration 64)
 
 Base: #429.
-Command pattern: `landing S03: a real parent relays a newly parked` in tests/e2e/landing-s03.test.ts.
+Command pattern: `landing S03: a real parent relays a newly parked` in tests/e2e/landing-s03-parent.test.ts.
 Executed mutation in src/wakeup-outbox.ts: `continuation:parked:` ids are no longer treated as quiet
 (parent-silent) outcomes.
 
