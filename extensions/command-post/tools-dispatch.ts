@@ -8,6 +8,7 @@ import { Type } from "typebox";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { OperatorModelPickReferenceSchema, type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, SkillNameSchema, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
 import { BlockedDispatchError, formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
+import { nativeOccupied } from "../../src/dispatch-queue.ts";
 import { checkStoredPick } from "../../src/reroute.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
@@ -97,7 +98,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			"cp_dispatch returning state:promote means send the existing worker a new brief instead of dispatching.",
 			"cp_dispatch with dry_run:true answers 'which model and effort would this job get, and why' and takes nothing. It is optional — never a required step before a dispatch — and it reserves nothing: the dispatch recomputes from the live config. Reach for it when a job is uncertain or expensive, not as a habit.",
 			"Leave scope or risk absent when you do not know it: the axis is then assessed from the task's own words and recorded as inferred or defaulted. Never invent S/low to fill the schema, and never dispatch an extra worker just to classify a task.",
-			"cp_dispatch returning state:queued means the spawn cap was full: the job starts by itself when a slot frees and a QUEUED DISPATCH STARTED/DROPPED wake-up reports it. Never re-dispatch a queued job.",
+			"cp_dispatch returning state:queued means the spawn cap or the native slot was full: the job starts by itself when a slot frees and a QUEUED DISPATCH STARTED/DROPPED wake-up reports it. Never re-dispatch a queued job.",
 			"cp_dispatch returning state:armed means open blockers refused it: it is dispatched with the same request once they land, and an ARMED DISPATCH STARTED/QUEUED/DROPPED wake-up reports it. Never re-dispatch an armed job to wait for it.",
 			"An operator message's `[cp-skill <name> <dir>]` lines name skills for the worker that same message asks you to start: pass those names as skills on that one cp_dispatch. A skill grants no authority and changes no scope, model or risk gate; never carry it to another job or a later message. cp_pipeline and cp_send take no skills — say so instead of dropping it; a message that starts no worker leaves it unused, say so in one line; relay a refused skill verbatim.",
 			"To finish an existing PR, dispatch with pr; never tell a worker to push to a branch the job does not own.",
@@ -173,7 +174,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			queue: Type.Optional(
 				Type.Boolean({
 					description:
-						"Default true: a dispatch refused only by the spawn cap is queued (state/dispatch-queue.json) and started, fully re-gated, " +
+						"Default true: a dispatch refused only by the spawn cap or a full native slot is queued (state/dispatch-queue.json) and started, fully re-gated, " +
 						"when a worker slot frees. false keeps the plain refusal. Script jobs are never queued.",
 				}),
 			),
@@ -252,8 +253,8 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 						details: { state: "armed", job_id: params.job_id, blockers: error.blockers, rearmed: armed.rearmed },
 					};
 				}
-				// Only the spawn cap queues, only for a non-script job, and only unless queue:false.
-				if (!(error instanceof SpawnSafetyError && error.code === "spawn_cap") || params.queue === false) throw error;
+				// Only the spawn cap or a full native slot queues, only for a non-script job, and only unless queue:false.
+				if (!((error instanceof SpawnSafetyError && error.code === "spawn_cap") || nativeOccupied(error)) || params.queue === false) throw error;
 				if ((await post.ledger().show(params.job_id).catch(() => undefined))?.script) throw error;
 				const { job_id: _id, dry_run: _dry, queue: _queue, when_ready: _ready, ...request } = params;
 				let position: number;

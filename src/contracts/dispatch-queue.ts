@@ -1,4 +1,7 @@
-/** `state/dispatch-queue.json` — `cp_dispatch` requests refused only by the spawn cap (cp-itl4 4b-2). Import via src/contracts.ts. */
+/**
+ * `state/dispatch-queue.json` — `cp_dispatch` requests refused only by the spawn cap or a full native slot
+ * (cp-itl4 4b-2). Import via src/contracts.ts.
+ */
 
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, SkillNameSchema, validate, type ValidationResult } from "./core.ts";

@@ -78,8 +78,8 @@ export interface QuotaContinuationOptions {
 	runs: RunRegistry;
 	/** Absent means production: the frozen empty adapter, which decodes nothing. */
 	adapter?: QuotaResetAdapter;
-	/** Due-tick ports: the existing continue_failed revive and the ordinary send. */
-	revive: (jobId: string, carried?: CarriedBounds) => Promise<unknown>;
+	/** Due-tick ports: the existing continue_failed revive (plain for a native job) and the ordinary send. */
+	revive: (jobId: string, carried?: CarriedBounds, plain?: boolean) => Promise<unknown>;
 	send: (request: SendRequest) => Promise<SendResult>;
 	/** Only the home's owner reconciles or sends. */
 	owns: () => boolean;
@@ -466,7 +466,7 @@ export class QuotaContinuation {
 		if (this.#options.fleet.get(intent.job_id)?.phase !== "failed" || !this.#options.capacityFree() || readDrain(this.#options.home)) return undefined;
 		step({ delivery: "claimed", attempts: intent.attempts + 1 });
 		try {
-			await this.#options.revive(intent.job_id, intent.round);
+			await this.#options.revive(intent.job_id, intent.round, this.#options.fleet.get(intent.job_id)?.worker?.driver !== undefined);
 		} catch (error) {
 			return step({ delivery: "ambiguous", reason: `revive refused: ${(error as Error).message.slice(0, 300)}` });
 		}

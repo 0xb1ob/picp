@@ -12,6 +12,8 @@ export interface ReviewerDriverContext {
 	manager: Pick<WorkerManager, "active">;
 	/** Take the native slot until the caller's `holdReviewerSlot` settles; a caller that spawns later must not set it. */
 	reserve?: boolean;
+	/** `pi` re-routes a reviewer that lost the native slot after its route was resolved. */
+	explicit?: "pi";
 }
 
 /** Runs one review start, releasing the native slot its route reserved once the reviewer is spawned (or failed). */
@@ -35,6 +37,7 @@ export function resolveReviewerRoute(
 		role: "gate-reviewer",
 		jobs: ctx.jobs,
 		...(ctx.reserve ? { reserve: true } : {}),
+		...(ctx.explicit ? { explicit: ctx.explicit } : {}),
 		nativeLive: liveNativeWorkers(ctx.manager, ""),
 	});
 }
