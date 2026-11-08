@@ -16,6 +16,7 @@ import {
 	query,
 	type SDKMessage,
 	type SDKResultMessage,
+	type SDKUserMessage,
 	type SpawnOptions,
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -274,6 +275,21 @@ export function preToolUseHook(
 	};
 }
 
+export const STOP_REPORT_REASON =
+	"You are ending the turn without an accepted report_result, and no background task of yours is running. Call " +
+	'report_result now: status "done" if the work is complete, or "blocked" with concrete blockers if it is not.';
+
+/** The Stop hook: an unreported stop with no live background task is blocked once per run, never in a loop. */
+export function stopHook(reported: () => boolean, liveTasks: () => number): HookCallback {
+	let blocked = false;
+	return async (input) => {
+		if (input.hook_event_name !== "Stop" || blocked || reported()) return {};
+		if ((input.background_tasks?.length ?? 0) > 0 || liveTasks() > 0) return {};
+		blocked = true;
+		return { decision: "block", reason: STOP_REPORT_REASON };
+	};
+}
+
 interface ReportState extends VerdictState {
 	accepted?: Envelope;
 	attempts: number;
@@ -471,6 +487,23 @@ async function runInScratch(
 		if (signal?.aborted) abort.abort();
 		signal?.addEventListener("abort", () => abort.abort(), { once: true });
 	}
+	// Input stays open until a result lands with no background task live: a closed stdin leaves the CLI's woken turn
+	// with no hook or permission channel, and every tool call then gets Claude Code's "wait for the user" denial.
+	let liveTasks = new Set<string>();
+	let settle: () => void = () => {};
+	const settled = new Promise<void>((done) => (settle = done));
+	abort.signal.addEventListener("abort", () => settle(), { once: true });
+	async function* input(): AsyncGenerator<SDKUserMessage> {
+		yield { type: "user", message: { role: "user", content: options.prompt }, parent_tool_use_id: null };
+		await settled;
+	}
+	const finish = native === "reviewer" ? "report_verdict" : "report_result";
+	const canUseTool: Options["canUseTool"] = async (toolName, _input, context) => {
+		const why = [context.blockedPath, context.decisionReason].filter(Boolean).join("; ");
+		const reason = `Refused: Claude Code's permission check holds ${toolName}${why ? ` (${why})` : ""}. Continue the task another way, or call ${finish} if you are blocked.`;
+		denials.push({ tool: toolName, reason });
+		return { behavior: "deny", message: reason };
+	};
 	const spawnClaudeCodeProcess = (spawnOptions: SpawnOptions) => {
 		spawnedCommand = spawnOptions.command;
 		spawnedEnvKeys = Object.keys(spawnOptions.env).filter((key) => spawnOptions.env[key] !== undefined).sort();
@@ -500,16 +533,19 @@ async function runInScratch(
 		strictMcpConfig: true,
 		mcpServers: { picp: native === "reviewer" ? verdictServer(options.job, state) : reportServer(options.job, state, forge) },
 		tools: [...tools],
-		allowedTools: [...tools, ...mcpTools],
+		// No bare allow rules: they shadow canUseTool, and the PreToolUse hook already allows every guarded call.
 		disallowedTools: ["Agent", "Task", "WebFetch", "WebSearch"],
 		agents: {},
 		plugins: [],
 		skills: [],
-		permissionMode: "dontAsk",
+		permissionMode: "default",
+		canUseTool,
 		hooks: {
 			PreToolUse: [
 				{ hooks: [preToolUseHook([...spikeGuards(options.job, secrets), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
 			],
+			// A report already on file (an earlier run's) is one this run cannot replace: nothing to ask for.
+			...(native === "reviewer" ? {} : { Stop: [{ hooks: [stopHook(() => state.accepted !== undefined || existsSync(join(options.job.runDir, ENVELOPE_FILE)), () => liveTasks.size)] }] }),
 		},
 		maxTurns: options.maxTurns ?? 12,
 		abortController: abort,
@@ -520,7 +556,7 @@ async function runInScratch(
 	};
 	const expectedTools = [...tools, ...mcpTools];
 	try {
-		const q = query({ prompt: options.prompt, options: sdkOptions });
+		const q = query({ prompt: input(), options: sdkOptions });
 		for await (const message of q) {
 			try {
 				options.onMessage?.(message);
@@ -538,10 +574,16 @@ async function runInScratch(
 				});
 			}
 			if (message.type === "assistant" && message.parent_tool_use_id === null) models.add(message.message.model);
-			if (message.type === "result") result = message;
+			if (message.type === "system" && message.subtype === "background_tasks_changed") liveTasks = new Set(message.tasks.map((task) => task.task_id));
+			if (message.type === "result") {
+				result = message;
+				if (liveTasks.size === 0) settle();
+			}
 		}
 	} catch (err) {
 		error = (err as Error).message;
+	} finally {
+		settle();
 	}
 	release("Refused: the run ended before the lockdown check.");
 	const lockdown = await checking;

@@ -398,11 +398,13 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 test("S3 carry: real opus and sonnet turns clear no-reset blocks by family; seven_day_overage_included clears on either", { skip, timeout: 600_000 }, async (t) => {
 	// A millisecond-magnitude reset is stored as no reset (F1), so each 429 leaves a sticky block.
 	const spent = (claim: string): ClaudeStep => ({ kind: "text", text: "Spent.", limit: { status: "rejected", claim, resetsAt: (Math.floor(Date.now() / 1000) + 3600) * 1000 } });
-	// N4e: a clean unreported turn (the one that clears blocks) settles idle; its nudged resume ends by turn limit.
-	const nudged: ClaudeStep = { kind: "tool_use", calls: [{ name: "Bash", input: { command: "ls" } }] };
-	const h = await routedHome(t, [spent("seven_day_opus"), spent("seven_day_overage_included"), { kind: "text", text: "Sonnet ran." }, nudged,
-		spent("seven_day_overage_included"), { kind: "text", text: "Opus ran." }, nudged], { subscriber: true });
-	h.env = { ...h.env, CP_NATIVE_MAX_TURNS: "1" } as typeof h.env;
+	// N4e: a clean unreported turn (the one that clears blocks) settles idle once the Stop hook's one block is spent;
+	// its nudged resume ends by turn limit.
+	const bash: ClaudeStep = { kind: "tool_use", calls: [{ name: "Bash", input: { command: "ls" } }] };
+	const ran = (text: string): ClaudeStep[] => [{ kind: "text", text }, { kind: "text", text: `${text} No report.` }];
+	const h = await routedHome(t, [spent("seven_day_opus"), spent("seven_day_overage_included"), ...ran("Sonnet ran."), bash, bash,
+		spent("seven_day_overage_included"), ...ran("Opus ran."), bash, bash], { subscriber: true });
+	h.env = { ...h.env, CP_NATIVE_MAX_TURNS: "2" } as typeof h.env;
 	const [opus, sonnet] = [`${FAKE_NATIVE_MODEL}-opus`, `${FAKE_NATIVE_MODEL}-sonnet`];
 	routeNativeModel(h.b.home, [opus, sonnet]);
 	h.toggle(true);
