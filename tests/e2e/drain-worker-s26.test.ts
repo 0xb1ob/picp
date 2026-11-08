@@ -268,8 +268,9 @@ test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: 
 		call({ action: "start", home: home.path, mode: "multi", model: parentModel }), { kind: "text", text: "Started." },
 		call({ action: "send", text: "Dispatch both jobs." }), { kind: "text", text: "Sent." },
 		call({ action: "drain", freeze: true, timeout_s: 120 }), { kind: "text", text: "Frozen." },
-		call({ action: "stop" }), { kind: "text", text: "Stopped." },
-	]);
+		// Wakes relayed after the freeze (parent replies, the drained notice) each start an operator turn: answer in text,
+		// never a queued scripted stop, which used to kill the parent whichever wake came first.
+	], { onExhausted: "repeat" });
 	agent.writeModels(provider);
 	saveOperatorTarget({ home: home.path, mode: "multi", hostPid: 0, parentPid: 0 }, { ...process.env, PI_HOME: agent.path });
 	routeNamed(home.path, jobs.map((job) => job.model), { seed: "template" });
@@ -289,6 +290,11 @@ test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: 
 	assert.deepEqual([readDrain(home.path)?.cause, readDrain(home.path)?.timeout_s], [{ reason: "freeze" }, 120], reply);
 	for (const job of jobs) assert.ok(reply.includes(`freeze: ${job.id} steered (`), reply);
 	writeFileSync(gate, "open\n");
+	// Scenario: Given a freeze whose two frozen implementers settle without an envelope,
+	// When the parent's tick reports the drain drained ("safe to restart"),
+	// Then each worker's settle is already recorded: a restart on that notice loses no settle decision.
+	const recorded = await waitFor(() => readDrain(home.path)?.state === "drained" ? jobs.map((job) => readRunEvents(home.path, job.id).some((event) => event.type === "settled_without_report")) : undefined, (rows) => rows !== undefined, { timeoutMs: 120_000, what: "the parent's tick reports drained" });
+	assert.deepEqual(recorded, jobs.map(() => true), "drained before a frozen worker's settle was recorded");
 	for (const job of jobs) {
 		const settled = await waitFor(() => readRunEvents(home.path, job.id).filter((event) => ["settled_without_report", "report_nudged"].includes(event.type)), (rows) => rows.length > 0, { timeoutMs: 120_000, what: `${job.id} settles` });
 		assert.deepEqual(settled.map((event) => event.type), ["settled_without_report"]);
@@ -296,12 +302,10 @@ test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: 
 		assert.equal(provider.requests(job.name).length, 3, "no nudge restarts a frozen turn");
 		assert.equal(readFleet(home.path).jobs.find((row) => row.job_id === job.id)?.reported_at, undefined, "no envelope, so the job is never held");
 	}
-	await waitFor(() => readDrain(home.path)?.state, (state) => state === "drained", { timeoutMs: 30_000, what: "the parent's tick reports drained" });
 	for (const job of jobs) {
 		const pushed = repo.git("ls-remote", "origin", `refs/heads/${job.id}`).split("\t")[0]!.trim();
 		assert.equal(readDrain(home.path)?.jobs.find((row) => row.job_id === job.id)?.head, pushed);
 	}
-	await turn("Stop the parent.");
 });
 
 for (const outcome of ["timeout", "drained"] as const) test(`S26: a ${outcome} freeze drain ${outcome === "timeout" ? "nudges" : "never nudges"} a worker settling after it`, { timeout: 120_000 }, async (t) => {
