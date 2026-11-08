@@ -301,6 +301,9 @@ test("reconcile pending consumed cancelled", { skip: SKIP, timeout: 240_000 }, a
 	const continued = f.provider.requests("consumed");
 	assert.equal(lastUserText(continued[1]!), QUOTA_CONTINUE_NUDGE, "the continuation is the short nudge, never the brief");
 	assert.equal(f.post.fleet.require(consumed).worker.session_file, session, "the same session continued");
+	// J7: a pi job's tick is unchanged: its failed job continues through continue_failed (a plain pi revive refuses it).
+	const [revived] = f.events(consumed, "worker_revived");
+	assert.deepEqual([revived?.continuation, revived?.continue_failed_as_revive, revived?.prior_failure !== undefined], ["operator", undefined, true]);
 
 	const snapshot = f.post.quota.intents();
 	const requests = () => ["stays-pending", "consumed", "cancelled"].map((name) => f.provider.requests(name).length);

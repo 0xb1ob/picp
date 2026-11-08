@@ -151,6 +151,8 @@ export type RevivePlanResult = RevivePlan | ReviveRefusal;
 export interface RevivePlanOptions {
 	recovering?: boolean;
 	continueFailed?: boolean;
+	/** A native bounded recovery: planned as a plain revive, journaled as `continuation: "bounded_recovery"`. */
+	nativeRecovery?: boolean;
 	/** A quota continuation resumes the interrupted round's caps (src/quota-continuation.ts). */
 	carriedBounds?: CarriedBounds;
 }
@@ -384,9 +386,9 @@ export class Reviver {
 		if (!record) return refuse(jobId, "not_found", `no fleet record for ${jobId}`);
 		if (isScriptFleetRecord(record)) return refuse(jobId, "not_revivable_phase", `${jobId} is a script job; an unobserved exit cannot be replayed`);
 		const native = record.worker?.driver !== undefined;
-		if (native && (options?.continueFailed || options?.recovering)) {
-			return refuse(jobId, "native_refused", nativeDoorRefusal(jobId, options.continueFailed ? "continue_failed" : "bounded recovery"));
-		}
+		if (native && options?.recovering) return refuse(jobId, "native_refused", nativeDoorRefusal(jobId, "bounded recovery"));
+		// J7: a native continue_failed is the plain native revive (its event records continue_failed_as_revive).
+		if (native && options?.continueFailed) options = { ...options, continueFailed: false };
 		if (record.phase === "awaiting_merge") {
 			return refuse(jobId, "not_revivable_phase", `${jobId} is parked awaiting a team merge: no lease, and ${record.worktree} is history — ` +
 				`cp_send ${jobId} resumes it on a fresh lease of ${record.branch}, never a revive on the old path`);
@@ -604,8 +606,9 @@ export class Reviver {
 				model: plan.model,
 				...(plan.interruptedTool ? { interrupted_tool: plan.interruptedTool } : {}),
 				...(plan.priorPick ? { rerouted_after_pick: plan.priorPick } : {}),
+				...(record.worker.driver && options?.continueFailed ? { continue_failed_as_revive: true } : {}),
 				...(continuing
-					? { continuation: options?.recovering ? "bounded_recovery" : "operator", ...(record.failure ? { prior_failure: record.failure } : {}) }
+					? { continuation: options?.recovering || options?.nativeRecovery ? "bounded_recovery" : "operator", ...(record.failure ? { prior_failure: record.failure } : {}) }
 					: restoring ? { continuation: "held_release" } : {}),
 			});
 			attachWorkerObservers({

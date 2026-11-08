@@ -218,7 +218,7 @@ export class Sender {
 		if (record.phase === "failed") {
 			throw new SendError(
 				native
-					? `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); cp_revive ${request.jobId} resumes its native Claude session (continue_failed is refused for native jobs).`
+					? `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); cp_revive ${request.jobId} resumes its native Claude session (continue_failed runs as that same plain revive).`
 					: `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); a brief does not revive it. Continue it on ` +
 						`its original lease: cp_revive ${request.jobId} continue_failed:true (plan, then confirm), then cp_send — never a ` +
 						"takeover job, a new branch or a force push.",

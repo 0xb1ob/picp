@@ -343,7 +343,7 @@ no longer test-only): every N3a gate is on and not optional.
 `src/drivers/claude-worker.ts`); `CP_NATIVE_MAX_TURNS` overrides it with a positive integer, and any other value keeps
 500. Every `native_run` event records `max_turns`; a run the SDK ends with `error_max_turns` adds `stop: "max_turns"`
 and a stderr line. If the worker then exits without a report, the job fails as `turn_limit` ("Stopped at turn limit"),
-not `crash`; the worktree and session are kept, and like every native failure it is never auto-recovered.
+not `crash`; the worktree and session are kept, and like every named stop it is never auto-recovered.
 
 **Settle and named stops (N4e).** A native turn that ends with a clean `success` and no report no longer exits: the
 worker emits `agent_settled` and stays idle, so settle.ts's existing nudge, correction and recovery prompts (same caps)
@@ -396,7 +396,7 @@ only path, with the same Bash policy, R1, lockdown, managed hooks, env allow-lis
 | `cp_send`, worker busy (auto/follow_up) | steer (auto) or follow_up | queued in `native-followups.jsonl`; ack `receipt: queued`, `native: queued until the current turn ends …` |
 | `cp_send` mode `steer` | steer into the turn | refused by name; nothing sent |
 | `cp_revive` | respawn idle | respawn, then resume with picp's revive prompt (also from `failed`) |
-| `cp_revive continue_failed` / bounded recovery | continue / automatic | refused (`native_refused`): a plain revive already resumes under admission |
+| `cp_revive continue_failed` / bounded recovery | continue / automatic | both run the plain native revive (admission, then the revive prompt): `continue_failed` records `continue_failed_as_revive`, and bounded recovery spends its one attempt, never redispatches, and refuses the named stops `turn_limit`, `provider_limit`, `model_call_failed` and `spawn_failed` (`native_refused`) |
 
 **Busy-send choice: (ii), a durable picp queue.** Streaming user input into a live SDK session is a mid-turn steer
 whose arrival point picp cannot observe or gate, so the ack could not be truthful. A busy send is appended to the queue
