@@ -344,15 +344,12 @@ test("drain: a failed model call's fleet transition lands before the drain repor
 	assert.equal(phase, "failed", "drained before the failed job's fleet record was final");
 });
 
-// Scenario: Given a worker whose model call failed and whose death notice is still being built (worktree inspect stalled),
-// When the parent drains, Then the drain reports drained only with the death wake-up already durable,
-// And the stalled inspect later refines that same wake-up in place instead of adding a second one.
-test("drain: a failed job's death wake-up is durable before the drain reports drained", { skip: SKIP, timeout: 110_000 }, async (t) => {
+/** A failed model call whose worktree inspect blocks in a `core.fsmonitor` hook (armed on markFailed) until `release()`. */
+async function stalledInspect(t: Parameters<typeof fleet>[0], slug: string) {
 	const f = await fleet(t);
-	const jobId = await f.intake("drain failed wake", "drain-failed-wake");
-	const model = f.script("drain-failed-wake", [{ kind: "error", status: 401, message: "401 Invalid API key", repeat: 20 }]);
+	const jobId = await f.intake(slug, slug);
+	const model = f.script(slug, [{ kind: "error", status: 401, message: "401 Invalid API key", repeat: 20 }]);
 	routeNamed(f.home, [model]);
-	// `git status` in a leased worktree blocks in this fsmonitor hook once armed, stalling the inspect deterministically.
 	const armed = join(f.home, "inspect-armed");
 	const open = join(f.home, "inspect-open");
 	const hook = join(f.home, "inspect-hook.sh");
@@ -363,20 +360,48 @@ test("drain: a failed job's death wake-up is durable before the drain reports dr
 		writeFileSync(armed, "");
 		return markFailed(id, failure);
 	};
-	const wakes = () => f.post.durableWakeups.pending().filter((entry) => entry.job_id === jobId);
+	await f.post.dispatch({ jobId, task: "Fail the model call.", model, fetch: false, toolCallCap: 100, wallClockSeconds: 90 });
+	await waitFor(() => f.post.fleet.get(jobId)?.phase, (phase) => phase === "failed", { timeoutMs: 30_000, what: "the failed transition" });
+	return {
+		f,
+		wakes: () => f.post.durableWakeups.pending().filter((entry) => entry.job_id === jobId),
+		release: () => writeFileSync(open, ""),
+	};
+}
+
+// Scenario: Given a failed worker whose death notice is still being built (worktree inspect stalled),
+// When the parent drains, Then the drain reports drained only with the death wake-up already durable,
+// And the stalled inspect later refines that same wake-up in place instead of adding a second one.
+test("drain: a failed job's death wake-up is durable before the drain reports drained", { skip: SKIP, timeout: 110_000 }, async (t) => {
+	const { f, wakes, release } = await stalledInspect(t, "drain-failed-wake");
 	try {
-		await f.post.dispatch({ jobId, task: "Fail the model call.", model, fetch: false, toolCallCap: 100, wallClockSeconds: 90 });
-		await waitFor(() => f.post.fleet.get(jobId)?.phase, (phase) => phase === "failed", { timeoutMs: 30_000, what: "the failed transition" });
 		f.post.drain.start();
 		await waitFor(() => f.post.drain.check()?.state, (state) => state === "drained", { timeoutMs: 30_000, what: "the drain reports drained" });
 		assert.equal(wakes().length, 1, "drained before the failed job's death wake-up was durable");
 		assert.match(wakes()[0]?.content ?? "", /inspection pending/);
 	} finally {
-		writeFileSync(open, "");
+		release();
 	}
 	const refined = await waitFor(wakes, (rows) => rows.every((row) => !/inspection pending/.test(row.content)), { timeoutMs: 30_000, what: "the refined notice" });
 	assert.equal(refined.length, 1);
 	assert.match(refined[0]?.content ?? "", /on disk:/);
+});
+
+// Scenario: Given the bare death wake was delivered before the inspect finished,
+// When the inspect completes, Then the parent gets one follow-up wake with the on-disk facts.
+test("drain: a death wake delivered before the inspect finishes gets one inspected follow-up", { skip: SKIP, timeout: 110_000 }, async (t) => {
+	const { f, wakes, release } = await stalledInspect(t, "drain-failed-followup");
+	try {
+		const bare = await waitFor(wakes, (rows) => rows.length === 1, { timeoutMs: 30_000, what: "the bare death wake-up" });
+		assert.match(bare[0]?.content ?? "", /inspection pending/);
+		assert.deepEqual(f.post.durableWakeups.confirmDelivered([bare[0]?.id ?? ""]), [bare[0]?.id]);
+	} finally {
+		release();
+	}
+	const followUp = await waitFor(wakes, (rows) => rows.length === 1, { timeoutMs: 30_000, what: "the inspected follow-up" });
+	assert.match(followUp[0]?.id ?? "", /:inspected$/);
+	assert.match(followUp[0]?.content ?? "", /on disk:/);
+	assert.doesNotMatch(followUp[0]?.content ?? "", /inspection pending/);
 });
 
 
