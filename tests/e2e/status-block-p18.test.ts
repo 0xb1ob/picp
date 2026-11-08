@@ -53,11 +53,15 @@ async function parent(t: TestContext, home: string, steps: ScriptStep[]): Promis
 
 const block = (args: Record<string, unknown>): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "cp_status_block", args }] });
 const DONE: ScriptStep = { kind: "text", text: "Status rendered." };
-/** One prompt; resolves once `blocks` cp_status_block results have landed and the turn settled. */
+/** One prompt; resolves once `blocks` cp_status_block results have landed and this prompt's own turn settled. */
 async function turn(child: PiChild, blocks: number): Promise<void> {
-	await child.prompt("Render the status block.");
+	// waitForSettled returns the first settle ever seen; a prompt sent mid-turn is refused as busy and the
+	// script then only resumes on the awaiting-merge watch's 60 s sweep wake-up.
+	const settled = child.eventsOfType("agent_settled").length;
+	const response = await child.prompt("Render the status block.");
+	assert.equal(response.success, true, JSON.stringify(response));
 	await waitFor(() => results(child).length, (n) => n >= blocks, { timeoutMs: 90_000, what: `${blocks} status blocks` });
-	await child.waitForSettled(120_000);
+	await waitFor(() => child.eventsOfType("agent_settled").length, (n) => n > settled, { timeoutMs: 120_000, what: "this turn to settle" });
 }
 const results = (child: PiChild) => child.eventsOfType("tool_execution_end").filter((end) => end.toolName === "cp_status_block")
 	.map((end) => ({ error: end.isError === true, text: (end.result as { content: { text: string }[] }).content[0]!.text }));
