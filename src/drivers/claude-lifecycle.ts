@@ -7,7 +7,7 @@ import type { NativeObservation } from "./claude-observation.ts";
 
 export type NativeStop = "window" | "auth" | "lockdown" | "other";
 export type TurnEnd =
-	| { kind: "reported" | "settle" | "turn_limit" }
+	| { kind: "reported" | "settle" | "turn_limit" | "frozen" }
 	| { kind: "stop"; stop: NativeStop; window?: string; resets_at?: number };
 
 export interface TurnFacts {
@@ -18,11 +18,14 @@ export interface TurnFacts {
 	error?: string;
 	lockdown: string;
 	observations: readonly NativeObservation[];
+	/** The turn was aborted by a freeze checkpoint: never a failure, whatever the aborted run looked like. */
+	frozen?: boolean;
 }
 
-/** One finished turn's end; a named stop (lockdown, auth, a rejected window) wins over every unreported outcome. */
+/** One finished turn's end; a named stop (lockdown, auth, a rejected window) wins over every other unreported outcome. */
 export function classifyTurn(facts: TurnFacts): TurnEnd {
 	if (facts.reported) return { kind: "reported" };
+	if (facts.frozen) return { kind: "frozen" };
 	if (facts.lockdown === "refused") return { kind: "stop", stop: "lockdown" };
 	if (facts.observations.some((seen) => seen.kind === "auth")) return { kind: "stop", stop: "auth" };
 	const spent = facts.observations.find((seen) => seen.kind === "window" && seen.status === "rejected");

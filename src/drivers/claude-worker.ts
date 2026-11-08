@@ -3,6 +3,7 @@
  * reads (`get_state`, `prompt`, `follow_up`, then events), runs each turn through `runClaudeSpike` with every N3a gate
  * on, and exits on stdin end or SIGTERM. A clean unreported turn settles idle; a named stop exits non-zero.
  */
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -37,7 +38,7 @@ import {
 
 const write = (record: Record<string, unknown>): void => void process.stdout.write(`${JSON.stringify(record)}\n`);
 const toolNames = new Map<string, string>();
-const abort = new AbortController();
+let abort = new AbortController();
 const env = process.env;
 // A flat home (`~/.pi-command-post`) keeps state/ at its root: unconfigured, every home read missed (N4l).
 if (env.CP_HOME) configureLayout("multi", env.CP_HOME);
@@ -56,6 +57,8 @@ let streamed: StreamedUsage = new Map();
 let accepted = false;
 // Set by the first stop: no queued follow-up starts a new turn after it.
 let stopping = false;
+// Set by a `checkpoint` (a freeze drain): the turn is aborted, its WIP committed, and the worker settles idle.
+let freezing = false;
 let session: NativeSession | undefined;
 let transcript: NativeTranscript | undefined;
 
@@ -177,6 +180,8 @@ async function turn(prompt: string): Promise<Turn> {
 	}
 	transcript.prompt(prompt, resumed);
 	const implementer = nativeRole(role) === "implementer";
+	// Per turn, so a checkpoint aborts only this run; a stop or freeze already under way keeps its aborted controller.
+	if (!stopping && !freezing) abort = new AbortController();
 	const result = await runClaudeSpike({
 		job: {
 			job_id: jobId, kind, role, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, ...(artifactPath ? { artifactPath } : {}),
@@ -219,7 +224,7 @@ async function turn(prompt: string): Promise<Turn> {
 	// SAFETY: relay() sets finalResult during the run; the control-flow narrowing to undefined above is stale.
 	const isError = (finalResult as SDKResultMessage | undefined)?.is_error;
 	const reported = Boolean(result.report ?? result.verdict);
-	const end = classifyTurn({ reported, resultSubtype: result.resultSubtype, isError, error: result.error, lockdown, observations: turnSeen });
+	const end = classifyTurn({ reported, resultSubtype: result.resultSubtype, isError, error: result.error, lockdown, observations: turnSeen, frozen: freezing });
 	const stop = nativeRunStop(end, maxTurns);
 	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: reported, result_subtype: result.resultSubtype ?? null, usage: measured.status === "estimated" ? "estimated" : usage ? "measured" : "unavailable", usage_status: measured.status, ...costUnknown, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...stop.fields });
 	if (stop.line) process.stderr.write(`[native claude] ${stop.line}\n`);
@@ -239,7 +244,7 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 	// Claimed before the admission await: a send queued during it waits for the next turn end, never lost.
 	const queued = claimFollowUps(runDir);
 	if (queued.length === 0) return [];
-	if (abort.signal.aborted || stopping) return (returnClaim(runDir), []);
+	if (abort.signal.aborted || stopping || freezing) return (returnClaim(runDir), []);
 	const events = join(env.CP_HOME ?? "", paths.eventsFile(env.CP_JOB_ID ?? ""));
 	const recorded = existsSync(events) && readFileSync(events, "utf8").includes(ran.runId);
 	try {
@@ -250,6 +255,19 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 		return [];
 	}
 	return queued;
+}
+
+/** Commits the worktree's WIP after a freeze aborted the turn; the head is the checkpoint, or the error names why not. */
+function checkpointCommit(worktree: string): { head: string } | { error: string } {
+	try {
+		const options: ExecFileSyncOptionsWithStringEncoding = { cwd: worktree, env: { ...env, ...commitIdentityEnv(worktree) }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
+		const git = (args: string[]): string => execFileSync("git", args, options).trim();
+		git(["add", "-A"]);
+		if (git(["status", "--porcelain"]) !== "") git(["commit", "-q", "-m", "WIP: freeze checkpoint"]);
+		return { head: git(["rev-parse", "HEAD"]) };
+	} catch (error) {
+		return { error: (error as Error).message.slice(0, 500) };
+	}
 }
 
 /** Turns until no admitted follow-up is queued; settles when any turn reported or the last ended clean, else fails. */
@@ -275,11 +293,19 @@ async function serve(first: string): Promise<number> {
 			code = ran.code;
 			end = ran.end;
 			// A named stop takes no queued follow-up: another turn would be the nudge the stop forbids.
-			claimed = end.kind === "stop" && end.stop !== "other" ? [] : await dueFollowUps(ran);
+			claimed = (end.kind === "stop" && end.stop !== "other") || end.kind === "frozen" ? [] : await dueFollowUps(ran);
+			// A checkpoint during the admission await: the claim goes back and the freeze ends the loop.
+			if (freezing && claimed.length > 0) claimed = (returnClaim(runDir), []);
 			prompt = claimed.length > 0 ? claimed.join("\n\n") : undefined;
 		}
 	} finally {
 		busy = false;
+	}
+	if (freezing) {
+		freezing = false;
+		write({ type: "native_checkpoint", ...checkpointCommit(env.CP_WORKTREE ?? "") });
+		write({ type: "agent_settled" });
+		return 0;
 	}
 	if (!reported && end?.kind !== "settle") return code;
 	write({ type: "agent_settled" });
@@ -296,6 +322,13 @@ function command(line: string): void {
 	const reply = (body: Record<string, unknown>) => write({ type: "response", id: request.id, command: request.type, ...body });
 	const jobId = env.CP_JOB_ID ?? "this job";
 	if (request.type === "get_state") return reply({ success: true, data: { sessionId: jobId, sessionFile } });
+	if (request.type === "checkpoint") {
+		if (!busy) return reply({ success: false, error: `${jobId}: the native worker is idle; there is no turn to checkpoint` });
+		// serve() awaits the observed claude exit, commits the WIP, writes native_checkpoint and settles idle.
+		freezing = true;
+		abort.abort();
+		return reply({ success: true, data: { disposition: "checkpointing" } });
+	}
 	const message = typeof request.message === "string" ? request.message : undefined;
 	if (message !== undefined && busy && (request.type === "prompt" || request.type === "follow_up")) {
 		try {
