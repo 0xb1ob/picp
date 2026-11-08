@@ -148,6 +148,45 @@ export function isPidAlive(pid: number): boolean {
 	}
 }
 
+/** Linux USER_HZ: the unit of /proc/<pid>/stat starttime, fixed by the ABI. */
+const CLOCK_TICKS_PER_SECOND = 100;
+/** Clock steps after boot move /proc/stat btime; a lock written by a live holder is never off by more. */
+const LOCK_START_SKEW_MS = 30_000;
+
+/** Process start as epoch ms from procfs; undefined when procfs cannot say. */
+function processStartMs(pid: number): number | undefined {
+	try {
+		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+		// comm may hold spaces and parens, so split after the last ")": starttime is field 22, index 19 from field 3.
+		const ticks = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
+		const btime = Number(/^btime\s+(\d+)$/m.exec(readFileSync("/proc/stat", "utf8"))?.[1]);
+		if (!Number.isFinite(ticks) || !Number.isFinite(btime)) return undefined;
+		return btime * 1000 + (ticks / CLOCK_TICKS_PER_SECOND) * 1000;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Is `pid` still the *process* that wrote a lock at `startedAt`?
+ *
+ * After a reboot a recorded pid is reused, often as a thread id inside another process; both pass
+ * `isPidAlive`. On Linux a thread (Tgid != pid) or a process that started after the lock was written
+ * is not the holder. Without procfs, or when it cannot say, this is `isPidAlive`.
+ */
+export function isLockHolderAlive(pid: number, startedAt: string): boolean {
+	if (!isPidAlive(pid)) return false;
+	try {
+		const tgid = /^Tgid:\s+(\d+)$/m.exec(readFileSync(`/proc/${pid}/status`, "utf8"))?.[1];
+		if (tgid !== undefined && Number(tgid) !== pid) return false;
+	} catch {
+		return true;
+	}
+	const wrote = Date.parse(startedAt);
+	const began = processStartMs(pid);
+	return !(Number.isFinite(wrote) && began !== undefined && began > wrote + LOCK_START_SKEW_MS);
+}
+
 export interface RunObservation {
 	/** The previous parent OBSERVED the child close. Never inferred from age. */
 	closed: boolean;

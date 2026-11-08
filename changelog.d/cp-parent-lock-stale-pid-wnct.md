@@ -1,0 +1,1 @@
+- Parent lock: a lock whose pid is a live thread (Tgid differs) or a process that started after the lock's `started_at` is now stale and reclaimed, so a pid reused after a reboot no longer blocks the live parent; `state/settings.lock` and `/doctor` share the check (`isLockHolderAlive`). Non-Linux unchanged.

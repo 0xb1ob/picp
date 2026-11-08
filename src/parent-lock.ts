@@ -34,7 +34,7 @@
 import { existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync, closeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { isIsoTimestamp, isoTimestamp, LAYOUT, SCHEMA_VERSION } from "./contracts.ts";
-import { isPidAlive as probePid } from "./fleet.ts";
+import { isLockHolderAlive, isPidAlive as probePid } from "./fleet.ts";
 // Not loaded-commit.ts: importing it reads HEAD, and only the process that writes the lock should pay that.
 import { SHA } from "./viewer/git-read.ts";
 
@@ -83,7 +83,7 @@ export interface ParentLockOptions {
 	commit?: string;
 	now?: () => Date;
 	/** Injected in tests; production probes the real process table. */
-	isPidAlive?: (pid: number) => boolean;
+	isPidAlive?: (pid: number, startedAt?: string) => boolean;
 	/**
 	 * Test seam, and the only reason it exists: the reclaim path has a
 	 * read-then-unlink shape, and this is where a competing parent gets to move
@@ -151,7 +151,7 @@ export function acquireParentLock(options: ParentLockOptions): ParentLockResult 
 	const home = resolve(options.home);
 	const path = parentLockPath(home);
 	const pid = options.pid ?? process.pid;
-	const isAlive = options.isPidAlive ?? probePid;
+	const isAlive = options.isPidAlive ?? ((holder: number, startedAt?: string) => (startedAt ? isLockHolderAlive(holder, startedAt) : probePid(holder)));
 	const record: ParentLockRecord = {
 		schema_version: SCHEMA_VERSION,
 		pid,
@@ -223,7 +223,7 @@ export function acquireParentLock(options: ParentLockOptions): ParentLockResult 
 			},
 		};
 	}
-	if (isAlive(current.record.pid)) {
+	if (isAlive(current.record.pid, current.record.started_at)) {
 		return {
 			ok: false,
 			holder: current.record,

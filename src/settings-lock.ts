@@ -11,7 +11,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isoTimestamp, LAYOUT } from "./contracts.ts";
-import { isPidAlive as probePid } from "./fleet.ts";
+import { isLockHolderAlive } from "./fleet.ts";
 
 export interface SettingsLockRecord {
 	schema_version: 1;
@@ -27,7 +27,7 @@ export type SettingsLockResult =
 export interface SettingsLockOptions {
 	pid?: number;
 	now?: () => Date;
-	isPidAlive?: (pid: number) => boolean;
+	isPidAlive?: (pid: number, startedAt: string) => boolean;
 	/** Test seam: called once, immediately before a dead holder's lock would be removed. */
 	onBeforeReclaim?: () => void;
 }
@@ -59,7 +59,7 @@ function readLock(path: string): Read {
 
 export function acquireSettingsLock(home: string, options: SettingsLockOptions = {}): SettingsLockResult {
 	const path = settingsLockPath(home);
-	const isAlive = options.isPidAlive ?? probePid;
+	const isAlive = options.isPidAlive ?? ((holder: number, startedAt: string) => isLockHolderAlive(holder, startedAt));
 	const record: SettingsLockRecord = { schema_version: 1, pid: options.pid ?? process.pid, started_at: isoTimestamp(options.now?.() ?? new Date()), nonce: randomBytes(8).toString("hex") };
 	const release = (): boolean => {
 		const current = readLock(path);
@@ -95,7 +95,7 @@ export function acquireSettingsLock(home: string, options: SettingsLockOptions =
 		const retry = write();
 		return retry.ok ? { ok: true, release } : { ok: false, reason: `lost a race for the settings lock at ${path}: ${retry.reason}` };
 	}
-	if (isAlive(current.record.pid)) return { ok: false, holder: current.record, reason: `another settings write holds ${path} (pid ${current.record.pid}, since ${current.record.started_at}); retry` };
+	if (isAlive(current.record.pid, current.record.started_at)) return { ok: false, holder: current.record, reason: `another settings write holds ${path} (pid ${current.record.pid}, since ${current.record.started_at}); retry` };
 	const stale = current.record;
 	options.onBeforeReclaim?.();
 	const confirm = readLock(path);

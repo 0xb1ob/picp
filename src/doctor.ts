@@ -58,7 +58,7 @@ import {
 } from "./contracts.ts";
 import { jobToolCallCap, jobWallClockSeconds } from "./bounds.ts";
 import { DEFAULT_REVIEW_TIMEOUT_MS } from "./gate.ts";
-import { type FleetStore, isPidAlive as probePid } from "./fleet.ts";
+import { type FleetStore, isLockHolderAlive, isPidAlive as probePid } from "./fleet.ts";
 import { ENV_TREEHOUSE_ROOT } from "./contracts.ts";
 import { readParentLock } from "./parent-lock.ts";
 import { DEFAULT_PARENT_COMPACT_TOKENS, parentContextStatus, parentSettings, standingOrdersFile } from "./parent-context.ts";
@@ -1358,7 +1358,7 @@ export class Doctor {
 				},
 			];
 		}
-		if (this.#isPidAlive(holder.pid)) {
+		if (this.#options.isPidAlive ? this.#isPidAlive(holder.pid) : isLockHolderAlive(holder.pid, holder.started_at)) {
 			return [
 				{
 					check: "parent.lock",
