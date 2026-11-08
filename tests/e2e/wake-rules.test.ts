@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CpBridge, type BridgeRelay } from "../../src/cp-bridge.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, waitFor, wakeTrail } from "../harness/index.ts";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
@@ -164,7 +164,9 @@ test("S20: a resolve cache stays quiet within its minute and refreshes to dispat
 	parent.post.mandates.issue({ projects: ["demo"], objective: "S20 independent work", job_ids: [ready.id],
 		expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [] });
 	parent.queue("cache-fresh");
-	await waitFor(parent.events, (rows) => rows.length === 2, { timeoutMs: 30_000, what: "fresh quiet cache" });
+	const trail = wakeTrail(parent.home.path, parent.child, parent.requests);
+	await waitFor(() => (trail.stamp(), parent.events()), (rows) => rows.length === 2, { timeoutMs: 30_000, what: "fresh quiet cache" })
+		.catch((error: unknown) => { throw trail.explain(error); });
 	assert.deepEqual(parent.events().map((e) => [e.decision, e.next_kind]), [["relayed", "no_mandate"], ["relayed", "no_mandate"]]);
 	assert.equal(parent.requests().length, 0);
 	await waitFor(() => Date.now() - cachedAt, (elapsed) => elapsed > 61_000, { timeoutMs: 70_000, what: "public one-minute cache expiry" });
@@ -175,6 +177,30 @@ test("S20: a resolve cache stays quiet within its minute and refreshes to dispat
 	assert.deepEqual(parent.events().map((e) => [e.decision, e.next_kind]), [
 		["relayed", "no_mandate"], ["relayed", "no_mandate"], ["woke", "dispatch"],
 	]);
+});
+
+// Scenario: Given an idle parent, When a durable wake is enqueued while a sweep is deferred,
+// Then it reaches a model request within one sweep interval. Quiet window wakes keep the test process writing across
+// the deferral and two 5 s ticks of parent rewrites; main lost about a third to that read-modify-write race.
+test("S20: wakes enqueued by another process while a sweep is deferred all reach a model request", { timeout: 120_000 }, async (t) => {
+	const parent = await startRuleParent(t, "s20-deferred-burst");
+	parent.queue("deferred");
+	const ids: string[] = [];
+	for (const end = Date.now() + 10_000; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 5))) {
+		ids.push(`continuation:window:burst-${ids.length}`);
+		parent.post.durableWakeups.enqueue({ id: ids.at(-1)!, kind: "recovery", content: `S20 ${ids.at(-1)}.` });
+	}
+	ids.push("burst-end");
+	parent.post.durableWakeups.enqueue({ id: "burst-end", kind: "recovery", content: "S20 burst-end." });
+	const trail = wakeTrail(parent.home.path, parent.child, parent.requests);
+	const missing = () => {
+		trail.stamp();
+		const carried = JSON.stringify(parent.requests().map((r) => r.body.messages));
+		return ids.filter((id) => !carried.includes(`S20 ${id}.`));
+	};
+	await waitFor(missing, (rows) => rows.length === 0, { timeoutMs: 30_000, what: "every wake enqueued during the deferral in a model request" })
+		.catch((error: unknown) => { throw trail.explain(error); });
+	assert.deepEqual(parent.events().map((e) => [e.decision, e.next_kind]), [["relayed", "no_mandate"]]);
 });
 
 test("S20: a failed next refresh wakes with a reason and is not retried during its cache minute", { timeout: 120_000 }, async (t) => {

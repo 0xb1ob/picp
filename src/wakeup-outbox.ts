@@ -6,8 +6,8 @@
  * undelivered entries once; a confirmed id never comes back.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
 	DURABLE_WAKEUP_KEEP_DELIVERED,
 	DURABLE_WAKEUP_RETRY_SECONDS,
@@ -24,6 +24,44 @@ import {
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 
 export class DurableWakeupError extends Error {}
+
+const LOCK_WAIT_MS = 5_000;
+const LOCK_STALE_MS = 10_000;
+const lockSleeper = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * One read-modify-write of `file` at a time across processes, under `<file>.lock` (O_EXCL, held for milliseconds).
+ * Without it a wake another process enqueued between the parent's read and rename was overwritten and never delivered.
+ */
+function withOutboxLock<T>(file: string, fn: () => T): T {
+	const lock = `${file}.lock`;
+	const deadline = Date.now() + LOCK_WAIT_MS;
+	mkdirSync(dirname(file), { recursive: true });
+	for (;;) {
+		try {
+			closeSync(openSync(lock, "wx", 0o600));
+			break;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		let age: number;
+		try {
+			age = Date.now() - statSync(lock).mtimeMs;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			continue; // released between our open and stat
+		}
+		// shortcut: a crashed holder's lock is reclaimed by age, not pid; upgrade if a hold can ever be slow.
+		if (age > LOCK_STALE_MS) rmSync(lock, { force: true });
+		else if (Date.now() > deadline) throw new DurableWakeupError(`${lock} held for over ${LOCK_WAIT_MS}ms; wakeups.json unchanged`);
+		else Atomics.wait(lockSleeper, 0, 0, 2);
+	}
+	try {
+		return fn();
+	} finally {
+		rmSync(lock, { force: true });
+	}
+}
 
 const OWNER_KEY = Symbol.for("pi-command-post.wakeups.owner");
 const globalOwners = globalThis as { [OWNER_KEY]?: string };
@@ -108,14 +146,16 @@ export class DurableWakeupOutbox {
 	}
 
 	#mutate(mutator: (file: DurableWakeupOutboxFile) => DurableWakeupOutboxFile): DurableWakeupOutboxFile {
-		const next = mutator(structuredClone(this.read()));
-		const stamped: DurableWakeupOutboxFile = { ...next, updated_at: isoTimestamp(this.#now()) };
-		const result = validateDurableWakeupOutboxFile(stamped);
-		if (!result.ok) {
-			throw new DurableWakeupError(`refusing to write an invalid wakeups.json:\n  ${result.errors.join("\n  ")}`);
-		}
-		atomicWriteJson(this.file, result.value);
-		return result.value;
+		return withOutboxLock(this.file, () => {
+			const next = mutator(structuredClone(this.read()));
+			const stamped: DurableWakeupOutboxFile = { ...next, updated_at: isoTimestamp(this.#now()) };
+			const result = validateDurableWakeupOutboxFile(stamped);
+			if (!result.ok) {
+				throw new DurableWakeupError(`refusing to write an invalid wakeups.json:\n  ${result.errors.join("\n  ")}`);
+			}
+			atomicWriteJson(this.file, result.value);
+			return result.value;
+		});
 	}
 
 	enqueue(input: DurableWakeupInput): boolean {
