@@ -1,6 +1,6 @@
 /**
  * cp-itl4 4b-2: the persisted dispatch queue. A `cp_dispatch` refused only by the
- * spawn cap is kept here (`state/dispatch-queue.json`) and replayed, FIFO, through
+ * spawn cap or a full native slot is kept here (`state/dispatch-queue.json`) and replayed, FIFO, through
  * the ordinary `CommandPost.dispatch` — every gate re-run per entry — when a slot
  * frees. Only the home's lock owner drains (`owns`, read per drain and per entry);
  * nothing drains during a home drain. Every outcome but "still full" wakes the parent.
@@ -20,6 +20,7 @@ import {
 	validateDispatchQueueFile,
 } from "./contracts.ts";
 import type { DispatchRequest } from "./dispatch.ts";
+import { NativeDriverError } from "./drivers/claude.ts";
 import { assertDispatchOpen, readDrain } from "./drain.ts";
 import { UpdateHoldError } from "./update-hold.ts";
 import { atomicWriteJson } from "./json-store.ts";
@@ -44,9 +45,14 @@ export interface DispatchQueueOptions {
 	now?: () => Date;
 }
 
+/** A strict native dispatch (explicit `driver: claude` or a locked job) refused only because the slots are full. */
+export function nativeOccupied(error: unknown): boolean {
+	return error instanceof NativeDriverError && error.category === "occupied";
+}
+
 /** Still full, or held for a pending update: keep the entry at the head, untouched, and stop the drain. */
 export function keepsHead(error: unknown): boolean {
-	if (error instanceof UpdateHoldError) return true;
+	if (error instanceof UpdateHoldError || nativeOccupied(error)) return true;
 	if (error instanceof SpawnSafetyError) return error.code === "spawn_cap";
 	return (error instanceof MandateError || error instanceof ScheduleAuthorityError) && error.code === "parallelism_full";
 }
