@@ -544,7 +544,8 @@ async function runInScratch(
 			PreToolUse: [
 				{ hooks: [preToolUseHook([...spikeGuards(options.job, secrets), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
 			],
-			...(native === "reviewer" ? {} : { Stop: [{ hooks: [stopHook(() => state.accepted !== undefined, () => liveTasks.size)] }] }),
+			// A report already on file (an earlier run's) is one this run cannot replace: nothing to ask for.
+			...(native === "reviewer" ? {} : { Stop: [{ hooks: [stopHook(() => state.accepted !== undefined || existsSync(join(options.job.runDir, ENVELOPE_FILE)), () => liveTasks.size)] }] }),
 		},
 		maxTurns: options.maxTurns ?? 12,
 		abortController: abort,

@@ -118,6 +118,7 @@ test("Stop hook: an unreported stop with no background task is blocked once with
 		assert.equal(blockedAsks(reports), 2, "the reason reached the model once (and stays in the later request's history)");
 		assert.equal(reports.overrun(), 0);
 
+		rmSync(join(root, "run"), { recursive: true, force: true });
 		const stubborn = await startClaudeMockProvider([{ kind: "text", text: "Done." }, { kind: "text", text: "Still done." }]);
 		const unreported = await run(root, worktree, stubborn, "research");
 		await stubborn.close();
