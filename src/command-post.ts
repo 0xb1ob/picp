@@ -67,7 +67,7 @@ import { boundContinueNext, HardBoundsWatch } from "./bounds.ts";
 import { boundWakeupId, deathWakeupId, FailureAnnouncer, type FailRecoveryFact } from "./failure-announcer.ts";
 import { homeProjectResolver } from "./project-report.ts";
 import { formatRecoveryNotice } from "./wakeups.ts";
-import { assertDispatchOpen, assertNotDraining, DrainControl, readDrain, staleDrainOutcome, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
+import { assertDispatchOpen, assertNotDraining, DrainControl, readDrain, staleDrainOutcome, sweepDurableWakeups as sweepDurableWakeupsHelper, workerCheckpoint } from "./drain.ts";
 import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Role, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
 import { FailureMonitor } from "./failures.ts";
 import { CheckpointStore } from "./checkpoint.ts";
@@ -597,7 +597,7 @@ export class CommandPost {
 			mainCiScope: (project) => resolveMainCiScope({ project, mandates: () => this.mandates.list(), now: isoTimestamp(), login: () => this.ghLogin() }), // cp-oc0m
 		});
 		this.drain = new DrainControl({ home: options.home, fleet: this.fleet, busy: () => this.manager.quiesce().busy, head: (jobId) => this.reportedHeadSha(jobId), owns: () => this.#ownsHome(), steer: (jobId, message) => this.send({ jobId, message, mode: "steer" }),
-			parentControlBusy: () => options.parentControlBusy?.() === true, settling: () => this.settle.settling,
+			parentControlBusy: () => options.parentControlBusy?.() === true, settling: () => this.settle.settling, checkpoint: (jobId) => workerCheckpoint(this.manager.get(jobId)?.worker),
 			// Not #journalDurable: an enqueue failure must reach DrainControl.check, which retries on the next tick.
 			journal: (wake) => { if (this.durableWakeups.enqueue({ ...wake, id: boundedWakeupId(wake.id), kind: "recovery" })) this.#options.onDurableWakeup?.(); },
 			discard: (ids) => this.durableWakeups.discard(ids.map((id) => ({ id: boundedWakeupId(id), reason: "the parent restarted after the drain" }))) });

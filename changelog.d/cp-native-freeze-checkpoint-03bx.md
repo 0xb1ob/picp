@@ -1,0 +1,1 @@
+- A freeze drain now checkpoints a mid-turn native Claude implementer instead of steering it: the worker aborts its turn, commits its WIP as `WIP: freeze checkpoint`, reports the head (`native_checkpoint`) and settles idle without exiting.

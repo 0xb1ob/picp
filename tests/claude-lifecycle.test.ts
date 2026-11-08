@@ -24,6 +24,10 @@ test("N4e: a finished native turn is reported, settles, hits the turn limit or s
 	for (const facts of [{ ...clean, isError: true }, { ...clean, error: "boom" }, { ...clean, resultSubtype: undefined }, { ...clean, lockdown: "unchecked" }]) {
 		assert.deepEqual(classifyTurn(facts), { kind: "stop", stop: "other" }, JSON.stringify(facts));
 	}
+	// J6: an aborted frozen turn is never a failure, but a named stop wins over the freeze and keeps its exit.
+	assert.deepEqual(classifyTurn({ ...clean, resultSubtype: undefined, error: "aborted", frozen: true }), { kind: "frozen" });
+	assert.deepEqual(classifyTurn({ ...clean, frozen: true, lockdown: "refused" }), { kind: "stop", stop: "lockdown" });
+	assert.deepEqual(classifyTurn({ ...spent, frozen: true }).kind, "stop");
 	assert.deepEqual(nativeRunStop(classifyTurn(spent), 500).fields, { stop: "window", window: "five_hour", resets_at: 1_900_000_000_000 });
 	assert.deepEqual(nativeRunStop({ kind: "turn_limit" }, 3).fields, { stop: "max_turns" });
 	assert.deepEqual(nativeRunStop({ kind: "settle" }, 3), { fields: {} });

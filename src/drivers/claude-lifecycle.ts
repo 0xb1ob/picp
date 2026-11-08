@@ -7,7 +7,7 @@ import type { NativeObservation } from "./claude-observation.ts";
 
 export type NativeStop = "window" | "auth" | "lockdown" | "other";
 export type TurnEnd =
-	| { kind: "reported" | "settle" | "turn_limit" }
+	| { kind: "reported" | "settle" | "turn_limit" | "frozen" }
 	| { kind: "stop"; stop: NativeStop; window?: string; resets_at?: number };
 
 export interface TurnFacts {
@@ -18,6 +18,8 @@ export interface TurnFacts {
 	error?: string;
 	lockdown: string;
 	observations: readonly NativeObservation[];
+	/** A freeze checkpoint aborted the turn: never a failure unless a named stop (lockdown, auth, window) ended it. */
+	frozen?: boolean;
 }
 
 /** One finished turn's end; a named stop (lockdown, auth, a rejected window) wins over every unreported outcome. */
@@ -27,6 +29,7 @@ export function classifyTurn(facts: TurnFacts): TurnEnd {
 	if (facts.observations.some((seen) => seen.kind === "auth")) return { kind: "stop", stop: "auth" };
 	const spent = facts.observations.find((seen) => seen.kind === "window" && seen.status === "rejected");
 	if (spent?.kind === "window") return { kind: "stop", stop: "window", window: spent.window, ...(spent.resets_at === undefined ? {} : { resets_at: spent.resets_at }) };
+	if (facts.frozen) return { kind: "frozen" };
 	if (facts.resultSubtype === "error_max_turns") return { kind: "turn_limit" };
 	const clean = facts.resultSubtype === "success" && facts.isError !== true && facts.error === undefined && facts.lockdown === "ok";
 	return clean ? { kind: "settle" } : { kind: "stop", stop: "other" };

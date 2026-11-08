@@ -231,6 +231,16 @@ export interface DrainControlDeps {
 	now?: () => Date;
 	/** A steer into a running turn (the `cp_send` path); a freeze drain sends `FREEZE_STEER` through it. */
 	steer?: (jobId: string, message: string) => Promise<unknown>;
+	/** A native worker's `checkpoint` RPC (no steer): abort the turn, commit the WIP, answer `{ head }`, settle idle. */
+	checkpoint?: (jobId: string) => Promise<unknown>;
+}
+
+/** The `checkpoint` dep over a live worker's RPC: a reply whose `success` is not true throws its error. */
+export async function workerCheckpoint(worker: { request(type: string): Promise<{ success?: boolean; error?: string; data?: unknown }> } | undefined): Promise<{ data?: unknown }> {
+	if (!worker) throw new Error("no live worker in this process");
+	const reply = await worker.request("checkpoint");
+	if (reply.success !== true) throw new Error(reply.error ?? "the worker refused the checkpoint");
+	return reply;
 }
 
 function outcomeWakeId(record: Pick<DrainRecord, "started_at">, state: "drained" | "timeout"): string {
@@ -303,8 +313,8 @@ export class DrainControl {
 	}
 
 	/**
-	 * Steer each mid-turn implementer of a running freeze drain to push its WIP and end its turn; one line per busy key.
-	 * Reviewers and planners are named, never steered: a review re-runs and a planner's work is its session.
+	 * Steer each mid-turn implementer of a freeze drain to push its WIP and end its turn (a native one is checkpointed).
+	 * One line per key. Reviewers and planners are named, never steered: a review re-runs, a planner's session is its work.
 	 */
 	async freeze(): Promise<string[]> {
 		const drain = readDrain(this.#deps.home);
@@ -314,7 +324,17 @@ export class DrainControl {
 		const records = this.#deps.fleet.list();
 		const lines: string[] = [];
 		for (const key of busy) {
-			const role = records.find((record) => record.job_id === key)?.worker?.role;
+			const worker = records.find((record) => record.job_id === key)?.worker;
+			const role = worker?.role;
+			if (role === "implementer" && worker?.driver && this.#deps.checkpoint) {
+				try {
+					const done = (await this.#deps.checkpoint(key)) as { data?: { head?: string } } | undefined;
+					lines.push(`  freeze: ${key} checkpointed (native ${worker.driver}${done?.data?.head ? ` at ${done.data.head}` : ""})`);
+				} catch (error) {
+					lines.push(`  freeze: ${key} not checkpointed: ${(error as Error).message}`);
+				}
+				continue;
+			}
 			if (role !== "implementer" || !this.#deps.steer) {
 				lines.push(`  freeze: ${key} not steered (${role ?? "no fleet record"}${this.#deps.steer ? "" : ", no steer path"})`);
 				continue;

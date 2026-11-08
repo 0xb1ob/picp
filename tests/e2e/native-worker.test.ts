@@ -549,6 +549,69 @@ test("P3h-unavailable: a native run whose usage the model omits is flagged unava
 	assert.equal(flight?.usage_unavailable, true, "the dashboard job says unavailable");
 });
 
+// Scenario: Given a native implementer mid-turn with an uncommitted edit, When /cp-drain freeze runs,
+//   Then the drain line says checkpointed and a WIP commit exists at the worktree HEAD,
+//   And the worker is idle, not failed, and resumes on the same session after the drain.
+test("J6 freeze: /cp-drain freeze checkpoints a mid-turn native implementer, which resumes its session after the drain", { skip, timeout: 300_000 }, async (t) => {
+	const ids: string[] = [];
+	const worktree = () => readFleet(h.b.home).jobs.find((job) => job.job_id === ids[0])!.worktree;
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: worktree(), encoding: "utf8" }).trim();
+	let release: () => void = () => {};
+	const held = new Promise<void>((done) => (release = done));
+	let holding = false;
+	const h = await nativeHome(t, [
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(worktree(), "wip.txt"), content: "half done\n" }) }] },
+		{ kind: "text", text: "never sent", beforeAnswer: () => ((holding = true), held) },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => ({ job_id: ids[0], kind: "ship", status: "blocked", summary: "Resumed after the freeze.", blockers: ["the e2e ends here"] }) }] },
+		{ kind: "text", text: "Reported." },
+	]);
+	t.after(release);
+	writeFileSync(join(h.b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_ship: true }));
+	const bin = mkdtempSync(join(tmpdir(), "cp-j6-git-"));
+	t.after(() => rmSync(bin, { recursive: true, force: true }));
+	writeFileSync(join(bin, "gitconfig"), "[user]\n\tname = j6 e2e\n\temail = j6@test.invalid\n");
+	const job = await h.b.ledger.create({ title: `j6 freeze ${Math.random()}`, project: "demo", delivery: "pr", kind: "ship" });
+	ids.push(job.id);
+	const gate = join(bin, "parent-gate");
+	const env = { ...h.env, GIT_CONFIG_GLOBAL: join(bin, "gitconfig") };
+	const running = h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Add wip.txt.", model: FAKE_NATIVE_MODEL, driver: "claude", queue: false, when_ready: false } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(gate) } }] },
+	], env, undefined, 240_000) as Promise<Tool[]>;
+	await waitFor(() => holding, Boolean, { timeoutMs: 120_000, what: "the native implementer is mid-turn" });
+	const parent = h.b.parents[0]!;
+	const drainLine = async (command: string) => {
+		const before = parent.records().length;
+		await parent.prompt(command);
+		const ui = await parent.waitFor((r) => parent.records().indexOf(r) >= before && r.type === "extension_ui_request" && String(r.message).startsWith("DRAIN:"), 60_000);
+		return String((ui as Record<string, unknown>).message);
+	};
+	const frozen = await drainLine("/cp-drain 120 freeze");
+	const head = git("rev-parse", "HEAD");
+	assert.ok(frozen.includes(`freeze: ${job.id} checkpointed (native claude at ${head})`), frozen);
+	assert.deepEqual([git("log", "-1", "--format=%s"), git("show", "HEAD:wip.txt"), git("status", "--porcelain")], ["WIP: freeze checkpoint", "half done", ""]);
+	const session = readNativeSession(join(h.b.home, paths.runDir(job.id), NATIVE_SESSION_FILE)).session_id;
+	await waitFor(() => readRunEvents(h.b.home, job.id).some((event) => event.type === "settled_without_report"), Boolean, { timeoutMs: 30_000, what: "the frozen worker settles idle" });
+	const record = readFleet(h.b.home).jobs.find((row) => row.job_id === job.id);
+	assert.deepEqual([record?.phase === "failed", record?.failure, record?.worker.exited_at], [false, undefined, undefined], JSON.stringify(record));
+	assert.equal((readRunEvents(h.b.home, job.id).find((event) => event.type === "native_run")?.payload as Record<string, unknown>)?.stop, undefined, "a frozen turn is no named failure");
+	// After the drain the parent restarts (a fresh parent clears the drained record) and revives the job.
+	writeFileSync(gate, "open\n");
+	await running;
+	await h.b.closeParents();
+	const ends = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_revive", args: { job_id: job.id, confirm: true } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(job.id)) } }] },
+	], env)) as Tool[];
+	assert.match(text(ends.find((end) => end.toolName === "cp_revive")), /resumed its native Claude session/);
+	const filed = (JSON.parse(readFileSync(h.envelope(job.id), "utf8")) as { envelope: Envelope }).envelope;
+	assert.equal(filed.summary, "Resumed after the freeze.");
+	assert.equal(readNativeSession(join(h.b.home, paths.runDir(job.id), NATIVE_SESSION_FILE)).session_id, session, "the same session resumed");
+	const runs = readRunEvents(h.b.home, job.id).filter((event) => event.type === "native_run").map((event) => (event.payload as { resumed?: boolean }).resumed);
+	assert.deepEqual(runs, [false, true], "the frozen run, then one resumed run");
+	assert.match(JSON.stringify(h.claude.requests.at(-1)?.body.messages), /wip\.txt[\s\S]*Resumed after the freeze/, "the resumed turn carries the frozen turn's history");
+});
+
 // The single live run of N3b: the operator's own claude settings (claude reads them; picp never does). Counts only.
 test("native live smoke: one research job through cp_dispatch on the installed claude", { skip: !LIVE_TESTS_ENABLED ? "set CP_LIVE_TESTS=1 to run live smokes" : !process.env.CP_LIVE_NATIVE_MODEL ? "set CP_LIVE_NATIVE_MODEL to the account's anthropic/claude-… id" : skip, timeout: 300_000 }, async (t) => {
 	const b = await dispatchS29(t);
