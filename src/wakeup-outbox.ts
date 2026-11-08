@@ -6,7 +6,7 @@
  * undelivered entries once; a confirmed id never comes back.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from "node:fs";
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	DURABLE_WAKEUP_KEEP_DELIVERED,
@@ -21,45 +21,87 @@ import {
 	validateDurableWakeupOutboxFile,
 	type AnsweredSend,
 } from "./contracts.ts";
+import { isLockHolderAlive } from "./fleet.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 
 export class DurableWakeupError extends Error {}
 
 const LOCK_WAIT_MS = 5_000;
-const LOCK_STALE_MS = 10_000;
+/** A lock naming no holder (one killed between create and write) is reclaimed after this, well inside one wait. */
+const LOCK_UNNAMED_STALE_MS = 1_000;
 const lockSleeper = new Int32Array(new SharedArrayBuffer(4));
 
+/** The lock as one waiter saw it: a dead or unnamed-and-old holder is `stale`. Undefined once it is gone. */
+function inspectLock(lock: string): { ino: number; text: string; stale: boolean } | undefined {
+	try {
+		const { ino, mtimeMs } = statSync(lock);
+		const text = readFileSync(lock, "utf8");
+		let holder: { pid?: unknown; started_at?: unknown } | undefined;
+		try {
+			holder = JSON.parse(text);
+		} catch {
+			holder = undefined; // still being written, or its writer died first: judged by age below
+		}
+		const named = Number.isInteger(holder?.pid) && typeof holder?.started_at === "string";
+		const stale = named
+			? !isLockHolderAlive(holder!.pid as number, holder!.started_at as string)
+			: Date.now() - mtimeMs > LOCK_UNNAMED_STALE_MS;
+		return { ino, text, stale };
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+/** Remove the stale lock `seen`; a fresh lock another waiter's reclaim raced in is linked back, never deleted. */
+function reclaimLock(lock: string, seen: { ino: number; text: string }): void {
+	const moved = `${lock}.stale-${process.pid}-${randomUUID().slice(0, 8)}`;
+	try {
+		renameSync(lock, moved);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw error;
+	}
+	try {
+		if (statSync(moved).ino !== seen.ino || readFileSync(moved, "utf8") !== seen.text) linkSync(moved, lock);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+	} finally {
+		rmSync(moved, { force: true });
+	}
+}
+
 /**
- * One read-modify-write of `file` at a time across processes, under `<file>.lock` (O_EXCL, held for milliseconds).
+ * One read-modify-write of `file` at a time across processes, under `<file>.lock` (O_EXCL, `{pid, started_at, nonce}`).
  * Without it a wake another process enqueued between the parent's read and rename was overwritten and never delivered.
  */
 function withOutboxLock<T>(file: string, fn: () => T): T {
 	const lock = `${file}.lock`;
+	const record = `${JSON.stringify({ pid: process.pid, started_at: isoTimestamp(new Date()), nonce: randomUUID() })}\n`;
 	const deadline = Date.now() + LOCK_WAIT_MS;
 	mkdirSync(dirname(file), { recursive: true });
 	for (;;) {
 		try {
-			closeSync(openSync(lock, "wx", 0o600));
+			const fd = openSync(lock, "wx", 0o600);
+			try {
+				writeSync(fd, record);
+			} finally {
+				closeSync(fd);
+			}
 			break;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 		}
-		let age: number;
-		try {
-			age = Date.now() - statSync(lock).mtimeMs;
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-			continue; // released between our open and stat
-		}
-		// shortcut: a crashed holder's lock is reclaimed by age, not pid; upgrade if a hold can ever be slow.
-		if (age > LOCK_STALE_MS) rmSync(lock, { force: true });
-		else if (Date.now() > deadline) throw new DurableWakeupError(`${lock} held for over ${LOCK_WAIT_MS}ms; wakeups.json unchanged`);
-		else Atomics.wait(lockSleeper, 0, 0, 2);
+		const seen = inspectLock(lock);
+		if (seen?.stale) reclaimLock(lock, seen);
+		else if (seen && Date.now() > deadline) throw new DurableWakeupError(`${lock} held for over ${LOCK_WAIT_MS}ms by ${seen.text.trim()}; wakeups.json unchanged`);
+		else if (seen) Atomics.wait(lockSleeper, 0, 0, 2);
 	}
 	try {
 		return fn();
 	} finally {
-		rmSync(lock, { force: true });
+		// Release only our own record: a waiter may have reclaimed it if this process looked dead.
+		if (existsSync(lock) && readFileSync(lock, "utf8") === record) rmSync(lock, { force: true });
 	}
 }
 

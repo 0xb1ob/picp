@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CpBridge, type BridgeRelay } from "../../src/cp-bridge.ts";
@@ -9,12 +9,12 @@ import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths } from "../../
 import { initJobsDocument } from "../../src/ledger.ts";
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { formatContinuationNotice } from "../../src/held-continuation.ts";
-import { boundedWakeupId } from "../../src/wakeup-outbox.ts";
+import { boundedWakeupId, DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { REPO_ROOT, readRunEvents, startPiChild } from "../harness/index.ts";
 import { JOB as CI_JOB, PR, seedHeldHome } from "../harness/held-home.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { CiWatchStore } from "../../src/ci-watch.ts";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { LeaseManager } from "../../src/leases.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { enableTreehouse } from "../harness/treehouse.ts";
@@ -180,8 +180,8 @@ test("S20: a resolve cache stays quiet within its minute and refreshes to dispat
 });
 
 // Scenario: Given an idle parent, When a durable wake is enqueued while a sweep is deferred,
-// Then it reaches a model request within one sweep interval. Quiet window wakes keep the test process writing across
-// the deferral and two 5 s ticks of parent rewrites; main lost about a third to that read-modify-write race.
+// Then every one of those wakes is carried in a model request (none lost). Quiet window wakes keep the test process
+// writing across the deferral and two 5 s ticks of parent rewrites; main lost about a third to that race.
 test("S20: wakes enqueued by another process while a sweep is deferred all reach a model request", { timeout: 120_000 }, async (t) => {
 	const parent = await startRuleParent(t, "s20-deferred-burst");
 	parent.queue("deferred");
@@ -201,6 +201,23 @@ test("S20: wakes enqueued by another process while a sweep is deferred all reach
 	await waitFor(missing, (rows) => rows.length === 0, { timeoutMs: 30_000, what: "every wake enqueued during the deferral in a model request" })
 		.catch((error: unknown) => { throw trail.explain(error); });
 	assert.deepEqual(parent.events().map((e) => [e.decision, e.next_kind]), [["relayed", "no_mandate"]]);
+});
+
+// Scenario: Given a wakeups.json.lock left by a dead process, When a wake is enqueued,
+// Then it is written without waiting for the wait deadline. Before the pid check a crashed parent's lock made
+// every writer wait 5 s and throw, losing death and bound wakes for 10 s.
+test("S20: a wakeups.json.lock left by a dead process is reclaimed at once", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const dead = spawnSync(process.execPath, ["-e", ""]).pid!;
+	const lock = join(home.path, LAYOUT.wakeupsFile) + ".lock";
+	mkdirSync(join(lock, ".."), { recursive: true });
+	writeFileSync(lock, `${JSON.stringify({ pid: dead, started_at: isoTimestamp(), nonce: "crashed" })}\n`);
+	const started = Date.now();
+	assert.equal(new DurableWakeupOutbox({ home: home.path }).enqueue({ id: "after-crash", kind: "recovery", content: "S20 after crash." }), true);
+	assert.ok(Date.now() - started < 2_500, `enqueue took ${Date.now() - started}ms behind a dead holder's lock`);
+	assert.deepEqual(new DurableWakeupOutbox({ home: home.path }).read().pending.map((e) => e.id), ["after-crash"]);
+	assert.deepEqual(readdirSync(join(lock, "..")).filter((name) => name.startsWith("wakeups.json.lock")), []);
 });
 
 test("S20: a failed next refresh wakes with a reason and is not retried during its cache minute", { timeout: 120_000 }, async (t) => {
