@@ -1180,7 +1180,10 @@ export class CommandPost {
 	}
 
 	async tearDown(jobId: string, options: TeardownCallOptions = {}): Promise<TeardownResult> {
-		return this.teardown.teardown(jobId, options);
+		const result = await this.teardown.teardown(jobId, options);
+		// The exit's slot-free drain ran while the fleet record still held its native slot; the closed record frees it.
+		if (result.torn_down) void this.dispatchQueue.drain();
+		return result;
 	}
 
 	/**

@@ -19,6 +19,7 @@ import { NATIVE_FOLLOWUPS_FILE, NATIVE_SESSION_FILE, nativeRevivePrompt, queuedF
 import { OBSERVATION_EVENT } from "../../src/drivers/claude-observation.ts";
 import { recordNativeObservation } from "../../src/native-availability.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
+import { VERDICT_TOOL } from "../../src/drivers/claude-verdict.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, type RecordedClaudeRequest, routeNativeModel, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
 import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, REPO_ROOT, treehouseAvailable, waitFor } from "../harness/index.ts";
@@ -652,6 +653,62 @@ test("F9: a queued driver:claude dispatch releases native, and an armed one is r
 	const parent = JSON.stringify(h.b.parents.at(-1)?.records() ?? []);
 	assert.match(parent, new RegExp(`ARMED DISPATCH DROPPED: [^"]*workers\\.native_claude_research is off[^"]*${ids.armed}`));
 	assert.match(readFileSync(join(h.b.home, LAYOUT.wakeupsFile), "utf8"), new RegExp(`armed-dispatch:dropped:${ids.armed}`));
+	assert.equal(h.claude.overrun(), 0);
+});
+
+// Scenario: Given max_concurrent 1 held by a live native job, When an explicit driver claude dispatch arrives,
+// Then it is queued (position 1) and starts natively when the holder tears down,
+// And a quality voter that loses the slot runs on pi instead of abstaining (main refused, then abstained).
+test("J8: a full native slot queues a driver:claude dispatch until teardown, and a voter that lost it votes on pi", { skip, timeout: 420_000 }, async (t) => {
+	const ids: Record<string, string> = {};
+	const switchFile = join(LAYOUT.data, "native.json");
+	const research = (key: string): ClaudeStep[] => [
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[key]!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[key]!, h.b.home) }] },
+		{ kind: "text", text: "Reported." },
+	];
+	const verdict = () => ({ job_id: ids.subject, verdict: "pass", reasons: ["checked"], flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false } });
+	// Voter 2 must find the slot gone at spawn: the cap drops to 1 while the subject holds one and voter 1 runs.
+	const lose = async () => writeFileSync(join(h.b.home, switchFile), JSON.stringify({ claude_research: true, claude_review: true, max_concurrent: 1 }));
+	const h = await nativeHome(t, [...research("holder"), ...research("queued"), ...research("subject"),
+		{ kind: "tool_use", calls: [{ name: VERDICT_TOOL, input: verdict }], beforeAnswer: lose }, { kind: "text", text: "Reviewed." }]);
+	for (const key of ["holder", "queued", "subject"]) ids[key] = (await h.job()).id;
+	// No scheduler-tick backstop: only the holder's teardown may start the queued job.
+	const noTick = { ...h.env, CP_SCHEDULER_TICK_SECONDS: "3600" };
+	const ends = (await h.b.run([
+		h.dispatch(ids.holder!),
+		h.wait(ids.holder!, "agent_settled", 1),
+		tool("cp_dispatch", { job_id: ids.queued, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, when_ready: false, driver: "claude" }),
+		tool("cp_teardown", { job_id: ids.holder }),
+		h.wait(ids.queued!, "agent_settled", 1),
+		tool("cp_teardown", { job_id: ids.queued }),
+	], noTick, undefined, 300_000)) as Tool[];
+	const queued = ends.filter((end) => end.toolName === "cp_dispatch")[1];
+	assert.notEqual(queued?.isError, true, text(queued));
+	assert.deepEqual([queued?.result.details?.state, queued?.result.details?.position], ["queued", 1], text(queued));
+	for (const end of ends.filter((e) => e.toolName === "cp_teardown")) assert.notEqual(end.isError, true, text(end));
+	assert.equal(readFleet(h.b.home).jobs.find((job) => job.job_id === ids.queued)?.worker.driver, "claude");
+	assert.equal(readRunEvents(h.b.home, ids.queued!).filter((event) => event.type === "native_run").length, 1);
+	assert.match(readFileSync(join(h.b.home, LAYOUT.wakeupsFile), "utf8"), new RegExp(`dispatch-queue:started:${ids.queued}`));
+	await h.b.closeParents();
+
+	// A claude voter row with a pi fallback; pi's lane cannot serve the native model, so pi walks to the fallback.
+	const piVoter = h.b.provider.addScript("j8-pi-voter", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: verdict }] }]);
+	h.b.agent.writeModels(h.b.provider);
+	const routing = JSON.parse(readFileSync(join(h.b.home, LAYOUT.routingFile), "utf8")) as { rubric: unknown[] };
+	routing.rubric.unshift({ id: "j8-voters", role: "gate-reviewer", model: FAKE_NATIVE_MODEL, fallbacks: [piVoter], driver: "claude" });
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify(routing));
+	writeFileSync(join(h.b.home, switchFile), JSON.stringify({ claude_research: true, claude_review: true, max_concurrent: 2 }));
+	const post = h.b.ownPost(new CommandPost({
+		home: h.b.home, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentEnv: { ...process.env, ...h.b.agent.env, ...h.env },
+		modelRegistry: () => ({ find: (provider: string, id: string) => ({ provider, id }), hasConfiguredAuth: (m: { provider: string; id: string }) => `${m.provider}/${m.id}` !== FAKE_NATIVE_MODEL }),
+	}));
+	await post.dispatch({ jobId: ids.subject!, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, driver: "claude", fetch: false });
+	await waitFor(() => readRunEvents(h.b.home, ids.subject!).some((event) => event.type === "agent_settled"), Boolean, { timeoutMs: 120_000, what: "the subject's settled turn" });
+	const panel = await post.qualityPass().runAndWait({ jobId: ids.subject!, task: "Report the repo's package name.", config: { verify: true, voters: 2, threshold: 1 } });
+	const votes = panel?.verify?.votes ?? [];
+	assert.deepEqual(votes.map((vote) => [vote.model, vote.sound, vote.abstained ?? false]), [[FAKE_NATIVE_MODEL, true, false], [piVoter, true, false]], JSON.stringify(votes));
+	assert.equal(panel?.passed, true);
 	assert.equal(h.claude.overrun(), 0);
 });
 

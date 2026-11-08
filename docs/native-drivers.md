@@ -313,8 +313,11 @@ request refuses as `refused: <job> cannot run on the native claude driver: <reas
 | `claude` missing or below the pinned floor `CLAUDE_VERSION_FLOOR` | `claude update` / install remedy |
 
 `WorkerManager.spawn` refuses a native worker past `max_concurrent` again (`SpawnSafetyError`) before admission. A `driver: "claude"`
-dispatch held by the spawn cap (queued) or by open blockers (armed) keeps its driver (`QueuedDispatchRequestSchema.driver`,
-`toDispatchRequest`), so its release re-runs this selection: it runs native or is refused, never on pi.
+dispatch held by the spawn cap or full native slots (queued) or by open blockers (armed) keeps its driver
+(`QueuedDispatchRequestSchema.driver`, `toDispatchRequest`), so its release re-runs this selection: it runs native or is
+refused, never on pi. A queued entry refused as `occupied` stays at the head; a successful `cp_teardown` drains the queue
+once the closed record frees the slot. A quality voter that finds the native slot taken at spawn re-routes to pi
+(`explicit: "pi"`) instead of abstaining.
 
 Policy: a version floor (2.1.318), not an exact pin, because `claude` auto-updates and an exact pin would refuse every
 run after each update, while the N3a lockdown digest already refuses a changed built-in surface; remedy `claude update`.
