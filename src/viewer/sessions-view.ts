@@ -321,10 +321,15 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
   generated_at: new Date(now).toISOString(), selected: "you", session_id: selected?.id ?? null,
   parent: rows.parent, workers, entries, title: "Operator ↔ you", subtitle: "Full transcript", warnings, truncated,
   transcript: true, operator_session: selected?.id ?? null, operator_sessions: files.map((file) => ({id:file.id,at:file.at})),
-  open_asks: askDetails(state,d.awaiting.items,now,d), pr_chips, projects: [...new Set(registeredProjects(state))].sort(),
+  open_asks: askDetails(state,d.awaiting.items,now,d), pr_chips, projects: sessionProjects(state,entries),
  };
 }
 
+/** The chat filter's rows: registered names, sorted, that a loaded entry is attributed to (so none filters to nothing). */
+function sessionProjects(state: ViewerState, entries: SessionEntry[]): string[] {
+ const seen = new Set(entries.flatMap(e => [...(e.projects ?? []),...(e.segments ?? []).flatMap(s => s.projects)]));
+ return [...new Set(registeredProjects(state))].filter(name => seen.has(name)).sort();
+}
 /** Read-only evidence, never a reconstruction of unrecorded operator speech. */
 export function sessionsView(state: ViewerState, tier: SessionTier, workerId: string | null, options: SessionsOptions = {}): SessionsResponse | undefined {
  const now=options.now ?? Date.now();

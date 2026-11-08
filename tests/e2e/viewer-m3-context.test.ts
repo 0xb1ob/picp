@@ -231,7 +231,7 @@ test("M3-context-phone: the context sheet and the Conversations drawer are modal
 	assert.equal(tab.$('.workspace-sessions .session-choice[aria-current="page"]')!.getAttribute("href"), "#sessions?view=you&project=atlas", "the current session keeps the selection");
 	// The drawer carries the sidebar's project rows, atlas current; negative control: the retired thread rail.
 	assert.deepEqual([texts(tab, ".workspace-sessions .project-row"), tab.$('.workspace-sessions .project-row[aria-current="page"]')?.textContent, /New thread/.test(tab.$("dialog.workspace-sessions")!.textContent!)],
-		[["#All projects", "#atlas", "#picp"], "#atlas", false], "the drawer carries the project rows");
+		[["#All projects", "#atlas"], "#atlas", false], "the drawer carries the project rows: no session project, the selection kept");
 	assert.equal(escape(tab), true);
 	await until(() => tab.$("dialog.workspace-sessions"), (el) => el === null, "Escape to close Conversations");
 	assert.ok(focused() === conversations);

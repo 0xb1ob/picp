@@ -372,8 +372,9 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const shell=useContext(ShellContext);
  // Combine: from 900 px the chat column carries the rail's chrome, so the shell drops its own rail.
  useLayoutEffect(()=>shell.claimRail?.(),[shell.claimRail]);
- /** The project rows under Operator (All projects, then each registered name); a click only moves the hash. */
- const projectRows=(you:string)=>{const current=selectionValue(selection); return <ul class="project-rows" aria-label="Projects">{["",...(data.projects ?? [])].map(v=><li key={v || "all"}>
+ /** The project rows under Operator (All, the session's projects, a selection outside them); a click moves the hash. */
+ const projectRows=(you:string)=>{const current=selectionValue(selection), names=data.projects ?? [], kept=selection && "project" in selection && !names.includes(current) ? [current] : [];
+  return <ul class="project-rows" aria-label="Projects">{["",...[...names,...kept].sort()].map(v=><li key={v || "all"}>
   <a href={rowHash(filterable ? location.hash : you,v)} onClick={filterable ? (e => pickRow(e,v)) : undefined} class="project-row" aria-current={filterable && v === current ? "page" : undefined} title={v || "All projects"}>
    <span aria-hidden="true">#</span><span class="project-row-name">{v || "All projects"}</span></a></li>)}</ul>;};
  /** Chats: the sidebar from 900 px; the phone's Conversations drawer passes an Operator href keeping the selection. */
