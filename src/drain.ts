@@ -217,6 +217,8 @@ export interface DrainControlDeps {
 	fleet: { list(): FleetRecord[] };
 	/** Manager keys mid-turn in this process (`WorkerManager.quiesce().busy`): workers and reviewers. */
 	busy: () => string[];
+	/** Keys whose settle is still being decided (`SettleWatcher.settling`): idle, but its record has not landed yet. */
+	settling?: () => string[];
 	head: (jobId: string) => string | undefined;
 	/** One durable `cp-recovery` wake; ids repeat for one outcome, so the outbox delivers it once. */
 	journal: (wake: { id: string; content: string; keys?: string[] }) => void;
@@ -288,7 +290,9 @@ export class DrainControl {
 
 	#survivors(): string[] {
 		const steps = this.#mergeSteps;
-		return [...this.#deps.busy(), ...(steps > 0 ? [`${steps} merge step(s)`] : []), ...(this.#deps.parentControlBusy?.() ? ["parent compaction"] : [])];
+		const busy = this.#deps.busy();
+		const settling = (this.#deps.settling?.() ?? []).filter((key) => !busy.includes(key));
+		return [...busy, ...settling, ...(steps > 0 ? [`${steps} merge step(s)`] : []), ...(this.#deps.parentControlBusy?.() ? ["parent compaction"] : [])];
 	}
 
 	/** A freeze records each job's pushed checkpoint (`origin/<branch>`, else worktree HEAD) before any reported head. */

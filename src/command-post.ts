@@ -598,6 +598,7 @@ export class CommandPost {
 		});
 		this.drain = new DrainControl({ home: options.home, fleet: this.fleet, busy: () => this.manager.quiesce().busy, head: (jobId) => this.reportedHeadSha(jobId), owns: () => this.#ownsHome(), steer: (jobId, message) => this.send({ jobId, message, mode: "steer" }),
 			parentControlBusy: () => options.parentControlBusy?.() === true,
+			settling: () => this.settle.settling, // a settle still being decided is not drained yet: a restart would lose its record
 			// Not #journalDurable: an enqueue failure must reach DrainControl.check, which retries on the next tick.
 			journal: (wake) => { if (this.durableWakeups.enqueue({ ...wake, id: boundedWakeupId(wake.id), kind: "recovery" })) this.#options.onDurableWakeup?.(); },
 			discard: (ids) => this.durableWakeups.discard(ids.map((id) => ({ id: boundedWakeupId(id), reason: "the parent restarted after the drain" }))) });

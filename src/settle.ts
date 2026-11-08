@@ -369,6 +369,11 @@ export class SettleWatcher {
 		};
 	}
 
+	/** Jobs whose settle is still being decided; a drain counts them as survivors until the decision is recorded. */
+	get settling(): string[] {
+		return [...this.#inFlight.keys()];
+	}
+
 	/** One settle, decided. Idempotent per job while a decision is in flight. */
 	async settled(jobId: string, worker: NudgeableWorker): Promise<SettleOutcome> {
 		const existing = this.#inFlight.get(jobId);
