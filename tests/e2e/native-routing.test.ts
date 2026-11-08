@@ -175,6 +175,31 @@ test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned plan
 	assert.equal(h.claude.requests.length, 0, "no fallback reached the native model");
 });
 
+// Scenario: Given claude_research is on and an S planner row prefers claude
+//   When an ops:pull job or a job naming per-job skills is previewed through cp_dispatch dry_run
+//   Then each routes to pi as ineligible with its reason named, while a plain planner job still routes claude
+test("J1 eligibility: the ops profile and per-job skills fall back to pi as ineligible", { skip, timeout: 300_000 }, async (t) => {
+	const h = await routedHome(t, []);
+	h.toggle(true);
+	const dir = join(h.b.agent.path, "skills", "tdd-x");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, "SKILL.md"), "---\nname: tdd-x\ndescription: does tdd-x\n---\nSkill text.\n");
+	const [plain, skilled] = await Promise.all([h.job(), h.job()]);
+	const ops = await h.b.ledger.create({ title: `j1 pull ${Math.random()}`, project: "demo", delivery: "local", kind: "research", labels: ["ops:pull"] });
+	const ends = (await h.b.run([dispatch(plain.id), dispatch(ops.id), dispatch(skilled.id, { skills: ["tdd-x"] })]
+		.map((call) => ({ kind: "tool_calls" as const, calls: [{ ...call, args: { ...call.args, dry_run: true } }] })), h.env)) as Tool[];
+	const decisions = ends.filter((end) => end.toolName === "cp_dispatch").map((end) => {
+		assert.notEqual(end.isError, true, text(end));
+		return (end.result.details as { decision?: { driver?: string; driver_reason?: string } }).decision;
+	});
+	assert.equal(decisions[0]?.driver, "claude", decisions[0]?.driver_reason);
+	assert.equal(decisions[1]?.driver, "pi");
+	assert.equal(decisions[1]?.driver_reason, "ineligible: the ops profile needs ssh/scp, which the native Bash policy refuses");
+	assert.equal(decisions[2]?.driver, "pi");
+	assert.equal(decisions[2]?.driver_reason, "ineligible: per-job skills load only on pi (`--skill`)");
+	assert.equal(h.claude.requests.length, 0, "a preview reached the native model");
+});
+
 test("S1 config: an unknown driver or a non-anthropic claude model refuses with no lease; a started job keeps its driver", { skip, timeout: 300_000 }, async (t) => {
 	// N4e: an unreported clean turn now settles idle, so the locked job ends by its turn limit (CP_NATIVE_MAX_TURNS=1).
 	const bash = { kind: "tool_use" as const, calls: [{ name: "Bash", input: { command: "ls" } }] };
