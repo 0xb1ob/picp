@@ -1,0 +1,1 @@
+- Tests: P12c-sender-closed times the first sweep in the sender's own clock (lease `started_at` to the first sweep line), so node start-up under load no longer fails it; the P13c seed leaves `defaults/ci-flakes.json` after 20 clean runs under CPU burners.
