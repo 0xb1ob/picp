@@ -254,6 +254,7 @@ test("M3-jobs-reply-log: a reply's job link opens the job's Transcript in the pa
 	const park = await stepsLink("cp-park");
 	const transcript = tab.$(".session-transcript") as Element & { scrollTop: number };
 	transcript.scrollTop = 120;
+	transcript.dispatchEvent(new tab.window.Event("scroll")); // a user scroll unfollows; else a late entry re-pins the end
 	const followed = activate(tab, park);
 	await settle();
 	assert.deepEqual([followed, !!tab.$(".sessions"), tab.window.location.hash], [false, true, filtered], "an unmodified primary click is the chat's: .sessions and the route stay");
@@ -336,6 +337,7 @@ test("M3-jobs-log (full match S4): a reply's link opens the job's Transcript wit
 	const footed = async (on: Tab) => on.click(await on.find('.workspace-job .workspace-log-tabs [data-view="report"]'));
 	const transcript = tab.$(".session-transcript") as Element & { scrollTop: number };
 	transcript.scrollTop = 160;
+	transcript.dispatchEvent(new tab.window.Event("scroll")); // a user scroll unfollows; else a late entry re-pins the end
 	assert.equal(activate(tab, link), false, "an unmodified click on the reply's link is the chat's");
 	const run = await tab.find(".workspace-job .job-detail-embedded[data-tab=transcript] .tool-run-solid button");
 	tab.click(run);

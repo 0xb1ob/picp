@@ -371,9 +371,10 @@ export class SettleWatcher {
 		};
 	}
 
-	/** Jobs whose settle is still being decided; a drain counts them as survivors until the outcome is in the run log. */
+	/** Jobs whose settle is still being decided; a drain counts them until the outcome is in the run log or the
+	 * fleet record is failed (what `fail()` does after `markFailed`, the announce, holds no drain). */
 	get settling(): string[] {
-		return [...this.#inFlight.keys()].filter((jobId) => !this.#recorded.has(jobId));
+		return [...this.#inFlight.keys()].filter((jobId) => !this.#recorded.has(jobId) && this.#options.fleet.get(jobId)?.phase !== "failed");
 	}
 
 	/** One settle, decided. Idempotent per job while a decision is in flight. */
