@@ -74,6 +74,11 @@ export function boundedWakeupId(raw: string): string {
 	return `${raw.slice(0, 139)}:${digest}`;
 }
 
+/** The follow-up id carrying a death notice's inspected facts once its bare entry already left the pending queue. */
+export function inspectedWakeupId(id: string): string {
+	return boundedWakeupId(`${id}:inspected`);
+}
+
 /** `prefix` + a cause, at most 160 chars; a long cause keeps its head and its tail (the status/HTTP code) plus a hash. */
 export function boundedCauseId(prefix: string, cause: string): string {
 	const raw = prefix + cause;
@@ -102,6 +107,8 @@ export interface DurableWakeupInput {
 	keys?: string[];
 	generation?: number;
 	queued_at?: string;
+	/** Rewrite the still-pending entry with this id; `enqueue` returns false when it is delivered, discarded or absent. */
+	replace?: boolean;
 }
 
 export class DurableWakeupOutbox {
@@ -171,6 +178,11 @@ export class DurableWakeupOutbox {
 		};
 		let queuedIt = false;
 		this.#mutate((file) => {
+			if (input.replace) {
+				if (!file.pending.some((item) => item.id === entry.id)) return file;
+				queuedIt = true;
+				return { ...file, pending: file.pending.map((item) => (item.id === entry.id ? { ...item, content: entry.content } : item)) };
+			}
 			if (file.pending.some((item) => item.id === entry.id)) return file;
 			if (file.delivered.some((item) => item.id === entry.id)) return file;
 			if ((file.discarded ?? []).some((item) => item.id === entry.id)) return file;

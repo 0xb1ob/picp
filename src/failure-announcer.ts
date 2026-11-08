@@ -8,7 +8,7 @@
  */
 import type { Failure, FleetRecord, UnreportedWork } from "./contracts.ts";
 import type { FleetStore } from "./fleet.ts";
-import { boundedWakeupId, type DurableWakeupInput } from "./wakeup-outbox.ts";
+import { boundedWakeupId, inspectedWakeupId, type DurableWakeupInput } from "./wakeup-outbox.ts";
 import { FAILURE_CLASS_WAKEUP, formatDeathNotice } from "./wakeups.ts";
 import { inspectWorktreeWork } from "./worktree-work.ts";
 
@@ -79,14 +79,18 @@ export function recoveryLine(recovery: FailRecoveryFact): string {
 	return `not attempted \u2014 ${left}`;
 }
 
+const UNINSPECTED: Omit<UnreportedWork, "observed_at"> = {
+	state: "unknown", files: [], file_count: 0, commits_ahead: 0, reason: "worktree inspection pending",
+};
+
 export class FailureAnnouncer {
 	readonly #fleet: FleetStore;
-	readonly #journal: (input: DurableWakeupInput) => void;
+	readonly #journal: (input: DurableWakeupInput) => boolean;
 	readonly #inspect: typeof inspectWorktreeWork;
 
 	constructor(options: {
 		fleet: FleetStore;
-		journal: (input: DurableWakeupInput) => void;
+		journal: (input: DurableWakeupInput) => boolean;
 		inspect?: typeof inspectWorktreeWork;
 	}) {
 		this.#fleet = options.fleet;
@@ -114,22 +118,28 @@ export class FailureAnnouncer {
 
 	async #announce(record: FleetRecord, failure: Failure, notice?: string, recovery?: FailRecoveryFact): Promise<void> {
 		const kind = FAILURE_CLASS_WAKEUP[failure.class];
-		const base = notice && notice.length > 0 ? notice : await this.#deathNotice(record, failure);
 		const auto = recovery ? recoveryLine(recovery) : undefined;
-		const content = auto !== undefined ? `${base}\n  automatic recovery: ${auto}` : base;
-		this.#journal({
-			// cur.4.4: a bound id without an occurrence component collapses every
-			// breach of the same (job, class) into one wake-up: `enqueue` suppresses an
-			// id already pending/delivered/discarded, so a second breach after a
-			// successful auto-redispatch never reached the parent. `failure.at` is the
-			// occurrence key death ids already carry.
-			id: kind === "bound" ? boundWakeupId(record.job_id, failure.class, failure.at) : deathWakeupId(record.job_id, failure.at),
-			kind,
-			job_id: record.job_id,
-			content: content.slice(0, 4000),
-			keys: [failure.class],
-			generation: (record.supersessions ?? 0) + 1,
-		});
+		// cur.4.4: a bound id needs the occurrence (`failure.at`) or a second breach of the same (job, class) is suppressed.
+		const id = kind === "bound" ? boundWakeupId(record.job_id, failure.class, failure.at) : deathWakeupId(record.job_id, failure.at);
+		const send = (base: string, options: { id?: string; replace?: boolean } = {}): boolean =>
+			this.#journal({
+				id: options.id ?? id,
+				kind,
+				job_id: record.job_id,
+				content: (auto !== undefined ? `${base}\n  automatic recovery: ${auto}` : base).slice(0, 4000),
+				keys: [failure.class],
+				generation: (record.supersessions ?? 0) + 1,
+				...(options.replace ? { replace: true } : {}),
+			});
+		if (notice && notice.length > 0) {
+			send(notice);
+			return;
+		}
+		// The inspect is slow and a drain no longer counts a failed job: journal a bare notice now, then refine it.
+		send(formatDeathNotice(record.job_id, failure, { ...UNINSPECTED, observed_at: failure.at }));
+		const inspected = await this.#deathNotice(record, failure);
+		// The bare notice already left the pending queue: the facts go out as one follow-up under a deterministic id.
+		if (!send(inspected, { replace: true })) send(inspected, { id: inspectedWakeupId(id) });
 	}
 
 	async #deathNotice(record: FleetRecord, failure: Failure): Promise<string> {
