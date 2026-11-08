@@ -1,0 +1,1 @@
+- Test-only: `M3-jobs-reply-log` and `M3-jobs-log` dispatch a `scroll` event after setting the transcript's `scrollTop`, as a real user scroll does, so a late transcript entry no longer re-pins the end and flakes the "scroll kept" assertion.
