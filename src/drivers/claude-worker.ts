@@ -3,6 +3,7 @@
  * reads (`get_state`, `prompt`, `follow_up`, then events), runs each turn through `runClaudeSpike` with every N3a gate
  * on, and exits on stdin end or SIGTERM. A clean unreported turn settles idle; a named stop exits non-zero.
  */
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -37,7 +38,7 @@ import {
 
 const write = (record: Record<string, unknown>): void => void process.stdout.write(`${JSON.stringify(record)}\n`);
 const toolNames = new Map<string, string>();
-const abort = new AbortController();
+let abort = new AbortController();
 const env = process.env;
 // A flat home (`~/.pi-command-post`) keeps state/ at its root: unconfigured, every home read missed (N4l).
 if (env.CP_HOME) configureLayout("multi", env.CP_HOME);
@@ -56,6 +57,11 @@ let streamed: StreamedUsage = new Map();
 let accepted = false;
 // Set by the first stop: no queued follow-up starts a new turn after it.
 let stopping = false;
+// Set by a `checkpoint` (a freeze drain): the turn is aborted, its WIP committed, and the worker settles idle.
+let freezing = false;
+const checkpointReplies: Array<(body: Record<string, unknown>) => void> = [];
+// Set while an idle prompt's resume admission is pending: busy, but no turn exists to checkpoint.
+let admitting = false;
 let session: NativeSession | undefined;
 let transcript: NativeTranscript | undefined;
 
@@ -177,6 +183,8 @@ async function turn(prompt: string): Promise<Turn> {
 	}
 	transcript.prompt(prompt, resumed);
 	const implementer = nativeRole(role) === "implementer";
+	// Per turn, so a checkpoint aborts only this run; a stop or freeze already under way keeps its aborted controller.
+	if (!stopping && !freezing) abort = new AbortController();
 	const result = await runClaudeSpike({
 		job: {
 			job_id: jobId, kind, role, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, ...(artifactPath ? { artifactPath } : {}),
@@ -219,7 +227,7 @@ async function turn(prompt: string): Promise<Turn> {
 	// SAFETY: relay() sets finalResult during the run; the control-flow narrowing to undefined above is stale.
 	const isError = (finalResult as SDKResultMessage | undefined)?.is_error;
 	const reported = Boolean(result.report ?? result.verdict);
-	const end = classifyTurn({ reported, resultSubtype: result.resultSubtype, isError, error: result.error, lockdown, observations: turnSeen });
+	const end = classifyTurn({ reported, resultSubtype: result.resultSubtype, isError, error: result.error, lockdown, observations: turnSeen, frozen: freezing });
 	const stop = nativeRunStop(end, maxTurns);
 	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: reported, result_subtype: result.resultSubtype ?? null, usage: measured.status === "estimated" ? "estimated" : usage ? "measured" : "unavailable", usage_status: measured.status, ...costUnknown, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...stop.fields });
 	if (stop.line) process.stderr.write(`[native claude] ${stop.line}\n`);
@@ -239,7 +247,7 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 	// Claimed before the admission await: a send queued during it waits for the next turn end, never lost.
 	const queued = claimFollowUps(runDir);
 	if (queued.length === 0) return [];
-	if (abort.signal.aborted || stopping) return (returnClaim(runDir), []);
+	if (abort.signal.aborted || stopping || freezing) return (returnClaim(runDir), []);
 	const events = join(env.CP_HOME ?? "", paths.eventsFile(env.CP_JOB_ID ?? ""));
 	const recorded = existsSync(events) && readFileSync(events, "utf8").includes(ran.runId);
 	try {
@@ -250,6 +258,34 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 		return [];
 	}
 	return queued;
+}
+
+type Checkpoint = { head: string; pushed: boolean; error?: string } | { error: string };
+
+/**
+ * Commits the worktree's WIP after a freeze aborted the turn (`git add -A` honours .gitignore), then pushes it to
+ * origin/<job> best effort, never forced: a failed push is `pushed: false` with its error, still a checkpoint.
+ */
+function checkpointCommit(worktree: string, branch: string): Checkpoint {
+	const bounded = (error: unknown) => (error as Error).message.slice(0, 500);
+	let head: string;
+	let git: (args: string[]) => string;
+	try {
+		const options: ExecFileSyncOptionsWithStringEncoding = { cwd: worktree, env: { ...env, ...commitIdentityEnv(worktree) }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
+		git = (args) => execFileSync("git", args, options).trim();
+		git(["add", "-A"]);
+		if (git(["status", "--porcelain"]) !== "") git(["commit", "-q", "-m", "WIP: freeze checkpoint"]);
+		head = git(["rev-parse", "HEAD"]);
+	} catch (error) {
+		return { error: bounded(error) };
+	}
+	if (!branch || ["main", env.CP_BASE_BRANCH?.trim()].includes(branch)) return { head, pushed: false, error: `no job branch to push (${branch || "unset"})` };
+	try {
+		git(["push", "-q", "origin", `HEAD:refs/heads/${branch}`]);
+		return { head, pushed: true };
+	} catch (error) {
+		return { head, pushed: false, error: bounded(error) };
+	}
 }
 
 /** Turns until no admitted follow-up is queued; settles when any turn reported or the last ended clean, else fails. */
@@ -275,11 +311,24 @@ async function serve(first: string): Promise<number> {
 			code = ran.code;
 			end = ran.end;
 			// A named stop takes no queued follow-up: another turn would be the nudge the stop forbids.
-			claimed = end.kind === "stop" && end.stop !== "other" ? [] : await dueFollowUps(ran);
+			claimed = (end.kind === "stop" && end.stop !== "other") || end.kind === "frozen" ? [] : await dueFollowUps(ran);
+			// A checkpoint during the admission await: the claim goes back and the freeze ends the loop.
+			if (freezing && claimed.length > 0) claimed = (returnClaim(runDir), []);
 			prompt = claimed.length > 0 ? claimed.join("\n\n") : undefined;
 		}
 	} finally {
 		busy = false;
+	}
+	if (freezing) {
+		freezing = false;
+		// A named stop (auth, lockdown, window) wins over the freeze: no checkpoint, and its non-zero exit is kept.
+		const named = end?.kind === "stop" && end.stop !== "other" ? end.stop : undefined;
+		const outcome = named ? { error: `the turn ended on a named stop (${named}); nothing was checkpointed` } : checkpointCommit(env.CP_WORKTREE ?? "", env.CP_JOB_ID ?? "");
+		if (!named) write({ type: "native_checkpoint", ...outcome });
+		for (const answer of checkpointReplies.splice(0)) answer("head" in outcome ? { success: true, data: outcome } : { success: false, ...outcome });
+		if (named) return code;
+		write({ type: "agent_settled" });
+		return 0;
 	}
 	if (!reported && end?.kind !== "settle") return code;
 	write({ type: "agent_settled" });
@@ -296,6 +345,16 @@ function command(line: string): void {
 	const reply = (body: Record<string, unknown>) => write({ type: "response", id: request.id, command: request.type, ...body });
 	const jobId = env.CP_JOB_ID ?? "this job";
 	if (request.type === "get_state") return reply({ success: true, data: { sessionId: jobId, sessionFile } });
+	if (request.type === "checkpoint") {
+		if (!busy) return reply({ success: false, error: `${jobId}: the native worker is idle; there is no turn to checkpoint` });
+		// No turn runs yet: a freeze set now would outlive a refused admission and abort the next turn.
+		if (admitting) return reply({ success: false, error: `${jobId}: a resume admission is pending; no turn to checkpoint yet` });
+		// serve() awaits the observed claude exit, commits the WIP, answers with the head and settles idle.
+		freezing = true;
+		checkpointReplies.push(reply);
+		abort.abort();
+		return;
+	}
 	const message = typeof request.message === "string" ? request.message : undefined;
 	if (message !== undefined && busy && (request.type === "prompt" || request.type === "follow_up")) {
 		try {
@@ -308,11 +367,15 @@ function command(line: string): void {
 	if (message !== undefined && request.type === "prompt") {
 		// Admission holds the door: a prompt arriving meanwhile queues; a refusal is the reply and no turn starts.
 		busy = true;
+		admitting = true;
 		const start = () => {
+			admitting = false;
 			// "resuming" is admitted and starting, not yet run: a resume that throws is journaled as native_resume_failed.
 			reply({ success: true, data: { disposition: resuming ? "resuming" : "started" } });
 			run = serve(message).catch((error: unknown) => {
 				if (resuming) write({ type: "native_resume_failed", reason: (error as Error).message });
+				freezing = false;
+				for (const answer of checkpointReplies.splice(0)) answer({ success: false, error: `the turn failed before a checkpoint: ${(error as Error).message}` });
 				process.stderr.write(`[native claude] refused: ${(error as Error).message}\n`);
 				return 1;
 			});
@@ -320,6 +383,7 @@ function command(line: string): void {
 		};
 		void startIdlePrompt({ home: env.CP_HOME ?? "", jobId, resumed: resuming }, start).then((refused) => {
 			if (refused === undefined) return;
+			admitting = false;
 			busy = false;
 			process.stderr.write(`[native claude] ${refused}\n`);
 			reply({ success: false, error: refused });
