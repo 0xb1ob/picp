@@ -45,7 +45,7 @@ export const NOT_RESUMED = "Nothing was resumed.";
 
 /**
  * An idle prompt (`worker.send` skips send.ts admission): a resumed turn passes `admit` first, then `start` runs.
- * Returns the named refusal, in which case `start` never ran; a first, dispatched turn was admitted by dispatch.
+ * Only picp's own nudges arrive unadmitted (cp_send and cp_revive passed the hold already), so the hold is skipped.
  */
 export async function startIdlePrompt(
 	input: { home: string; jobId: string; resumed: boolean },
@@ -54,7 +54,7 @@ export async function startIdlePrompt(
 ): Promise<string | undefined> {
 	if (input.resumed) {
 		try {
-			await admit({ home: input.home, jobId: input.jobId, what: "resume" });
+			await admit({ home: input.home, jobId: input.jobId, what: "resume", ownPrompt: true });
 		} catch (error) {
 			return `${(error as Error).message}. ${NOT_RESUMED}`;
 		}
