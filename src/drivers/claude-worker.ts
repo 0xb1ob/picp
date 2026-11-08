@@ -374,6 +374,8 @@ function command(line: string): void {
 			reply({ success: true, data: { disposition: resuming ? "resuming" : "started" } });
 			run = serve(message).catch((error: unknown) => {
 				if (resuming) write({ type: "native_resume_failed", reason: (error as Error).message });
+				freezing = false;
+				for (const answer of checkpointReplies.splice(0)) answer({ success: false, error: `the turn failed before a checkpoint: ${(error as Error).message}` });
 				process.stderr.write(`[native claude] refused: ${(error as Error).message}\n`);
 				return 1;
 			});

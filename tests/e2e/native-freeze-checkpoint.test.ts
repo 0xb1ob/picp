@@ -80,6 +80,24 @@ test("J6 admission: a checkpoint while the resume admission is pending is refuse
 	assert.match(replies[1]?.error ?? "", /Nothing was resumed\.$/);
 });
 
+// Scenario: a turn that throws still answers its pending checkpoint
+//   Given a native implementer whose turn throws (started without CP_HOME) with a checkpoint pending
+//   When serve() fails
+//   Then the checkpoint is answered success false naming the failure, never left to the RPC timeout
+test("J6 throw: a checkpoint pending when the turn throws is answered with the error", (t) => {
+	const root = mkdtempSync(join(tmpdir(), "cp-j6-throw-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	writeFileSync(join(root, "system.md"), "You are a test implementer.\n");
+	const input = [{ id: 1, type: "prompt", message: "go" }, { id: 2, type: "checkpoint" }].map((line) => `${JSON.stringify(line)}\n`).join("");
+	// No CP_HOME: the implementer's exclude paths cannot be read, so the turn throws before claude starts.
+	const env = { PATH: process.env.PATH ?? "", HOME: root, CP_JOB_ID: "cp-j6", CP_RUN_DIR: root, CP_WORKTREE: root, CP_KIND: "ship", CP_ROLE: "implementer", CP_NATIVE_SYSTEM_PROMPT_FILE: join(root, "system.md") };
+	const worker = spawnSync(process.execPath, [WORKER], { input, env, encoding: "utf8", timeout: 60_000 });
+	const replies = worker.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Line).filter((line) => line.type === "response");
+	assert.deepEqual(replies.map((line) => [line.id, line.success]), [[1, true], [2, false]], worker.stdout + worker.stderr);
+	assert.match(replies[1]?.error ?? "", /^the turn failed before a checkpoint: native claude worker started without CP_HOME/);
+	assert.equal(worker.status, 1, worker.stderr);
+});
+
 // Scenario: a checkpoint aborts the native turn, commits and pushes the WIP, and leaves the worker idle and alive
 //   Given a native ship implementer mid-turn (its model call held open) with an uncommitted file in its worktree
 //   When the parent sends the checkpoint RPC, Then claude exits, `WIP: freeze checkpoint` holds the file,
