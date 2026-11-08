@@ -64,6 +64,8 @@ export interface DurableWakeupInput {
 	keys?: string[];
 	generation?: number;
 	queued_at?: string;
+	/** Rewrite the content of the still-pending entry with this id; a no-op once it is delivered or discarded. */
+	replace?: boolean;
 }
 
 export class DurableWakeupOutbox {
@@ -131,6 +133,9 @@ export class DurableWakeupOutbox {
 		};
 		let queuedIt = false;
 		this.#mutate((file) => {
+			if (input.replace) {
+				return { ...file, pending: file.pending.map((item) => (item.id === entry.id ? { ...item, content: entry.content } : item)) };
+			}
 			if (file.pending.some((item) => item.id === entry.id)) return file;
 			if (file.delivered.some((item) => item.id === entry.id)) return file;
 			if ((file.discarded ?? []).some((item) => item.id === entry.id)) return file;
