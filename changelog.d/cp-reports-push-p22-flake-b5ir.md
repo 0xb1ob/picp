@@ -1,0 +1,1 @@
+- Tests: `P22-push-retry` no longer flakes on a loaded runner. Its 30/60/120/240 s backoff and "not before" checks used to compare against the test's wall-clock receipt time with a 2 s tolerance. They now compare exactly against the parent's own whole-second sweep clock, read from each post's VAPID JWT `exp`.
