@@ -342,11 +342,13 @@ test("P12c-sender-closed: a bad binding, ledger or store sends nothing; the bind
 	const kioskOwn = (await eventOf(s, kiosk)).id;
 	writeFileSync(lease, JSON.stringify({ pid: 999_999_999 })); // a dead holder
 	writeFileSync(tunnelRuntimeFile(s.stateDir), "{torn");
-	const started = Date.now();
 	let sender = s.sender();
 	const unreadable = () => sender.out().split("\n").filter((line) => line.includes("pairing alerts stopped: the tunnel runtime is unreadable")).length;
 	await until(unreadable, (count) => count === 1, "fail closed");
-	assert.ok(Date.now() - started < 4_000, `the first sweep runs at start, not after an interval (${Date.now() - started} ms)`);
+	// Timed in the sender's own clock, lease stamp to first sweep line, so node start-up under load is not counted.
+	const swept = sender.out().split("\n").find((line) => line.includes("the tunnel runtime is unreadable"))!.split(" ")[0]!;
+	const firstSweep = Date.parse(swept) - Date.parse(JSON.parse(readFileSync(lease, "utf8")).started_at);
+	assert.ok(firstSweep < 4_000, `the first sweep runs at start, not after an interval (${firstSweep} ms after taking the lease)`);
 	assert.equal(JSON.parse(readFileSync(lease, "utf8")).pid, sender.child.pid, "a dead holder's lease is replaced");
 	assert.deepEqual([s.record(own, laptop.id)?.state, s.posts.length], ["pending", 0], "no push on a guess, nothing settled");
 	for (const bad of [{ schema_version: 2, generation: 1, origin: null }, { schema_version: 1, generation: 1.5, origin: null }, { schema_version: 1, generation: 1, origin: "http://abc.trycloudflare.com" }]) {
