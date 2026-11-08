@@ -1,6 +1,6 @@
 /**
  * Behavior 15 (P14e): cp-daemon's update oneshot as cp-daemon runs it — `node <app>/src/service/update.ts` in a
- * scratch checkout with a bare origin, its clock 50 times fast but for its cp-daemon waits and host connects (real trips).
+ * scratch checkout with a bare origin, its clock 50 times fast but for its cp-daemon waits and host connects (real).
  * The parent host and cp-daemon's control socket are one logging stand-in process answering from a plan file; npm is
  * a stub; git, the fleet, run status and drain.json are real.
  */
