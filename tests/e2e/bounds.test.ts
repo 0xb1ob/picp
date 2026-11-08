@@ -316,6 +316,34 @@ test("S21: budget and provider failures reach the durable death journal", { skip
 	}
 });
 
+// Scenario: Given a worker whose model call failed and whose failed transition is still pending,
+// When the parent drains, Then the drain holds until fail() resolves,
+// And at the moment it reports drained the job's fleet record is already failed.
+test("drain: a failed model call's fleet transition lands before the drain reports drained", { skip: SKIP, timeout: 110_000 }, async (t) => {
+	const f = await fleet(t);
+	const jobId = await f.intake("drain failed call", "drain-failed-call");
+	const model = f.script("drain-failed-call", [{ kind: "error", status: 401, message: "401 Invalid API key", repeat: 20 }]);
+	routeNamed(f.home, [model]);
+	let entered!: () => void;
+	let release!: () => void;
+	const reached = new Promise<void>((resolve) => (entered = resolve));
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	const markFailed = f.post.fleet.markFailed.bind(f.post.fleet);
+	f.post.fleet.markFailed = async (id, failure) => {
+		entered();
+		await gate;
+		return markFailed(id, failure);
+	};
+	await f.post.dispatch({ jobId, task: "Fail the model call.", model, fetch: false, toolCallCap: 100, wallClockSeconds: 90 });
+	await reached;
+	assert.equal(f.post.drain.start().state, "draining", "the failed transition is still pending");
+	assert.equal(f.post.drain.check()?.state, "draining");
+	release();
+	const phase = await waitFor(() => (f.post.drain.check()?.state === "drained" ? f.post.fleet.get(jobId)?.phase : undefined),
+		(value) => value !== undefined, { timeoutMs: 30_000, what: "the drain reports drained" });
+	assert.equal(phase, "failed", "drained before the failed job's fleet record was final");
+});
+
 
 test("S21: an idle worker that ignores its report nudge emits one unreported outcome", { skip: SKIP, timeout: 110_000 }, async (t) => {
 	const f = await fleet(t);

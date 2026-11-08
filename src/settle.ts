@@ -322,7 +322,7 @@ export class SettleWatcher {
 	/** cp-mub7: per-job "the outer ladder is spent on this settle" reads, set by `watch`'s fourth argument. */
 	readonly #retryExhausted = new Map<string, () => string | undefined>();
 	readonly #quotaClaim = new Map<string, () => string | undefined>();
-	/** In-flight jobs whose outcome is already in the run log; what remains (announce, stop) holds no drain. */
+	/** In-flight jobs whose outcome is final (run-log event, or `fail()` resolved); a failed job's `shutdown` holds no drain. */
 	readonly #recorded = new Set<string>();
 
 	constructor(options: SettleWatcherOptions) {
@@ -606,8 +606,9 @@ export class SettleWatcher {
 		};
 		const recorder = this.#options.runs.open(jobId);
 		recorder.markFailure(failure);
-		this.#recorded.add(jobId);
+		// Recorded only once the fleet transition lands, so a drain never reports drained over a pending `failed`.
 		await this.#options.fail(jobId, failure);
+		this.#recorded.add(jobId);
 		const outcome: SettleOutcome = {
 			action: "recorded",
 			settles,

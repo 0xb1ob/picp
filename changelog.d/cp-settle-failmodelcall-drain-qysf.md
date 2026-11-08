@@ -1,0 +1,1 @@
+- A drain no longer reports `drained` while a failed model call's `fail()` is still pending: `SettleWatcher` marks the job recorded after `fail()` resolves (the worker `shutdown` still holds no drain), so a restart on that notice cannot lose the failed transition.
