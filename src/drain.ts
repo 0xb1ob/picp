@@ -235,6 +235,14 @@ export interface DrainControlDeps {
 	checkpoint?: (jobId: string) => Promise<unknown>;
 }
 
+/** The `checkpoint` dep over a live worker's RPC: a reply whose `success` is not true throws its error. */
+export async function workerCheckpoint(worker: { request(type: string): Promise<{ success?: boolean; error?: string; data?: unknown }> } | undefined): Promise<{ data?: unknown }> {
+	if (!worker) throw new Error("no live worker in this process");
+	const reply = await worker.request("checkpoint");
+	if (reply.success !== true) throw new Error(reply.error ?? "the worker refused the checkpoint");
+	return reply;
+}
+
 function outcomeWakeId(record: Pick<DrainRecord, "started_at">, state: "drained" | "timeout"): string {
 	return `drain:${record.started_at}:${state}`;
 }

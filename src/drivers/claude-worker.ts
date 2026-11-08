@@ -60,6 +60,8 @@ let stopping = false;
 // Set by a `checkpoint` (a freeze drain): the turn is aborted, its WIP committed, and the worker settles idle.
 let freezing = false;
 const checkpointReplies: Array<(body: Record<string, unknown>) => void> = [];
+// Set while an idle prompt's resume admission is pending: busy, but no turn exists to checkpoint.
+let admitting = false;
 let session: NativeSession | undefined;
 let transcript: NativeTranscript | undefined;
 
@@ -258,16 +260,31 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 	return queued;
 }
 
-/** Commits the worktree's WIP after a freeze aborted the turn; the head is the checkpoint, or the error names why not. */
-function checkpointCommit(worktree: string): { head: string } | { error: string } {
+type Checkpoint = { head: string; pushed: boolean; error?: string } | { error: string };
+
+/**
+ * Commits the worktree's WIP after a freeze aborted the turn (`git add -A` honours .gitignore), then pushes it to
+ * origin/<job> best effort, never forced: a failed push is `pushed: false` with its error, still a checkpoint.
+ */
+function checkpointCommit(worktree: string, branch: string): Checkpoint {
+	const bounded = (error: unknown) => (error as Error).message.slice(0, 500);
+	let head: string;
+	let git: (args: string[]) => string;
 	try {
 		const options: ExecFileSyncOptionsWithStringEncoding = { cwd: worktree, env: { ...env, ...commitIdentityEnv(worktree) }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
-		const git = (args: string[]): string => execFileSync("git", args, options).trim();
+		git = (args) => execFileSync("git", args, options).trim();
 		git(["add", "-A"]);
 		if (git(["status", "--porcelain"]) !== "") git(["commit", "-q", "-m", "WIP: freeze checkpoint"]);
-		return { head: git(["rev-parse", "HEAD"]) };
+		head = git(["rev-parse", "HEAD"]);
 	} catch (error) {
-		return { error: (error as Error).message.slice(0, 500) };
+		return { error: bounded(error) };
+	}
+	if (!branch || ["main", env.CP_BASE_BRANCH?.trim()].includes(branch)) return { head, pushed: false, error: `no job branch to push (${branch || "unset"})` };
+	try {
+		git(["push", "-q", "origin", `HEAD:refs/heads/${branch}`]);
+		return { head, pushed: true };
+	} catch (error) {
+		return { head, pushed: false, error: bounded(error) };
 	}
 }
 
@@ -304,9 +321,12 @@ async function serve(first: string): Promise<number> {
 	}
 	if (freezing) {
 		freezing = false;
-		const outcome = checkpointCommit(env.CP_WORKTREE ?? "");
-		write({ type: "native_checkpoint", ...outcome });
+		// A named stop (auth, lockdown, window) wins over the freeze: no checkpoint, and its non-zero exit is kept.
+		const named = end?.kind === "stop" && end.stop !== "other" ? end.stop : undefined;
+		const outcome = named ? { error: `the turn ended on a named stop (${named}); nothing was checkpointed` } : checkpointCommit(env.CP_WORKTREE ?? "", env.CP_JOB_ID ?? "");
+		if (!named) write({ type: "native_checkpoint", ...outcome });
 		for (const answer of checkpointReplies.splice(0)) answer("head" in outcome ? { success: true, data: outcome } : { success: false, ...outcome });
+		if (named) return code;
 		write({ type: "agent_settled" });
 		return 0;
 	}
@@ -327,6 +347,8 @@ function command(line: string): void {
 	if (request.type === "get_state") return reply({ success: true, data: { sessionId: jobId, sessionFile } });
 	if (request.type === "checkpoint") {
 		if (!busy) return reply({ success: false, error: `${jobId}: the native worker is idle; there is no turn to checkpoint` });
+		// No turn runs yet: a freeze set now would outlive a refused admission and abort the next turn.
+		if (admitting) return reply({ success: false, error: `${jobId}: a resume admission is pending; no turn to checkpoint yet` });
 		// serve() awaits the observed claude exit, commits the WIP, answers with the head and settles idle.
 		freezing = true;
 		checkpointReplies.push(reply);
@@ -345,7 +367,9 @@ function command(line: string): void {
 	if (message !== undefined && request.type === "prompt") {
 		// Admission holds the door: a prompt arriving meanwhile queues; a refusal is the reply and no turn starts.
 		busy = true;
+		admitting = true;
 		const start = () => {
+			admitting = false;
 			// "resuming" is admitted and starting, not yet run: a resume that throws is journaled as native_resume_failed.
 			reply({ success: true, data: { disposition: resuming ? "resuming" : "started" } });
 			run = serve(message).catch((error: unknown) => {
@@ -357,6 +381,7 @@ function command(line: string): void {
 		};
 		void startIdlePrompt({ home: env.CP_HOME ?? "", jobId, resumed: resuming }, start).then((refused) => {
 			if (refused === undefined) return;
+			admitting = false;
 			busy = false;
 			process.stderr.write(`[native claude] ${refused}\n`);
 			reply({ success: false, error: refused });

@@ -3,14 +3,14 @@
  * The worker aborts its turn, commits the WIP as `WIP: freeze checkpoint`, reports the head and settles idle.
  */
 import assert from "node:assert/strict";
-import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
-import type { FleetRecord } from "../../src/contracts.ts";
-import { DrainControl, FREEZE_STEER } from "../../src/drain.ts";
+import { type FleetRecord, layoutForHome } from "../../src/contracts.ts";
+import { DrainControl, FREEZE_STEER, workerCheckpoint } from "../../src/drain.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { FAKE_CLAUDE_AUTH_TOKEN, startClaudeMockProvider } from "../harness/claude-mock-provider.ts";
 import { waitFor } from "../harness/index.ts";
@@ -40,10 +40,50 @@ test("J6 freeze: a busy native implementer is checkpointed, a busy pi implemente
 	assert.deepEqual(lines, ["  freeze: cp-native checkpointed (native claude at abc123)", "  freeze: cp-pi steered (delivered)"]);
 });
 
-// Scenario: a checkpoint aborts the native turn, commits the WIP and leaves the worker idle and alive
+// Scenario: a refused checkpoint reply is named on the drain line
+//   Given a freeze drain whose native implementer's worker answers the checkpoint RPC with success false
+//   When the parent runs the freeze through the command-post wiring (`workerCheckpoint`)
+//   Then the line reads "not checkpointed: <why>", never "checkpointed"; a missing worker is named the same way
+test("J6 wiring: a refused or missing checkpoint reply prints not checkpointed with the reason", async (t) => {
+	const home = mkdtempSync(join(tmpdir(), "cp-j6-wiring-"));
+	t.after(() => rmSync(home, { recursive: true, force: true }));
+	const record = (job_id: string) => ({ job_id, worker: { role: "implementer", driver: "claude" } }) as unknown as FleetRecord;
+	const refusing = { request: async () => ({ success: false, error: "cp-a: the native worker is idle; there is no turn to checkpoint" }) };
+	const drain = new DrainControl({
+		home, fleet: { list: () => [record("cp-a"), record("cp-b")] }, busy: () => ["cp-a", "cp-b"], head: () => undefined, journal: () => {},
+		checkpoint: (jobId) => workerCheckpoint(jobId === "cp-a" ? refusing : undefined),
+	});
+	drain.start(60, { reason: "freeze" });
+	assert.deepEqual(await drain.freeze(), [
+		"  freeze: cp-a not checkpointed: cp-a: the native worker is idle; there is no turn to checkpoint",
+		"  freeze: cp-b not checkpointed: no live worker in this process",
+	]);
+});
+
+// Scenario: a checkpoint during a pending resume admission is refused, so no freeze outlives a refused admission
+//   Given a revived native worker whose resume admission is still pending (it then refuses)
+//   When the checkpoint RPC arrives before the admission settles
+//   Then the checkpoint is refused by name and the admission's own refusal follows; no turn is left frozen
+test("J6 admission: a checkpoint while the resume admission is pending is refused by name", (t) => {
+	const root = mkdtempSync(join(tmpdir(), "cp-j6-admission-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const home = join(root, ".pi-command-post");
+	const fleet = join(home, layoutForHome("multi", home).fleetFile);
+	mkdirSync(dirname(fleet), { recursive: true });
+	writeFileSync(fleet, "{");
+	const input = [{ id: 1, type: "prompt", message: "go" }, { id: 2, type: "checkpoint" }].map((line) => `${JSON.stringify(line)}\n`).join("");
+	const env = { PATH: process.env.PATH ?? "", CP_HOME: home, CP_NATIVE_RESUME: "1", CP_JOB_ID: "cp-j6", CP_RUN_DIR: root, CP_WORKTREE: root, CP_KIND: "ship", CP_ROLE: "implementer" };
+	const worker = spawnSync(process.execPath, [WORKER], { input, env, encoding: "utf8", timeout: 60_000 });
+	const replies = worker.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Line).filter((line) => line.type === "response");
+	assert.deepEqual(replies.map((line) => [line.id, line.success]), [[2, false], [1, false]], worker.stdout + worker.stderr);
+	assert.match(replies[0]?.error ?? "", /a resume admission is pending; no turn to checkpoint yet/);
+	assert.match(replies[1]?.error ?? "", /Nothing was resumed\.$/);
+});
+
+// Scenario: a checkpoint aborts the native turn, commits and pushes the WIP, and leaves the worker idle and alive
 //   Given a native ship implementer mid-turn (its model call held open) with an uncommitted file in its worktree
-//   When the parent sends the checkpoint RPC
-//   Then claude exits, `WIP: freeze checkpoint` holds the file, native_checkpoint names that head, agent_settled follows
+//   When the parent sends the checkpoint RPC, Then claude exits, `WIP: freeze checkpoint` holds the file,
+//   agent_settled follows native_checkpoint's head, And the WIP head is on the remote job branch
 test("J6 checkpoint: a mid-turn native implementer commits its WIP, reports the head and settles idle", { skip, timeout: 120_000 }, async (t) => {
 	const root = mkdtempSync(join(tmpdir(), "cp-j6-checkpoint-"));
 	let release: () => void = () => {};
@@ -66,6 +106,8 @@ test("J6 checkpoint: a mid-turn native implementer commits its WIP, reports the 
 	git("add", "-A");
 	git("commit", "-q", "-m", "base");
 	const base = git("rev-parse", "HEAD");
+	execFileSync("git", ["init", "-q", "--bare", join(root, "origin.git")]);
+	git("remote", "add", "origin", join(root, "origin.git"));
 	writeFileSync(join(worktree, "wip.txt"), "half done\n");
 	const fakeHome = join(root, "home");
 	mkdirSync(join(fakeHome, ".claude"), { recursive: true, mode: 0o700 });
@@ -98,7 +140,8 @@ test("J6 checkpoint: a mid-turn native implementer commits its WIP, reports the 
 	assert.ok(types.indexOf("native_checkpoint") < types.indexOf("agent_settled"), types.join(","));
 	assert.equal(out.find((line) => line.type === "native_run")?.stop, undefined, "a frozen turn is no named failure");
 	assert.equal(checkpoint?.head, git("rev-parse", "HEAD"), JSON.stringify(checkpoint));
-	assert.deepEqual([reply(2)?.success, reply(2)?.data], [true, { head: checkpoint?.head }], "the RPC answers once the commit is made");
+	assert.deepEqual([reply(2)?.success, reply(2)?.data], [true, { head: checkpoint?.head, pushed: true }], "the RPC answers once the commit is pushed");
+	assert.equal(git("ls-remote", "origin", "refs/heads/cp-j6").split("\t")[0], checkpoint?.head, "the WIP head is on the remote job branch");
 	assert.deepEqual([git("log", "-1", "--format=%s"), git("rev-parse", "HEAD~1"), git("status", "--porcelain")], ["WIP: freeze checkpoint", base, ""]);
 	assert.equal(git("show", "HEAD:wip.txt"), "half done");
 
