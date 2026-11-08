@@ -205,12 +205,11 @@ export async function sendNativeRevive(
 	return sent.receipt === "failed" ? `the native worker refused the revive prompt (${sent.error ?? "no error text"})` : undefined;
 }
 
-/** Why a native job takes no pi-only follow-up door (cp_revive continue_failed, bounded recovery, a mid-turn steer). */
-export function nativeDoorRefusal(jobId: string, door: "continue_failed" | "bounded recovery" | "steer"): string {
+/** Why a native job takes no pi-only follow-up door (a named stop's bounded recovery, a mid-turn steer). */
+export function nativeDoorRefusal(jobId: string, door: "bounded recovery" | "steer"): string {
 	const why = {
-		continue_failed: "continue_failed takes over a pi transcript and a stale registered worker; a native job's plain cp_revive " +
-			"already resumes its Claude session under the native admission, so a second door would only skip it",
-		"bounded recovery": "automatic recovery never starts a native claude process; the operator revives it with cp_revive",
+		"bounded recovery": "a turn limit, spent window, auth failure or lockdown is a named stop a human decides; the operator " +
+			"revives it with cp_revive",
 		steer: "the native driver takes no mid-turn steer; send with mode auto or follow_up to queue it until the turn ends",
 	}[door];
 	return `${jobId} runs on the native claude driver: ${door} is refused (${why}). Nothing was sent or spawned.`;

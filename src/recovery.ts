@@ -281,6 +281,9 @@ export interface RecoveryNotRevived {
 const SHUTDOWN_WAIT_RETRIES = 20;
 const SHUTDOWN_WAIT_DELAY_MS = 150;
 
+/** Native stops a human decides (docs/native-drivers.md): bounded recovery never resumes them. */
+const NATIVE_NAMED_STOPS: readonly FailureClass[] = ["turn_limit", "provider_limit", "model_call_failed", "spawn_failed"];
+
 export class BoundedRecovery {
 	readonly #options: BoundedRecoveryOptions;
 
@@ -393,8 +396,9 @@ export class BoundedRecovery {
 		const { home, fleet, runs } = this.#options;
 		const record = fleet.get(jobId);
 		if (record && isScriptFleetRecord(record)) return { action: "revive_refused", reason: `${jobId} is a script job; no automatic replay`, attempted: false, attemptsLeft: 0 };
-		if (record?.worker.driver) {
-			// N3c: never a pi redispatch or an unadmitted resume of a native job; the operator's cp_revive resumes it.
+		const native = record?.worker.driver !== undefined;
+		if (native && NATIVE_NAMED_STOPS.includes(failure.class)) {
+			// J7: a named native stop is a human's decision; the operator's cp_revive resumes it.
 			const reason = nativeDoorRefusal(jobId, "bounded recovery");
 			runs.open(jobId).cp("recovery_failed", { class: failure.class, stage: "native", error: reason });
 			return { action: "revive_refused", reason, attempted: false, attemptsLeft: 0 };
@@ -422,8 +426,9 @@ export class BoundedRecovery {
 		// A live tool child of the dead worker is decided before the attempt is
 		// spent: waiting it out is not a failed attempt. Every other plan refusal
 		// still spends, then escalates (below).
-		const reviver = decision.action === "redispatch" ? undefined : this.#options.reviver();
-		const plan = await reviver?.plan(jobId, { recovering: true });
+		// J7: a native job is never redispatched; its plain revive runs the native admission and revive prompt.
+		const reviver = decision.action === "redispatch" && !native ? undefined : this.#options.reviver();
+		const plan = await reviver?.plan(jobId, native ? undefined : { recovering: true });
 		if (plan && !plan.ok && plan.code === "tool_child_alive") {
 			const reason = `automatic recovery could not revive ${jobId} (${plan.code}): ${plan.message}`;
 			await this.#escalate(jobId, failure, reason);
@@ -435,7 +440,7 @@ export class BoundedRecovery {
 		let pid: number;
 		let sessionFile: string;
 		let revived: ReviveResult | undefined;
-		if (decision.action === "redispatch") {
+		if (decision.action === "redispatch" && !native) {
 			// The worktree is intact and the process is already gone (module header,
 			// `onBound`): a fresh worker on the SAME worktree/branch, never `Reviver`,
 			// which would resume the dead session instead of starting a new one.
@@ -462,22 +467,21 @@ export class BoundedRecovery {
 				await this.#escalate(jobId, failure, reason);
 				return { action: "revive_refused", reason, attempted: true, attemptsLeft };
 			}
-			revived = await reviver.revive(jobId, { recovering: true });
+			revived = await reviver.revive(jobId, native ? undefined : { recovering: true });
 			pid = revived.pid;
 			sessionFile = revived.session_file;
 		}
 
-		const text = brief(revived);
-		const sent = await this.#options.sender.send(jobId, text);
+		// A native revive already sent its revive prompt; a recovery brief on top would queue a second turn.
+		const sent = native ? undefined : await this.#options.sender.send(jobId, brief(revived));
 		runs.open(jobId).cp("recovery_attempted", {
 			class: failure.class,
-			action: decision.action,
+			action: native ? "revive" : decision.action,
 			attempt: decision.attempt,
 			bound: RECOVERY_ATTEMPT_BOUND,
 			pid,
 			session_file: sessionFile,
-			send_receipt: sent.receipt,
-			...(sent.error ? { send_error: sent.error } : {}),
+			...(sent ? { send_receipt: sent.receipt, ...(sent.error ? { send_error: sent.error } : {}) } : { native_revive: true }),
 		});
 		return { action: "revived", attempt: decision.attempt };
 	}

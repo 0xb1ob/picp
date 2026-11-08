@@ -10,6 +10,8 @@ import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CommandPost } from "../../src/command-post.ts";
+import { recordRecoveryAttempt } from "../../src/recovery.ts";
+import { childPids } from "../../src/revive.ts";
 import { DEFAULT_BUDGET_CONFIG, type Failure, LAYOUT, paths } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { NATIVE_FOLLOWUPS_FILE, NATIVE_SESSION_FILE, nativeRevivePrompt, queuedFollowUps, readNativeSession } from "../../src/drivers/claude-followup.ts";
@@ -173,7 +175,7 @@ test("F1/F3/F4/F8: a busy send queues until the turn ends, idle sends resume the
 	assert.equal(h.claude.overrun(), 0);
 });
 
-test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_failed is refused, revive resumes once", { skip, timeout: 420_000 }, async (t) => {
+test("F2/F5/F6: switch-off and freeze refuse resume and revive, revive resumes once", { skip, timeout: 420_000 }, async (t) => {
 	const ids: string[] = [];
 	const h = await nativeHome(t, [
 		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
@@ -205,7 +207,6 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	], limited)) as Tool[];
 	await h.b.closeParents();
 	const ends = (await h.b.run([
-		tool("cp_revive", { job_id: id, continue_failed: true, confirm: true }),
 		h.off,
 		tool("cp_revive", { job_id: id, confirm: true }),
 		h.frozen,
@@ -221,7 +222,7 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 		tool("cp_teardown", { job_id: id }),
 	], limited)) as Tool[];
 	const [offSend, frozenSend, resumed] = first.filter((end) => end.toolName === "cp_send");
-	const [continued, offRevive, frozenRevive, revived] = ends.filter((end) => end.toolName === "cp_revive");
+	const [offRevive, frozenRevive, revived] = ends.filter((end) => end.toolName === "cp_revive");
 	const runsBefore = (pattern: RegExp) => modelCalls(h.claude.requests).filter((request) => pattern.test(messages(request))).length;
 
 	// F5/F6 on resume: refused by name before any process starts; the refused messages never reached the model.
@@ -231,8 +232,7 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	assert.match(text(frozenSend), /draining/);
 	assert.equal(runsBefore(/Switched off\.|Frozen\./), 0);
 	assert.match(String(resumed?.result.details?.native), /^resuming:/, text(resumed));
-	// F7, then F5/F6 on revive: the failed native job is not continued, not revived while off or frozen.
-	assert.match(text(continued), /continue_failed is refused/);
+	// F5/F6 on revive: the failed native job is not revived while off or frozen.
 	assert.match(text(offRevive), /native_refused.*workers\.native_claude_research is off/);
 	assert.match(text(frozenRevive), /native_refused.*draining/);
 	// F2: the revive resumes the session with picp's revive prompt and the job reports once more (generation 2).
@@ -428,6 +428,68 @@ test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_r
 	assert.equal(h.claude.overrun(), 0);
 });
 
+// Scenario: Given a native job that crashed unreported, When bounded recovery runs, Then it resumes the session once
+// with the revive prompt (recovery_attempted) and reports; And a turn_limit failure is not recovered; And cp_revive
+// continue_failed resumes instead of refusing.
+test("J7: bounded recovery resumes a crashed native job, a turn limit stays a human's, continue_failed revives", { skip, timeout: 420_000 }, async (t) => {
+	const ids: Record<string, string> = {};
+	const descendants = (pid: number): number[] => childPids(pid).flatMap((child) => [child, ...descendants(child)]);
+	const crash = async () => {
+		const sessionFile = join(h.b.home, paths.runDir(ids.crashed!), NATIVE_SESSION_FILE);
+		await waitFor(() => existsSync(sessionFile) && readNativeSession(sessionFile).session_id, Boolean, { timeoutMs: 30_000, what: "the session id" });
+		const pid = readFleet(h.b.home).jobs.find((job) => job.job_id === ids.crashed)!.worker.pid;
+		for (const victim of [...descendants(pid), pid]) process.kill(victim, "SIGKILL");
+		await new Promise<void>(() => {});
+	};
+	const h = await nativeHome(t, [
+		{ kind: "tool_use", calls: [{ name: "Read", input: { file_path: "/nonexistent" } }], beforeAnswer: crash },
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids.crashed!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids.crashed!, h.b.home) }] },
+		{ kind: "text", text: "Reported after recovery." },
+		call("Bash", { command: "ls" }),
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids.limited!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids.limited!, h.b.home) }] },
+		{ kind: "text", text: "Reported after continue_failed." },
+	]);
+	ids.crashed = (await h.job()).id;
+	ids.limited = (await h.job()).id;
+	await h.b.run([h.dispatch(ids.crashed)], h.env);
+	const types = (id: string) => readRunEvents(h.b.home, id).map((event) => event.type);
+	await waitFor(() => types(ids.crashed!), (seen) => seen.includes("envelope_received") && seen.includes("agent_settled"), { timeoutMs: 180_000, what: "the recovered report" })
+		.catch((error: Error) => assert.fail(`${error.message}: ${JSON.stringify(readRunEvents(h.b.home, ids.crashed!).filter((event) => ["failure", "native_run", "worker_revived"].includes(event.type)))}`));
+	const crashed = readRunEvents(h.b.home, ids.crashed);
+	const attempted = crashed.find((event) => event.type === "recovery_attempted")?.payload as Record<string, unknown> | undefined;
+	assert.deepEqual([attempted?.class, attempted?.action, attempted?.native_revive], ["crash", "revive", true], JSON.stringify(attempted));
+	assert.equal(crashed.filter((event) => event.type === "worker_revived").length, 1);
+	const revivedRun = modelCalls(h.claude.requests).find((request) => messages(request).includes(nativeRevivePrompt("research").slice(0, 40)));
+	assert.ok(messages(revivedRun).includes("Report the repo"), "recovery did not resume the crashed session");
+	assert.equal(crashed.filter((event) => event.type === "envelope_received").length, 1);
+
+	await h.b.closeParents();
+	await h.b.run([h.dispatch(ids.limited)], { ...h.env, CP_NATIVE_MAX_TURNS: "1" });
+	await waitFor(() => types(ids.limited!), (seen) => seen.includes("recovery_failed"), { timeoutMs: 120_000, what: "the turn limit's refusal" })
+		.catch((error: Error) => assert.fail(`${error.message}: ${types(ids.limited!).join(",")}`));
+	const limited = readRunEvents(h.b.home, ids.limited);
+	assert.equal(readFleet(h.b.home).jobs.find((job) => job.job_id === ids.limited)?.failure?.class, "turn_limit");
+	assert.equal((limited.find((event) => event.type === "recovery_failed")?.payload as { stage?: string } | undefined)?.stage, "native");
+	assert.equal(limited.some((event) => event.type === "worker_revived" || event.type === "recovery_attempted"), false);
+
+	await h.b.closeParents();
+	const ends = (await h.b.run([
+		tool("cp_revive", { job_id: ids.limited, continue_failed: true, confirm: true }),
+		h.wait(ids.limited, "envelope_received", 1),
+		h.wait(ids.limited, "agent_settled", 1),
+		tool("cp_teardown", { job_id: ids.limited }),
+		tool("cp_teardown", { job_id: ids.crashed }),
+	], h.env)) as Tool[];
+	assert.match(text(ends.find((end) => end.toolName === "cp_revive")), /resumed its native Claude session/);
+	const continued = readRunEvents(h.b.home, ids.limited).find((event) => event.type === "worker_revived")?.payload as Record<string, unknown> | undefined;
+	assert.equal(continued?.continue_failed_as_revive, true, JSON.stringify(continued));
+	assert.equal(readRunEvents(h.b.home, ids.limited).filter((event) => event.type === "envelope_received").length, 1);
+	for (const down of ends.filter((end) => end.toolName === "cp_teardown")) assert.notEqual(down.isError, true, text(down));
+	assert.equal(h.claude.overrun(), 0);
+});
+
 test("N4i moved session: a revive from a changed worktree starts a fresh session led by the brief and logs native_session_moved", { skip, timeout: 420_000 }, async (t) => {
 	let id = "";
 	const h = await nativeHome(t, [
@@ -552,6 +614,8 @@ async function boundsPost(t: TestContext, script: readonly ClaudeStep[], ids: Re
 		onHardBound: (_jobId, failure) => void bounds.push(failure),
 	}));
 	ids.job = (await h.job()).id;
+	// The one recovery attempt is spent up front, so the bound escalates and the job ends here (J7 revives otherwise).
+	for (const cls of ["tool_call_cap_exceeded", "wall_clock_exceeded"] as const) recordRecoveryAttempt(h.b.home, ids.job, cls);
 	return { h, post, bounds, model: FAKE_NATIVE_MODEL };
 }
 
@@ -561,14 +625,15 @@ async function assertBoundEnds(f: Awaited<ReturnType<typeof boundsPost>>, jobId:
 	assert.equal(failed?.failure?.class, failureClass);
 	assert.equal(f.bounds[0]?.class, failureClass);
 	await waitFor(() => readRunEvents(f.h.b.home, jobId).some((event) => event.type === "process_exit"), (seen) => seen, { timeoutMs: 30_000, what: "the observed exit" });
-	// Bounded recovery runs on the bound first (and refuses native by name); teardown waits for it, as for pi.
+	// Bounded recovery runs on the bound first (and escalates, its attempt spent); teardown waits for it, as for pi.
 	let down = await f.post.tearDown(jobId);
 	for (let i = 0; i < 60 && down.failure?.code === "job_in_flight"; i++) down = await sleep(1_000).then(() => f.post.tearDown(jobId));
 	assert.equal(down.torn_down, true, JSON.stringify(down));
 	assert.equal(f.post.fleet.get(jobId)?.worker.driver, "claude", "recovery relaunched the job off the native driver");
-	const recovery = readRunEvents(f.h.b.home, jobId).find((event) => event.type === "recovery_failed")?.payload as { stage?: string; error?: string } | undefined;
-	assert.equal(recovery?.stage, "native", "bounded recovery must refuse a native job by name, never redispatch it on pi");
-	assert.match(recovery?.error ?? "", /bounded recovery is refused/);
+	const events = readRunEvents(f.h.b.home, jobId);
+	const escalated = events.find((event) => event.type === "recovery_escalated")?.payload as { reason?: string } | undefined;
+	assert.match(escalated?.reason ?? "", /recurred after 1 automatic/);
+	assert.equal(events.some((event) => event.type === "worker_revived"), false, "a spent bound revived the native job");
 	const removed = readRunEvents(f.h.b.home, jobId).find((event) => event.type === "native_scratch_removed")?.payload as { removed?: string } | undefined;
 	assert.ok(removed?.removed && !existsSync(removed.removed), JSON.stringify(removed));
 	assert.equal(down.lease_returned, true, "the lease was not returned");
