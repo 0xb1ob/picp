@@ -32,12 +32,12 @@ test("J6 freeze: a busy native implementer is checkpointed, a busy pi implemente
 	const drain = new DrainControl({
 		home, fleet: { list: () => [record("cp-native", "claude"), record("cp-pi")] }, busy: () => ["cp-native", "cp-pi"], head: () => undefined, journal: () => {},
 		steer: async (jobId, message) => (assert.equal(message, FREEZE_STEER), steered.push(jobId), { receipt: "delivered" }),
-		checkpoint: async (jobId) => void checkpointed.push(jobId),
+		checkpoint: async (jobId) => (checkpointed.push(jobId), { success: true, data: { head: "abc123" } }),
 	});
 	assert.equal(drain.start(60, { reason: "freeze" }).state, "draining");
 	const lines = await drain.freeze();
 	assert.deepEqual([checkpointed, steered], [["cp-native"], ["cp-pi"]], lines.join("\n"));
-	assert.deepEqual(lines, ["  freeze: cp-native checkpointing (native claude)", "  freeze: cp-pi steered (delivered)"]);
+	assert.deepEqual(lines, ["  freeze: cp-native checkpointed (native claude at abc123)", "  freeze: cp-pi steered (delivered)"]);
 });
 
 // Scenario: a checkpoint aborts the native turn, commits the WIP and leaves the worker idle and alive
@@ -92,13 +92,13 @@ test("J6 checkpoint: a mid-turn native implementer commits its WIP, reports the 
 
 	send({ id: 2, type: "checkpoint" });
 	await waitFor(() => out.some((line) => line.type === "agent_settled"), Boolean, { timeoutMs: 60_000, what: "the frozen worker settles" });
-	assert.deepEqual([reply(2)?.success, reply(2)?.data?.disposition], [true, "checkpointing"]);
 	const types = out.map((line) => line.type);
 	const checkpoint = out.find((line) => line.type === "native_checkpoint");
 	assert.ok(types.indexOf("native_run") < types.indexOf("native_checkpoint"), "the checkpoint follows the observed claude exit");
 	assert.ok(types.indexOf("native_checkpoint") < types.indexOf("agent_settled"), types.join(","));
 	assert.equal(out.find((line) => line.type === "native_run")?.stop, undefined, "a frozen turn is no named failure");
 	assert.equal(checkpoint?.head, git("rev-parse", "HEAD"), JSON.stringify(checkpoint));
+	assert.deepEqual([reply(2)?.success, reply(2)?.data], [true, { head: checkpoint?.head }], "the RPC answers once the commit is made");
 	assert.deepEqual([git("log", "-1", "--format=%s"), git("rev-parse", "HEAD~1"), git("status", "--porcelain")], ["WIP: freeze checkpoint", base, ""]);
 	assert.equal(git("show", "HEAD:wip.txt"), "half done");
 

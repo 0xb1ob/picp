@@ -231,7 +231,7 @@ export interface DrainControlDeps {
 	now?: () => Date;
 	/** A steer into a running turn (the `cp_send` path); a freeze drain sends `FREEZE_STEER` through it. */
 	steer?: (jobId: string, message: string) => Promise<unknown>;
-	/** A native worker's `checkpoint` RPC (it refuses a steer): abort the turn, commit the WIP, settle idle. */
+	/** A native worker's `checkpoint` RPC (no steer): abort the turn, commit the WIP, answer `{ head }`, settle idle. */
 	checkpoint?: (jobId: string) => Promise<unknown>;
 }
 
@@ -320,8 +320,8 @@ export class DrainControl {
 			const role = worker?.role;
 			if (role === "implementer" && worker?.driver && this.#deps.checkpoint) {
 				try {
-					await this.#deps.checkpoint(key);
-					lines.push(`  freeze: ${key} checkpointing (native ${worker.driver})`);
+					const done = (await this.#deps.checkpoint(key)) as { data?: { head?: string } } | undefined;
+					lines.push(`  freeze: ${key} checkpointed (native ${worker.driver}${done?.data?.head ? ` at ${done.data.head}` : ""})`);
 				} catch (error) {
 					lines.push(`  freeze: ${key} not checkpointed: ${(error as Error).message}`);
 				}

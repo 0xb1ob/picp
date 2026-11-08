@@ -59,6 +59,7 @@ let accepted = false;
 let stopping = false;
 // Set by a `checkpoint` (a freeze drain): the turn is aborted, its WIP committed, and the worker settles idle.
 let freezing = false;
+const checkpointReplies: Array<(body: Record<string, unknown>) => void> = [];
 let session: NativeSession | undefined;
 let transcript: NativeTranscript | undefined;
 
@@ -303,7 +304,9 @@ async function serve(first: string): Promise<number> {
 	}
 	if (freezing) {
 		freezing = false;
-		write({ type: "native_checkpoint", ...checkpointCommit(env.CP_WORKTREE ?? "") });
+		const outcome = checkpointCommit(env.CP_WORKTREE ?? "");
+		write({ type: "native_checkpoint", ...outcome });
+		for (const answer of checkpointReplies.splice(0)) answer("head" in outcome ? { success: true, data: outcome } : { success: false, ...outcome });
 		write({ type: "agent_settled" });
 		return 0;
 	}
@@ -324,10 +327,11 @@ function command(line: string): void {
 	if (request.type === "get_state") return reply({ success: true, data: { sessionId: jobId, sessionFile } });
 	if (request.type === "checkpoint") {
 		if (!busy) return reply({ success: false, error: `${jobId}: the native worker is idle; there is no turn to checkpoint` });
-		// serve() awaits the observed claude exit, commits the WIP, writes native_checkpoint and settles idle.
+		// serve() awaits the observed claude exit, commits the WIP, answers with the head and settles idle.
 		freezing = true;
+		checkpointReplies.push(reply);
 		abort.abort();
-		return reply({ success: true, data: { disposition: "checkpointing" } });
+		return;
 	}
 	const message = typeof request.message === "string" ? request.message : undefined;
 	if (message !== undefined && busy && (request.type === "prompt" || request.type === "follow_up")) {
