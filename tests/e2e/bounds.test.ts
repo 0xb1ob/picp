@@ -233,7 +233,7 @@ test("S21: a rejected envelope and an observed worker loop emit durable deaths",
 			process.kill(pid, "SIGKILL");
 		}
 		const entries = await waitFor(() => f.post.durableWakeups.pending().filter((entry) => entry.job_id === jobId),
-			(rows) => rows.some((entry) => entry.keys?.includes(cls)), { timeoutMs: 10_000, what: `${cls} durable death` }).catch((error) => {
+			(rows) => rows.some((entry) => entry.keys?.includes(cls) && !/inspection pending/.test(entry.content)), { timeoutMs: 10_000, what: `${cls} durable death` }).catch((error) => {
 				throw new Error(`${error.message}; fleet=${JSON.stringify(f.post.fleet.require(jobId))}`);
 			});
 		if (cls === "envelope_invalid") {
@@ -317,7 +317,7 @@ test("S21: budget and provider failures reach the durable death journal", { skip
 });
 
 // Scenario: Given a worker whose model call failed and whose failed transition is still pending,
-// When the parent drains, Then the drain holds until fail() resolves,
+// When the parent drains, Then the drain holds until the failed transition lands,
 // And at the moment it reports drained the job's fleet record is already failed.
 test("drain: a failed model call's fleet transition lands before the drain reports drained", { skip: SKIP, timeout: 110_000 }, async (t) => {
 	const f = await fleet(t);
@@ -342,6 +342,66 @@ test("drain: a failed model call's fleet transition lands before the drain repor
 	const phase = await waitFor(() => (f.post.drain.check()?.state === "drained" ? f.post.fleet.get(jobId)?.phase : undefined),
 		(value) => value !== undefined, { timeoutMs: 30_000, what: "the drain reports drained" });
 	assert.equal(phase, "failed", "drained before the failed job's fleet record was final");
+});
+
+/** A failed model call whose worktree inspect blocks in a `core.fsmonitor` hook (armed on markFailed) until `release()`. */
+async function stalledInspect(t: Parameters<typeof fleet>[0], slug: string) {
+	const f = await fleet(t);
+	const jobId = await f.intake(slug, slug);
+	const model = f.script(slug, [{ kind: "error", status: 401, message: "401 Invalid API key", repeat: 20 }]);
+	routeNamed(f.home, [model]);
+	const armed = join(f.home, "inspect-armed");
+	const open = join(f.home, "inspect-open");
+	const hook = join(f.home, "inspect-hook.sh");
+	writeFileSync(hook, `#!/bin/sh\nif [ -f "${armed}" ]; then while [ ! -f "${open}" ]; do sleep 0.05; done; fi\nexit 1\n`, { mode: 0o755 });
+	execFileSync("git", ["config", "core.fsmonitor", hook], { cwd: f.post.registry.pathOf("demo") });
+	const markFailed = f.post.fleet.markFailed.bind(f.post.fleet);
+	f.post.fleet.markFailed = async (id, failure) => {
+		writeFileSync(armed, "");
+		return markFailed(id, failure);
+	};
+	await f.post.dispatch({ jobId, task: "Fail the model call.", model, fetch: false, toolCallCap: 100, wallClockSeconds: 90 });
+	await waitFor(() => f.post.fleet.get(jobId)?.phase, (phase) => phase === "failed", { timeoutMs: 30_000, what: "the failed transition" });
+	return {
+		f,
+		wakes: () => f.post.durableWakeups.pending().filter((entry) => entry.job_id === jobId),
+		release: () => writeFileSync(open, ""),
+	};
+}
+
+// Scenario: Given a failed worker whose death notice is still being built (worktree inspect stalled),
+// When the parent drains, Then the drain reports drained only with the death wake-up already durable,
+// And the stalled inspect later refines that same wake-up in place instead of adding a second one.
+test("drain: a failed job's death wake-up is durable before the drain reports drained", { skip: SKIP, timeout: 110_000 }, async (t) => {
+	const { f, wakes, release } = await stalledInspect(t, "drain-failed-wake");
+	try {
+		f.post.drain.start();
+		await waitFor(() => f.post.drain.check()?.state, (state) => state === "drained", { timeoutMs: 30_000, what: "the drain reports drained" });
+		assert.equal(wakes().length, 1, "drained before the failed job's death wake-up was durable");
+		assert.match(wakes()[0]?.content ?? "", /inspection pending/);
+	} finally {
+		release();
+	}
+	const refined = await waitFor(wakes, (rows) => rows.every((row) => !/inspection pending/.test(row.content)), { timeoutMs: 30_000, what: "the refined notice" });
+	assert.equal(refined.length, 1);
+	assert.match(refined[0]?.content ?? "", /on disk:/);
+});
+
+// Scenario: Given the bare death wake was delivered before the inspect finished,
+// When the inspect completes, Then the parent gets one follow-up wake with the on-disk facts.
+test("drain: a death wake delivered before the inspect finishes gets one inspected follow-up", { skip: SKIP, timeout: 110_000 }, async (t) => {
+	const { f, wakes, release } = await stalledInspect(t, "drain-failed-followup");
+	try {
+		const bare = await waitFor(wakes, (rows) => rows.length === 1, { timeoutMs: 30_000, what: "the bare death wake-up" });
+		assert.match(bare[0]?.content ?? "", /inspection pending/);
+		assert.deepEqual(f.post.durableWakeups.confirmDelivered([bare[0]?.id ?? ""]), [bare[0]?.id]);
+	} finally {
+		release();
+	}
+	const followUp = await waitFor(wakes, (rows) => rows.length === 1, { timeoutMs: 30_000, what: "the inspected follow-up" });
+	assert.match(followUp[0]?.id ?? "", /:inspected$/);
+	assert.match(followUp[0]?.content ?? "", /on disk:/);
+	assert.doesNotMatch(followUp[0]?.content ?? "", /inspection pending/);
 });
 
 
