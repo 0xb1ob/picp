@@ -3,20 +3,6 @@
 	"entries": [
 		{
 			"project": "picp",
-			"file": "tests/e2e/service-update-p14e.test.ts",
-			"test": "P14e-update-verify: busy, deferred, down",
-			"text": "the rollback's verify fails alike",
-			"evidence": "https://github.com/0xb1ob/picp/actions/runs/42175046791 attempt 1, test-shard (7): daemon ECONNREFUSED in the rollback verify"
-		},
-		{
-			"project": "picp",
-			"file": "tests/e2e/dispatch-s29.test.ts",
-			"test": "S29: public validation refuses unavailable routing, effort, skills and inactive jobs",
-			"text": "waiting for worker script untouched",
-			"evidence": "https://github.com/0xb1ob/picp/actions/runs/42188730223 attempt 1, test-shard (10): the worker script wait timed out (also run 42132325529)"
-		},
-		{
-			"project": "picp",
 			"job": "test",
 			"step": "Require every shard and the checks",
 			"evidence": ".github/workflows/ci.yml: the required gate fails whenever a shard does (run 42175046791 attempt 1)"
