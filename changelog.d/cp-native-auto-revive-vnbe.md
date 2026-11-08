@@ -1,0 +1,1 @@
+- Native Claude jobs now auto-recover: bounded recovery resumes a crashed or bound-stopped native job once through the plain native revive (named stops `turn_limit`, `provider_limit`, `model_call_failed`, `spawn_failed` stay a human's), `cp_revive continue_failed` runs as that plain revive, and quota continuation revives native jobs plainly.

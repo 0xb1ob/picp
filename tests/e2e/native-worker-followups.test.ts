@@ -438,7 +438,10 @@ test("J7: bounded recovery resumes a crashed native job, a turn limit stays a hu
 		const sessionFile = join(h.b.home, paths.runDir(ids.crashed!), NATIVE_SESSION_FILE);
 		await waitFor(() => existsSync(sessionFile) && readNativeSession(sessionFile).session_id, Boolean, { timeoutMs: 30_000, what: "the session id" });
 		const pid = readFleet(h.b.home).jobs.find((job) => job.job_id === ids.crashed)!.worker.pid;
-		for (const victim of [...descendants(pid), pid]) process.kill(victim, "SIGKILL");
+		// The worker dies first so nothing observes its CLI; SIGTERM lets the CLI keep the session it resumes from.
+		const children = descendants(pid);
+		process.kill(pid, "SIGKILL");
+		for (const child of children) process.kill(child, "SIGTERM");
 		await new Promise<void>(() => {});
 	};
 	const h = await nativeHome(t, [
