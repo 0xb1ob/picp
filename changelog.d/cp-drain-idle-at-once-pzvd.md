@@ -1,0 +1,1 @@
+- A drain started right after a model call failed now reports `drained` at once: the hold ends when the fleet record is `failed`, not when `fail()`'s death-notice announce finishes, so with no live worker the drain answers `drained` immediately instead of `draining`.
