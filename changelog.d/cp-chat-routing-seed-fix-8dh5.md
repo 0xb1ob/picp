@@ -1,0 +1,1 @@
+- Tests: `tests/e2e/chat-routing.test.ts` seeds its old `OLD-RELAY` outbox send as settled and owner-observed, so `cp_parent start` no longer re-delivers it and relays its reply into an extra operator run that consumed the scripted `corrupt` ask before the bogus asks line was appended (intermittent failure at "an unknown non-retired field still refuses").

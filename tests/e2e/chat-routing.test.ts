@@ -125,6 +125,12 @@ test("chat-routing: old asks, sends and jobs read through cp_parent; new ones ca
 	const outboxFile = parentSendFile(join(home.path, LAYOUT.sessions, "cp-parent.jsonl"));
 	const outbox = () => new ParentSendOutbox({ file: outboxFile });
 	const old = outbox().enqueue("OLD-RELAY");
+	// Settled and owner-observed, so `start` neither re-delivers it nor relays a reply that would start an extra
+	// operator run and take the scripted `corrupt` ask before the bogus line is appended.
+	outbox().markInjected([old.id]);
+	outbox().markLanded([old.id]);
+	outbox().settle(old.id, { reply: "OLD-REPLY" });
+	outbox().markObserved(old.id);
 	const raw = JSON.parse(readFileSync(outboxFile, "utf8")) as { entries: Json[] };
 	raw.entries[0]!.origin = RETIRED_ORIGIN;
 	writeFileSync(outboxFile, JSON.stringify(raw));
