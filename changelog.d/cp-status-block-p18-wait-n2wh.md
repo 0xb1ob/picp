@@ -1,0 +1,1 @@
+- Tests: P18-status-block waits for each prompt's own `agent_settled` instead of the first one ever seen, so a prompt is no longer sent mid-turn, refused as busy and rescued only by the awaiting-merge watch's 60 s sweep (a ~60 s CI stall).
