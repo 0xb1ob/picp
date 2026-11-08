@@ -1,0 +1,1 @@
+- Fix the P14e update flakes: the test stand-in survives a client that hung up, and the updater's host connect budgets (`HOST_CONNECT_MS` 6 s, `PROBE_CONNECT_MS` 4 s) stay real time under the test clock; the S29 and P14e-update-verify known-flake entries are removed.

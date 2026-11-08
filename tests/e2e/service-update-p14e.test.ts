@@ -1,6 +1,6 @@
 /**
  * Behavior 15 (P14e): cp-daemon's update oneshot as cp-daemon runs it — `node <app>/src/service/update.ts` in a
- * scratch checkout with a bare origin, its clock 50 times fast but for its 10 s cp-daemon waits (a real round trip).
+ * scratch checkout with a bare origin, its clock 50 times fast but for its cp-daemon waits and host connects (real trips).
  * The parent host and cp-daemon's control socket are one logging stand-in process answering from a plan file; npm is
  * a stub; git, the fleet, run status and drain.json are real.
  */
@@ -18,7 +18,7 @@ import { parentHostPaths } from "../../src/parent-host.ts";
 import { initialStatus } from "../../src/run-artifacts.ts";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
 import { whichAll } from "../../src/doctor.ts";
-import { HEALTH_WAIT_MS, type UpdateState } from "../../src/service/update.ts";
+import { HEALTH_WAIT_MS, HOST_CONNECT_MS, PROBE_CONNECT_MS, type UpdateState } from "../../src/service/update.ts";
 import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
 import { until } from "../harness/dashboard.ts";
 import { advanceBase, createScratchRepo } from "../harness/scratch-repo.ts";
@@ -33,7 +33,7 @@ const log = (line) => fs.appendFileSync(e.SM + "/calls.log", line + "\\n");
 const plan = () => JSON.parse(fs.readFileSync(e.SM + "/plan.json", "utf8"));
 const save = (p) => fs.writeFileSync(e.SM + "/plan.json", JSON.stringify(p));
 const next = (p, key) => { const list = p[key] ?? []; const value = list.length > 1 ? list.shift() : list[0]; save(p); return value; };
-const serve = (path, handle) => { fs.rmSync(path, { force: true }); net.createServer((s) => { let buf = ""; s.on("data", (c) => { buf += c;
+const serve = (path, handle) => { fs.rmSync(path, { force: true }); net.createServer((s) => { s.on("error", () => {}); let buf = ""; s.on("data", (c) => { buf += c;
   let i; while ((i = buf.indexOf("\\n")) >= 0) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
   Promise.resolve().then(() => handle(m)).then((r) => r !== undefined && s.write(JSON.stringify({ id: m.id, ...r }) + "\\n"), (err) => s.write(JSON.stringify({ id: m.id, ok: false, error: err.message }) + "\\n")); } }); }).listen(path); };
 serve(e.HOST_SOCK, (m) => { const p = plan(); const shown = (m.args ?? []).filter((a) => !(a && typeof a === "object" && "reason" in a));
@@ -112,7 +112,7 @@ async function bench(t: TestContext, config: unknown = { enabled: true, interval
 		const child = spawn(process.execPath, ["--import", join(REPO_ROOT, "tests/harness/time-scale.ts"), script, ...(opts.dry ? ["--dry-run"] : [])], {
 			cwd: home,
 			env: { HOME: home, CP_HOME: home, PATH: bin, CP_DAEMON_JOB: "update", CP_VIEWER_HOST: "127.0.0.1", CP_VIEWER_PORT: String((viewer.address() as AddressInfo).port),
-				CP_TEST_TIME_SCALE: String(SCALE), CP_TEST_TIME_ZERO: String(zero), CP_TEST_TIME_REAL_MS: String(HEALTH_WAIT_MS), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", ...opts.env },
+				CP_TEST_TIME_SCALE: String(SCALE), CP_TEST_TIME_ZERO: String(zero), CP_TEST_TIME_REAL_MS: [HEALTH_WAIT_MS, HOST_CONNECT_MS, PROBE_CONNECT_MS].join(), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", ...opts.env },
 		});
 		let text = "";
 		child.stderr.on("data", (chunk) => (text += String(chunk)));

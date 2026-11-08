@@ -102,6 +102,9 @@ export const VERIFY_SETTLE_MS = 300_000;
 export const DOCTOR_PROBE_MS = 150_000;
 export const STATUS_PROBE_MS = 3_000;
 const POLL_MS = 5_000;
+/** Host connect+hello budgets; values unique among this module's timers so a time-scaled test can keep them real. */
+export const HOST_CONNECT_MS = 6_000;
+export const PROBE_CONNECT_MS = 4_000;
 const DETAIL_MAX = 300;
 
 export const updateStateFile = (stateDir: string): string => join(stateDir, "update.json");
@@ -538,7 +541,7 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 		host: async (op, ...args) => {
 			const { record } = currentHost(paths);
 			if (!record || !isPidAlive(record.pid)) throw new Error(NO_HOST);
-			const client = await ParentHostClient.connect(record, 5_000);
+			const client = await ParentHostClient.connect(record, HOST_CONNECT_MS);
 			try {
 				return await client.request(op, ...args);
 			} finally {
@@ -568,7 +571,7 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 						if (!record) return { down: "no parent host answered" };
 						let client: ParentHostClient;
 						try {
-							client = await ParentHostClient.connect(record, 3_000);
+							client = await ParentHostClient.connect(record, PROBE_CONNECT_MS);
 						} catch (error) {
 							return { down: (error as Error).message };
 						}
