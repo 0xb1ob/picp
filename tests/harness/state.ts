@@ -100,6 +100,7 @@ export function assertEventSequence(observed: readonly string[], expected: reado
 	);
 }
 
+const WAIT_DETAIL_MAX = 4000;
 /** Poll until `predicate` holds, or fail after `timeoutMs` (default 10 s) naming `what` and the last value. */
 export async function waitFor<T>(
 	read: () => T,
@@ -121,6 +122,8 @@ export async function waitFor<T>(
 		}
 		await new Promise((resolve) => setTimeout(resolve, intervalMs));
 	}
-	const detail = last !== undefined ? JSON.stringify(last) : `error: ${String(lastError)}`;
+	const full = last !== undefined ? JSON.stringify(last) : `error: ${String(lastError)}`;
+	// One long line (a provider request body) cuts `gh run view --log` at this test, hiding the whole error.
+	const detail = full.length > WAIT_DETAIL_MAX ? `${full.slice(0, WAIT_DETAIL_MAX)}… [${full.length} chars]` : full;
 	throw new Error(`timed out after ${timeoutMs}ms waiting for ${options.what ?? "condition"}; last = ${detail}`);
 }

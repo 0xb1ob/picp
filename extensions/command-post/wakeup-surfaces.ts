@@ -392,8 +392,8 @@ export function createWakeupSurfaces(
 				return sent ? wakeRules.delivered(entry) : suppressionReason;
 			});
 			confirmQuietArrivals();
-		} catch {
-			// Transport failed. Still pending; next sweep retries. Stale ones already discarded.
+		} catch (error) {
+			process.stderr.write(`durable wake-up sweep failed; pending entries retry on the next tick: ${(error as Error).message}\n`);
 		}
 	};
 
@@ -402,8 +402,8 @@ export function createWakeupSurfaces(
 			const ids = durableIdsFromMessage(message);
 			if (ids.length === 0) return;
 			commandPost().confirmDurableWakeups(ids);
-		} catch {
-			// Arrival bookkeeping must never throw into the session.
+		} catch (error) {
+			process.stderr.write(`durable wake-up arrival not confirmed; it is resent, never lost: ${(error as Error).message}\n`);
 		}
 	};
 
