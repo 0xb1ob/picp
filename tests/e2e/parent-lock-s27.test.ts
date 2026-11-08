@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, LAYOUT, SCHEMA_VERSION, isoTimestamp, type FleetRecord } from "../../src/contracts.ts";
@@ -48,7 +48,7 @@ for (const live of [true, false]) {
 		const before = readFileSync(fleet, "utf8");
 		const mtime = statSync(fleet).mtimeMs;
 		const lock = join(home.path, LAYOUT.state, "parent.lock");
-		writeFileSync(lock, JSON.stringify({ schema_version: SCHEMA_VERSION, pid: live ? process.pid : DEAD, home: home.path, started_at: "2026-09-02T00:00:00Z" }));
+		writeFileSync(lock, JSON.stringify({ schema_version: SCHEMA_VERSION, pid: live ? process.pid : DEAD, home: home.path, started_at: live ? isoTimestamp() : "2026-09-02T00:00:00Z" }));
 		const rpc = startRpc({ cwd: home.path, env: { ...agent.env, CP_HOME: home.path }, args: ["--no-extensions", "-e", COMMAND_POST_EXTENSION, "--no-session", "--model", model] });
 		t.after(async () => { await rpc.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
 		const notice = await rpc.waitFor((r) => r.type === "extension_ui_request" && String(r.message).includes(live ? "parent lock" : "reclaimed from pid"), 30_000);
@@ -85,6 +85,42 @@ for (const live of [true, false]) {
 			rpc.endInput();
 			await waitFor(() => existsSync(lock), (exists) => !exists, { what: "lock release on shutdown" });
 		}
+	});
+}
+
+const threadOfThisProcess = (): number => {
+	const tid = Number(readdirSync("/proc/self/task").find((id) => Number(id) !== process.pid));
+	// The Tgid branch is only exercised if the probed id is a live thread, not a process of its own.
+	assert.match(readFileSync(`/proc/${tid}/status`, "utf8"), new RegExp(`^Tgid:\\s+${process.pid}$`, "m"));
+	assert.notEqual(tid, process.pid);
+	assert.equal(process.kill(tid, 0), true, "kill(tid, 0) alone cannot tell a thread from a process");
+	return tid;
+};
+
+// Scenario: a lock names a pid that is alive but is not the process that wrote it
+//   Given state/parent.lock names a live thread of another process, or a live process that started after started_at
+//   When a parent starts on that home
+//   Then the lock is stale: it is reclaimed with the usual log line and the new parent holds the home
+for (const [name, pid, startedAt] of [
+	["a pid that is a live thread of another process", () => threadOfThisProcess(), () => isoTimestamp()],
+	["a started_at that predates the live pid's process start", () => process.pid, () => "2026-09-02T00:00:00Z"],
+] as const) {
+	test(`S27 lock: ${name} is a stale holder`, { timeout: 60_000, skip: process.platform !== "linux" }, async (t) => {
+		const home = createScratchHome();
+		const agent = createAgentDir();
+		const lock = join(home.path, LAYOUT.state, "parent.lock");
+		mkdirSync(join(home.path, LAYOUT.state), { recursive: true });
+		const holder = pid();
+		writeFileSync(lock, JSON.stringify({ schema_version: SCHEMA_VERSION, pid: holder, home: home.path, started_at: startedAt() }));
+		const rpc = startRpc({ cwd: home.path, env: { ...agent.env, CP_HOME: home.path }, args: ["--no-extensions", "-e", COMMAND_POST_EXTENSION, "--no-session"] });
+		t.after(async () => { await rpc.close(); agent.cleanup(); home.cleanup(); });
+		const notice = await rpc.waitFor((r) => r.type === "extension_ui_request" && String(r.message).includes("parent lock"), 30_000);
+		assert.match(String(notice.message), new RegExp(`reclaimed from pid ${holder} `));
+		const now = JSON.parse(readFileSync(lock, "utf8"));
+		assert.notEqual(now.pid, holder);
+		assert.equal(now.home, home.path);
+		rpc.endInput();
+		await waitFor(() => existsSync(lock), (exists) => !exists, { what: "lock release on shutdown" });
 	});
 }
 

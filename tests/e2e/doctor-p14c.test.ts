@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, type TestContext, test } from "node:test";
 import {
-	DEFAULT_ORIGIN, type DoctorReport, EMPTY_USAGE, type FleetRecord, JOBS_SIZE_WARNING, LAYOUT, NEVER_COMMIT_PATHS, PARENT_BRIDGE_FLAGS,
+	DEFAULT_ORIGIN, type DoctorReport, EMPTY_USAGE, type FleetRecord, isoTimestamp, JOBS_SIZE_WARNING, LAYOUT, NEVER_COMMIT_PATHS, PARENT_BRIDGE_FLAGS,
 	paths, SCHEMA_VERSION, THINKING_LEVELS, validateDoctorReport, type WorkerHandle,
 } from "../../src/contracts.ts";
 import { DETAIL_MAX, MAX_LINT_DETAIL, whichAll } from "../../src/doctor.ts";
@@ -313,7 +313,7 @@ test("P14-doctor-fleet: fleet records, the parent lock, the worktree pool, the v
 	assert.match(JSON.stringify(one(quiet, "parent.lock")), /"ok".*held by this session/);
 	const other = spawn("sleep", ["60"]);
 	t.after(() => other.kill("SIGKILL"));
-	const holder = (pid: number) => writeFileSync(lock, `${JSON.stringify({ schema_version: SCHEMA_VERSION, pid, started_at: "2026-08-27T11:00:00Z", home: h })}\n`);
+	const holder = (pid: number) => writeFileSync(lock, `${JSON.stringify({ schema_version: SCHEMA_VERSION, pid, started_at: isoTimestamp(), home: h })}\n`);
 	holder(other.pid!);
 	const live = one(await p.doctor(), "parent.lock");
 	assert.match(live?.what ?? "", new RegExp(`another parent process holds this home \\(pid ${other.pid}\\)`));

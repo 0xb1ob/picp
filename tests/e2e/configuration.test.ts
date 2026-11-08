@@ -1140,7 +1140,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	fullHome(home);
 	const lock = settingsLockPath(home);
 	const plant = (body: string) => { mkdirSync(dirname(lock), { recursive: true }); writeFileSync(lock, body); };
-	plant(JSON.stringify({ schema_version: 1, pid: process.pid, started_at: "2026-01-01T00:00:00Z", nonce: "live" }));
+	plant(JSON.stringify({ schema_version: 1, pid: process.pid, started_at: new Date().toISOString(), nonce: "live" }));
 	const held = await b.apply({ mode: "set", changes: { "grants.job_cap": 5 } });
 	assert.deepEqual(settled(held), [409, "refused"]);
 	assert.match(held.error ?? "", /another settings write holds <home>/);
