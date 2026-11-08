@@ -151,6 +151,8 @@ export type RevivePlanResult = RevivePlan | ReviveRefusal;
 export interface RevivePlanOptions {
 	recovering?: boolean;
 	continueFailed?: boolean;
+	/** A native bounded recovery: planned as a plain revive, journaled as `continuation: "bounded_recovery"`. */
+	nativeRecovery?: boolean;
 	/** A quota continuation resumes the interrupted round's caps (src/quota-continuation.ts). */
 	carriedBounds?: CarriedBounds;
 }
@@ -606,7 +608,7 @@ export class Reviver {
 				...(plan.priorPick ? { rerouted_after_pick: plan.priorPick } : {}),
 				...(record.worker.driver && options?.continueFailed ? { continue_failed_as_revive: true } : {}),
 				...(continuing
-					? { continuation: options?.recovering ? "bounded_recovery" : "operator", ...(record.failure ? { prior_failure: record.failure } : {}) }
+					? { continuation: options?.recovering || options?.nativeRecovery ? "bounded_recovery" : "operator", ...(record.failure ? { prior_failure: record.failure } : {}) }
 					: restoring ? { continuation: "held_release" } : {}),
 			});
 			attachWorkerObservers({

@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CommandPost } from "../../src/command-post.ts";
+import { QUOTA_CONTINUE_NUDGE, type QuotaIntent, quotaContinuationFile } from "../../src/quota-continuation.ts";
 import { recordRecoveryAttempt } from "../../src/recovery.ts";
 import { childPids } from "../../src/revive.ts";
 import { DEFAULT_BUDGET_CONFIG, type Failure, LAYOUT, paths } from "../../src/contracts.ts";
@@ -493,6 +494,51 @@ test("J7: bounded recovery resumes a crashed native job, a turn limit stays a hu
 	assert.equal(h.claude.overrun(), 0);
 });
 
+// Scenario: Given a failed native job holding a due quota continuation, When the parent's due tick runs, Then it resumes
+// the session by the plain native revive (no continue_failed, no recovery continuation) and the nudge reaches it.
+// The pi tick's continue_failed revive is pinned in tests/e2e/quota-continuation.test.ts.
+test("J7 quota: a native job's due quota continuation revives it plainly and delivers the nudge", { skip, timeout: 420_000 }, async (t) => {
+	let id = "";
+	const h = await nativeHome(t, [
+		call("Bash", { command: "ls" }),
+		// The revived turn holds its first answer so the continuation's nudge lands mid-turn and queues.
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(id)), content: "# native\n" }) }], beforeAnswer: () => sleep(6_000) },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(id, h.b.home) }] },
+		{ kind: "text", text: "Reported after the quota reset." },
+		{ kind: "text", text: "Continued after the nudge." },
+	]);
+	id = (await h.job()).id;
+	const types = () => readRunEvents(h.b.home, id).map((event) => event.type);
+	const until = (what: string, done: (seen: string[]) => boolean) =>
+		waitFor(types, done, { timeoutMs: 120_000, what }).catch((error: Error) => assert.fail(`${error.message}: ${types().join(",")}`));
+	await h.b.run([h.dispatch(id)], { ...h.env, CP_NATIVE_MAX_TURNS: "1" });
+	await until("the turn limit's refusal", (seen) => seen.includes("recovery_failed"));
+	await h.b.closeParents();
+	// No native adapter claims a reset, so the due intent is seeded as a claim would have written it.
+	const record = readFleet(h.b.home).jobs.find((job) => job.job_id === id)!;
+	const past = Math.floor(Date.now() / 1000) - 60;
+	const at = new Date().toISOString();
+	const intent: QuotaIntent = {
+		continuation_id: `${id}:quota:1`, job_id: id, generation: 1, state: "pending", delivery: "waiting", capability_version: "test",
+		signal: { provider: "anthropic", model: record.worker.model, status: 429, category: "usage", scope: "five_hour", resetsAtEpochSeconds: past, resetsAtUtc: new Date(past * 1000).toISOString() },
+		observed_at: at, policy: { enabled: true, source: "job", changed_at: at }, worktree: record.worktree, branch: record.branch,
+		session_file: record.worker.session_file, worker_pid: record.worker.pid, worker_started_at: record.worker.started_at, attempts: 0,
+	};
+	writeFileSync(quotaContinuationFile(h.b.home), JSON.stringify({ schema_version: 1, policy: { jobs: { [id]: { enabled: true, changed_at: at, actor: "operator" } } }, eligibility: {}, intents: [intent] }));
+	await h.b.run([], h.env);
+	await until("the delivered nudge", (seen) => seen.includes("envelope_received") && seen.lastIndexOf("agent_settled") > seen.indexOf("native_followup_delivered") && seen.includes("native_followup_delivered"));
+	const stored = JSON.parse(readFileSync(quotaContinuationFile(h.b.home), "utf8")) as { intents: QuotaIntent[] };
+	assert.deepEqual([stored.intents[0]?.state, stored.intents[0]?.consumed?.receipt], ["consumed", "queued"], JSON.stringify(stored.intents[0]));
+	const revived = readRunEvents(h.b.home, id).filter((event) => event.type === "worker_revived").map((event) => event.payload as Record<string, unknown>);
+	assert.equal(revived.length, 1);
+	assert.deepEqual([revived[0]?.continuation, revived[0]?.continue_failed_as_revive], ["operator", undefined], JSON.stringify(revived[0]));
+	assert.ok(modelCalls(h.claude.requests).some((request) => messages(request).includes(QUOTA_CONTINUE_NUDGE.slice(0, 60))), "the nudge never reached the model");
+	await h.b.closeParents();
+	const [down] = (await h.b.run([tool("cp_teardown", { job_id: id })], h.env)) as Tool[];
+	assert.notEqual(down?.isError, true, text(down));
+	assert.equal(h.claude.overrun(), 0);
+});
+
 test("N4i moved session: a revive from a changed worktree starts a fresh session led by the brief and logs native_session_moved", { skip, timeout: 420_000 }, async (t) => {
 	let id = "";
 	const h = await nativeHome(t, [
@@ -609,7 +655,7 @@ test("F9: a queued driver:claude dispatch releases native, and an armed one is r
 	assert.equal(h.claude.overrun(), 0);
 });
 
-async function boundsPost(t: TestContext, script: readonly ClaudeStep[], ids: Record<string, string>) {
+async function boundsPost(t: TestContext, script: readonly ClaudeStep[], ids: Record<string, string>, spent = true) {
 	const h = await nativeHome(t, script);
 	const bounds: Failure[] = [];
 	const post = h.b.ownPost(new CommandPost({
@@ -617,8 +663,8 @@ async function boundsPost(t: TestContext, script: readonly ClaudeStep[], ids: Re
 		onHardBound: (_jobId, failure) => void bounds.push(failure),
 	}));
 	ids.job = (await h.job()).id;
-	// The one recovery attempt is spent up front, so the bound escalates and the job ends here (J7 revives otherwise).
-	for (const cls of ["tool_call_cap_exceeded", "wall_clock_exceeded"] as const) recordRecoveryAttempt(h.b.home, ids.job, cls);
+	// `spent`: the one recovery attempt is spent up front, so the bound escalates and the job ends there.
+	if (spent) for (const cls of ["tool_call_cap_exceeded", "wall_clock_exceeded"] as const) recordRecoveryAttempt(h.b.home, ids.job, cls);
 	return { h, post, bounds, model: FAKE_NATIVE_MODEL };
 }
 
@@ -655,4 +701,43 @@ test("F10b: a native worker past its wall-clock ends as a pi worker does", { ski
 	const f = await boundsPost(t, [{ kind: "tool_use", calls: [{ name: "Read", input: { file_path: "/nonexistent" } }], beforeAnswer: () => sleep(60_000) }], ids);
 	await f.post.dispatch({ jobId: ids.job!, task: "Read the README.", model: f.model, driver: "claude", fetch: false, toolCallCap: 900, wallClockSeconds: 15 });
 	await assertBoundEnds(f, ids.job!, "wall_clock_exceeded");
+});
+
+// Scenario: Given a native worker past its wall-clock, When bounded recovery runs on the bound, Then it resumes the same
+// session once with the revive prompt and reports; And a second bound after a follow-up is escalated, never revived.
+test("J7 bound: a native wall-clock bound is recovered once by a plain revive, and a second bound is not", { skip, timeout: 300_000 }, async (t) => {
+	const ids: Record<string, string> = {};
+	const hang = (): ClaudeStep => ({ kind: "tool_use", calls: [{ name: "Read", input: { file_path: "/nonexistent" } }], beforeAnswer: () => new Promise<void>(() => {}) });
+	const f = await boundsPost(t, [
+		hang(),
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(f.h.b.home, paths.artifactFile(ids.job!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids.job!, f.h.b.home) }] },
+		{ kind: "text", text: "Reported after the bound." },
+		hang(),
+	], ids, false);
+	const id = ids.job!;
+	const types = () => readRunEvents(f.h.b.home, id).map((event) => event.type);
+	const until = (what: string, done: (seen: string[]) => boolean) =>
+		waitFor(types, done, { timeoutMs: 120_000, what }).catch((error: Error) => assert.fail(`${error.message}: ${JSON.stringify(readRunEvents(f.h.b.home, id).filter((event) => event.source === "cp" && event.type !== "native_transcript").map((event) => [event.type, event.payload]))}`));
+	await f.post.dispatch({ jobId: id, task: "Read the README.", model: f.model, driver: "claude", fetch: false, toolCallCap: 900, wallClockSeconds: 15 });
+	await until("the recovered report", (seen) => seen.includes("envelope_received") && seen.includes("agent_settled"));
+	const events = readRunEvents(f.h.b.home, id);
+	const attempted = events.find((event) => event.type === "recovery_attempted")?.payload as Record<string, unknown> | undefined;
+	assert.deepEqual([attempted?.class, attempted?.action, attempted?.native_revive], ["wall_clock_exceeded", "revive", true], JSON.stringify(attempted));
+	const revived = events.filter((event) => event.type === "worker_revived").map((event) => event.payload as { continuation?: string });
+	assert.deepEqual(revived.map((payload) => payload.continuation), ["bounded_recovery"]);
+	const revivedRun = modelCalls(f.h.claude.requests).find((request) => messages(request).includes(nativeRevivePrompt("research").slice(0, 40)));
+	assert.ok(messages(revivedRun).includes("Read the README"), "recovery did not resume the bound session");
+
+	// The follow-up turn hangs past a fresh wall-clock round: the attempt is spent, so recovery escalates.
+	await f.post.send({ jobId: id, message: "One more look." });
+	await until("the second bound's escalation", (seen) => seen.includes("recovery_escalated"));
+	const escalated = readRunEvents(f.h.b.home, id).find((event) => event.type === "recovery_escalated")?.payload as { reason?: string } | undefined;
+	assert.match(escalated?.reason ?? "", /wall_clock_exceeded recurred after 1 automatic/);
+	assert.equal(types().filter((type) => type === "worker_revived").length, 1, "the second bound was revived again");
+	assert.deepEqual(f.bounds.map((bound) => bound.class), ["wall_clock_exceeded", "wall_clock_exceeded"]);
+	let down = await f.post.tearDown(id);
+	for (let i = 0; i < 60 && down.failure?.code === "job_in_flight"; i++) down = await sleep(1_000).then(() => f.post.tearDown(id));
+	assert.equal(down.torn_down, true, JSON.stringify(down));
+	assert.equal(f.h.claude.overrun(), 0);
 });

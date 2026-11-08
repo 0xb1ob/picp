@@ -56,6 +56,7 @@ import { assertNotDraining } from "./drain.ts";
 import { resolveJobHardBounds } from "./bounds.ts";
 import { raiseLoopExhausted, type EscalationStore } from "./escalation.ts";
 import { nativeDoorRefusal } from "./drivers/claude-followup.ts";
+import { NATIVE_RESULT_GRACE_MS } from "./drivers/claude-usage.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
 import { loadProfile } from "./profiles.ts";
 import type { ModelProbe } from "./routing.ts";
@@ -467,7 +468,7 @@ export class BoundedRecovery {
 				await this.#escalate(jobId, failure, reason);
 				return { action: "revive_refused", reason, attempted: true, attemptsLeft };
 			}
-			revived = await reviver.revive(jobId, native ? undefined : { recovering: true });
+			revived = await reviver.revive(jobId, native ? { nativeRecovery: true } : { recovering: true });
 			pid = revived.pid;
 			sessionFile = revived.session_file;
 		}
@@ -583,7 +584,10 @@ export class BoundedRecovery {
 		const manager = this.#options.manager;
 		if (!manager) return;
 		const sleep = this.#options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
-		for (let attempt = 0; attempt < SHUTDOWN_WAIT_RETRIES; attempt += 1) {
+		// A native worker's stop first waits out its turn's result grace (src/drivers/claude-worker.ts).
+		const record = this.#options.fleet.get(jobId);
+		const grace = record && !isScriptFleetRecord(record) && record.worker.driver ? Math.ceil(NATIVE_RESULT_GRACE_MS / SHUTDOWN_WAIT_DELAY_MS) : 0;
+		for (let attempt = 0; attempt < SHUTDOWN_WAIT_RETRIES + grace; attempt += 1) {
 			if (!manager.get(jobId)) return;
 			await sleep(SHUTDOWN_WAIT_DELAY_MS);
 		}
