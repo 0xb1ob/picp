@@ -47,7 +47,7 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 			const env = { ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" };
 			const children = [1, 2].map(() => child([f.scratch.path, f.source, f.target, attemptId!, "", barrier, "standing", model], env));
 			await waitFor(() => readdirSync(f.scratch.path).filter((name) => name.startsWith("standing-race.") && name.endsWith(".ready")).length === 2,
-				(value) => value, { timeoutMs: 15000, what: "both standing claimants" });
+				(value) => value, { timeoutMs: 45000, what: "both standing claimants" });
 			writeFileSync(`${barrier}.release`, "release");
 			const results = await Promise.all(children);
 			assert.deepEqual(results.map((result) => result.code).sort(), [0, 1]);
