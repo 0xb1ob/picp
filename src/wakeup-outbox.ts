@@ -6,8 +6,8 @@
  * undelivered entries once; a confirmed id never comes back.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
 	DURABLE_WAKEUP_KEEP_DELIVERED,
 	DURABLE_WAKEUP_RETRY_SECONDS,
@@ -21,9 +21,101 @@ import {
 	validateDurableWakeupOutboxFile,
 	type AnsweredSend,
 } from "./contracts.ts";
+import { isLockHolderAlive } from "./fleet.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 
 export class DurableWakeupError extends Error {}
+
+const LOCK_WAIT_MS = 5_000;
+/** A lock naming no holder (one killed between create and write), or any reclaim guard, is stale after this. */
+const LOCK_UNNAMED_STALE_MS = 1_000;
+const lockSleeper = new Int32Array(new SharedArrayBuffer(4));
+
+/** O_EXCL-create `path` holding `record`; false when it already exists. */
+function createLockFile(path: string, record: string): boolean {
+	let fd: number;
+	try {
+		fd = openSync(path, "wx", 0o600);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+		throw error;
+	}
+	try {
+		writeSync(fd, record);
+	} finally {
+		closeSync(fd);
+	}
+	return true;
+}
+
+/** Remove `path` only while it still holds this process's `record`. */
+function releaseLockFile(path: string, record: string): void {
+	if (existsSync(path) && readFileSync(path, "utf8") === record) rmSync(path, { force: true });
+}
+
+/** The lock as one waiter saw it: a dead or unnamed-and-old holder is `stale`. Undefined once it is gone. */
+function inspectLock(lock: string): { ino: number; text: string; ageMs: number; stale: boolean } | undefined {
+	try {
+		const { ino, mtimeMs } = statSync(lock);
+		const text = readFileSync(lock, "utf8");
+		let holder: { pid?: unknown; started_at?: unknown } | undefined;
+		try {
+			holder = JSON.parse(text);
+		} catch {
+			holder = undefined; // still being written, or its writer died first: judged by age below
+		}
+		const ageMs = Date.now() - mtimeMs;
+		const named = Number.isInteger(holder?.pid) && typeof holder?.started_at === "string";
+		// Never break a live holder: its synchronous write may just be slow, and breaking it re-opens the lost-wake race.
+		const stale = named ? !isLockHolderAlive(holder!.pid as number, holder!.started_at as string) : ageMs > LOCK_UNNAMED_STALE_MS;
+		return { ino, text, ageMs, stale };
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+/**
+ * Remove the stale lock `seen` under the O_EXCL guard `<lock>.reclaim`, only if a re-inspection under the guard finds
+ * the same file still stale; a fresh lock is never touched. False when another waiter holds the guard.
+ */
+function reclaimLock(lock: string, seen: { ino: number; text: string }, record: string): boolean {
+	const guard = `${lock}.reclaim`;
+	if (!createLockFile(guard, record)) {
+		const held = inspectLock(guard);
+		if (held && (held.stale || held.ageMs > LOCK_UNNAMED_STALE_MS)) rmSync(guard, { force: true });
+		return false;
+	}
+	try {
+		const now = inspectLock(lock);
+		if (now?.stale && now.ino === seen.ino && now.text === seen.text) rmSync(lock, { force: true });
+	} finally {
+		releaseLockFile(guard, record);
+	}
+	return true;
+}
+
+/**
+ * One read-modify-write of `file` at a time across processes, under `<file>.lock` (O_EXCL, `{pid, started_at, nonce}`).
+ * Without it a wake another process enqueued between the parent's read and rename was overwritten and never delivered.
+ */
+function withOutboxLock<T>(file: string, fn: () => T): T {
+	const lock = `${file}.lock`;
+	const record = `${JSON.stringify({ pid: process.pid, started_at: isoTimestamp(new Date()), nonce: randomUUID() })}\n`;
+	const deadline = Date.now() + LOCK_WAIT_MS;
+	mkdirSync(dirname(file), { recursive: true });
+	while (!createLockFile(lock, record)) {
+		const seen = inspectLock(lock);
+		if (!seen || (seen.stale && reclaimLock(lock, seen, record))) continue;
+		if (Date.now() > deadline) throw new DurableWakeupError(`${lock} held for over ${LOCK_WAIT_MS}ms by ${seen.text.trim()}; wakeups.json unchanged`);
+		Atomics.wait(lockSleeper, 0, 0, 2);
+	}
+	try {
+		return fn();
+	} finally {
+		releaseLockFile(lock, record);
+	}
+}
 
 const OWNER_KEY = Symbol.for("pi-command-post.wakeups.owner");
 const globalOwners = globalThis as { [OWNER_KEY]?: string };
@@ -115,14 +207,16 @@ export class DurableWakeupOutbox {
 	}
 
 	#mutate(mutator: (file: DurableWakeupOutboxFile) => DurableWakeupOutboxFile): DurableWakeupOutboxFile {
-		const next = mutator(structuredClone(this.read()));
-		const stamped: DurableWakeupOutboxFile = { ...next, updated_at: isoTimestamp(this.#now()) };
-		const result = validateDurableWakeupOutboxFile(stamped);
-		if (!result.ok) {
-			throw new DurableWakeupError(`refusing to write an invalid wakeups.json:\n  ${result.errors.join("\n  ")}`);
-		}
-		atomicWriteJson(this.file, result.value);
-		return result.value;
+		return withOutboxLock(this.file, () => {
+			const next = mutator(structuredClone(this.read()));
+			const stamped: DurableWakeupOutboxFile = { ...next, updated_at: isoTimestamp(this.#now()) };
+			const result = validateDurableWakeupOutboxFile(stamped);
+			if (!result.ok) {
+				throw new DurableWakeupError(`refusing to write an invalid wakeups.json:\n  ${result.errors.join("\n  ")}`);
+			}
+			atomicWriteJson(this.file, result.value);
+			return result.value;
+		});
 	}
 
 	enqueue(input: DurableWakeupInput): boolean {

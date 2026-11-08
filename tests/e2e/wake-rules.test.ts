@@ -1,20 +1,21 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CpBridge, type BridgeRelay } from "../../src/cp-bridge.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, waitFor, wakeTrail } from "../harness/index.ts";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { formatContinuationNotice } from "../../src/held-continuation.ts";
-import { boundedWakeupId } from "../../src/wakeup-outbox.ts";
+import { boundedWakeupId, DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { REPO_ROOT, readRunEvents, startPiChild } from "../harness/index.ts";
 import { JOB as CI_JOB, PR, seedHeldHome } from "../harness/held-home.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { CiWatchStore } from "../../src/ci-watch.ts";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { LeaseManager } from "../../src/leases.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { enableTreehouse } from "../harness/treehouse.ts";
@@ -164,7 +165,9 @@ test("S20: a resolve cache stays quiet within its minute and refreshes to dispat
 	parent.post.mandates.issue({ projects: ["demo"], objective: "S20 independent work", job_ids: [ready.id],
 		expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [] });
 	parent.queue("cache-fresh");
-	await waitFor(parent.events, (rows) => rows.length === 2, { timeoutMs: 30_000, what: "fresh quiet cache" });
+	const trail = wakeTrail(parent.home.path, parent.child, parent.requests);
+	await waitFor(() => (trail.stamp(), parent.events()), (rows) => rows.length === 2, { timeoutMs: 30_000, what: "fresh quiet cache" })
+		.catch((error: unknown) => { throw trail.explain(error); });
 	assert.deepEqual(parent.events().map((e) => [e.decision, e.next_kind]), [["relayed", "no_mandate"], ["relayed", "no_mandate"]]);
 	assert.equal(parent.requests().length, 0);
 	await waitFor(() => Date.now() - cachedAt, (elapsed) => elapsed > 61_000, { timeoutMs: 70_000, what: "public one-minute cache expiry" });
@@ -175,6 +178,90 @@ test("S20: a resolve cache stays quiet within its minute and refreshes to dispat
 	assert.deepEqual(parent.events().map((e) => [e.decision, e.next_kind]), [
 		["relayed", "no_mandate"], ["relayed", "no_mandate"], ["woke", "dispatch"],
 	]);
+});
+
+// Scenario: Given an idle parent, When a durable wake is enqueued while a sweep is deferred,
+// Then every one of those wakes is carried in a model request (none lost). Quiet window wakes keep the test process
+// writing across the deferral and two 5 s ticks of parent rewrites; main lost about a third to that race.
+test("S20: wakes enqueued by another process while a sweep is deferred all reach a model request", { timeout: 120_000 }, async (t) => {
+	const parent = await startRuleParent(t, "s20-deferred-burst");
+	parent.queue("deferred");
+	const ids: string[] = [];
+	for (const end = Date.now() + 10_000; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 5))) {
+		ids.push(`continuation:window:burst-${ids.length}`);
+		parent.post.durableWakeups.enqueue({ id: ids.at(-1)!, kind: "recovery", content: `S20 ${ids.at(-1)}.` });
+	}
+	ids.push("burst-end");
+	parent.post.durableWakeups.enqueue({ id: "burst-end", kind: "recovery", content: "S20 burst-end." });
+	const trail = wakeTrail(parent.home.path, parent.child, parent.requests);
+	const missing = () => {
+		trail.stamp();
+		const carried = JSON.stringify(parent.requests().map((r) => r.body.messages));
+		return ids.filter((id) => !carried.includes(`S20 ${id}.`));
+	};
+	await waitFor(missing, (rows) => rows.length === 0, { timeoutMs: 30_000, what: "every wake enqueued during the deferral in a model request" })
+		.catch((error: unknown) => { throw trail.explain(error); });
+	assert.deepEqual(parent.events().map((e) => [e.decision, e.next_kind]), [["relayed", "no_mandate"]]);
+});
+
+// Scenario: Given a wakeups.json.lock left by a dead process, When a wake is enqueued,
+// Then it is written without waiting for the wait deadline. Before the pid check a crashed parent's lock made
+// every writer wait 5 s and throw, losing death and bound wakes for 10 s.
+test("S20: a wakeups.json.lock left by a dead process is reclaimed at once", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const dead = spawnSync(process.execPath, ["-e", ""]).pid!;
+	const lock = join(home.path, LAYOUT.wakeupsFile) + ".lock";
+	mkdirSync(join(lock, ".."), { recursive: true });
+	writeFileSync(lock, `${JSON.stringify({ pid: dead, started_at: isoTimestamp(), nonce: "crashed" })}\n`);
+	const started = Date.now();
+	assert.equal(new DurableWakeupOutbox({ home: home.path }).enqueue({ id: "after-crash", kind: "recovery", content: "S20 after crash." }), true);
+	assert.ok(Date.now() - started < 2_500, `enqueue took ${Date.now() - started}ms behind a dead holder's lock`);
+	assert.deepEqual(new DurableWakeupOutbox({ home: home.path }).read().pending.map((e) => e.id), ["after-crash"]);
+	assert.deepEqual(readdirSync(join(lock, "..")).filter((name) => name.startsWith("wakeups.json.lock")), []);
+});
+
+// Scenario: Given three processes writing wakes, When dead-pid wakeups.json.locks keep appearing between their writes,
+// Then every wake survives and no writer throws DurableWakeupError. Pins the guarded reclaim: a waiter deletes only
+// the stale lock it re-inspected under wakeups.json.lock.reclaim, never another writer's fresh lock.
+test("S20: three writers contending on dead-pid locks lose no wake", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const lock = join(home.path, LAYOUT.wakeupsFile) + ".lock";
+	const go = join(home.path, "go");
+	const dead = `${JSON.stringify({ pid: spawnSync(process.execPath, ["-e", ""]).pid, started_at: isoTimestamp(), nonce: "crashed" })}\n`;
+	mkdirSync(join(lock, ".."), { recursive: true });
+	writeFileSync(lock, dead);
+	const script = `const { DurableWakeupOutbox } = await import(process.env.OUTBOX_SRC);
+		const { existsSync } = await import("node:fs");
+		while (!existsSync(process.env.GO));
+		const outbox = new DurableWakeupOutbox({ home: process.env.OUTBOX_HOME });
+		for (let i = 0; i < 100; i++) outbox.enqueue({ id: process.env.TAG + "-" + i, kind: "recovery", content: "x" });`;
+	const writers = ["a", "b", "c"].map((tag) => new Promise<string>((resolve) => {
+		const env = { ...process.env, OUTBOX_SRC: pathToFileURL(join(REPO_ROOT, "src/wakeup-outbox.ts")).href, OUTBOX_HOME: home.path, GO: go, TAG: tag };
+		const child = spawn(process.execPath, ["--input-type=module", "-e", script], { env });
+		let stderr = "";
+		child.stderr.on("data", (chunk) => { stderr += chunk; });
+		child.on("close", (code) => resolve(`${tag} exit ${code}${stderr ? `: ${stderr.slice(0, 2000)}` : ""}`));
+	}));
+	let planted = 1;
+	let running = true;
+	const exits = Promise.all(writers).finally(() => { running = false; });
+	writeFileSync(go, "");
+	while (running) {
+		try {
+			writeFileSync(lock, dead, { flag: "wx" });
+			planted += 1;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 1));
+	}
+	assert.deepEqual(await exits, ["a exit 0", "b exit 0", "c exit 0"]);
+	const ids = new DurableWakeupOutbox({ home: home.path }).read().pending.map((e) => e.id);
+	const expected = ["a", "b", "c"].flatMap((tag) => Array.from({ length: 100 }, (_, i) => `${tag}-${i}`));
+	assert.deepEqual([...ids].sort(), expected.sort(), `planted ${planted} dead-pid locks`);
+	assert.ok(planted > 1, `only the initial dead-pid lock was planted`);
 });
 
 test("S20: a failed next refresh wakes with a reason and is not retried during its cache minute", { timeout: 120_000 }, async (t) => {

@@ -64,5 +64,6 @@ export {
 	waitFor,
 } from "./state.ts";
 export { type FakeFleet, type FakeWorker, fakeWorker, fakeWorkerManager } from "./fake-worker.ts";
+export { wakeTrail } from "./wake-trail.ts";
 /** Live-model suites are operator-run only (see PLAN.md testing strategy). */
 export const LIVE_TESTS_ENABLED = process.env.CP_LIVE_TESTS === "1";

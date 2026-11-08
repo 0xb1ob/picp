@@ -13,7 +13,7 @@ import { initJobsDocument } from "../../src/ledger.ts";
 import { AnsweredOutbox } from "../../src/answered.ts";
 import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { frameBatch } from "../../src/parent-outbox.ts";
-import { REPO_ROOT, readRunEvents, waitFor } from "../harness/index.ts";
+import { REPO_ROOT, readRunEvents, waitFor, wakeTrail } from "../harness/index.ts";
 import { FAILURE_CLASSES, type FleetRecord } from "../../src/contracts.ts";
 import { checkWakeup, wakeupFacts } from "../../src/wakeups.ts";
 import { dirname } from "node:path";
@@ -386,39 +386,11 @@ test("S20: abort strands no autonomous turn and the next prompt carries the noti
 	assert.match(resumed, /S20-abort-late/);
 	assert.doesNotMatch(resumed, /fleet notice\(s\) arrived while you were busy/);
 	box.enqueue({ id: "after-abort-idle", kind: "recovery", content: "S20 idle wake" });
-	// Diagnostics only: timestamped wake-surface trail, printed when this wait times out (flaky in CI).
-	const trail: string[] = [];
-	let seenRecords = child.records().length;
-	const stamp = (line: string) => trail.push(`${new Date().toISOString()} ${line}`);
-	const sample = () => {
-		const all = child.records();
-		for (; seenRecords < all.length; seenRecords++) stamp(`rpc ${all[seenRecords]!.type}`);
-		return requests();
-	};
-	const wakeAt = Date.now();
-	try {
-		await waitFor(sample, (rows) => rows.some((r) => JSON.stringify(r.body.messages).includes("S20 idle wake")), {
-			timeoutMs: 30_000, what: "idle notice reaches a model request",
-		});
-	} catch (error) {
-		let detail: string;
-		try {
-			const outbox = box.read();
-			const at = (r: { at?: number }) => (Number.isFinite(r.at) ? new Date(r.at!).toISOString() : "?");
-			detail = [
-				`wake enqueued at ${new Date(wakeAt).toISOString()}; trail built ${new Date().toISOString()}`,
-				`outbox pending=${JSON.stringify(outbox.pending.map((e) => ({ id: e.id, queued_at: e.queued_at })))}`,
-				`outbox sends=${JSON.stringify(outbox.sends ?? [])}`,
-				`outbox delivered=${JSON.stringify(outbox.delivered)} discarded=${JSON.stringify(outbox.discarded ?? [])}`,
-				...requests().map((r, i) => `request#${i} at=${at(r)} last=${String(JSON.stringify(r.body.messages?.at(-1))).slice(0, 300)}`),
-				"rpc records (first seen by 25ms poll):", ...trail,
-				`stderr: ${child.stderr().slice(-1500)}`,
-			].join("\n");
-		} catch (trailError) {
-			detail = `trail unavailable: ${(trailError as Error).message ?? String(trailError)}`;
-		}
-		throw new Error(`${(error as Error).message}\nwake-surface trail:\n${detail}`);
-	}
+	// Diagnostics only: the wake-surface trail, printed when this wait times out (flaky in CI).
+	const trail = wakeTrail(home.path, child, requests);
+	await waitFor(() => (trail.stamp(), requests()), (rows) => rows.some((r) => JSON.stringify(r.body.messages).includes("S20 idle wake")), {
+		timeoutMs: 30_000, what: "idle notice reaches a model request",
+	}).catch((error: unknown) => { throw trail.explain(error); });
 	assert.doesNotMatch(JSON.stringify(requests().map((r) => r.body.messages)), /fleet notice\(s\) arrived while you were busy/);
 	assert.equal(provider.remaining("s20-abort"), 0);
 });
