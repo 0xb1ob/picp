@@ -1,0 +1,1 @@
+- A `driver: "claude"` dispatch (explicit or a locked job) refused only because the native slots are full is now queued and starts natively when the holder tears down; a quality voter that loses the native slot at spawn votes on pi instead of abstaining.

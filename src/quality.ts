@@ -50,6 +50,7 @@ import {
 	QualityReportSchema,
 	type QualityVote,
 	type RoutingConfig,
+	type RoutingDecision,
 	SCHEMA_VERSION,
 	validate,
 	type WorkerProfile,
@@ -60,10 +61,10 @@ import { type ReviewRuns, type ReviewWait, type ReviewWakeup } from "./review-ru
 import { atomicWriteJson } from "./json-store.ts";
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
 import { type ModelProbe, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
-import { resolveReviewerRoute } from "./reviewer-route.ts";
+import { holdReviewerSlot, resolveReviewerRoute } from "./reviewer-route.ts";
 import { nativeSpawn } from "./dispatch-driver.ts";
 import { RunRecorder } from "./run-artifacts.ts";
-import type { WorkerManager } from "./worker-manager.ts";
+import { SpawnSafetyError, type WorkerManager } from "./worker-manager.ts";
 
 export class QualityError extends Error {}
 
@@ -249,7 +250,8 @@ export class QualityPass {
 		const now = this.#options.now ?? (() => new Date());
 		const deadline = isoTimestamp(new Date(now().getTime() + timeoutMs));
 
-		const wait = () => this.#panel(request, route);
+		// The first voter's spawn frees the slot the route reserved; a panel failing before any spawn frees it here.
+		const wait = () => holdReviewerSlot(this.#options.home, request.jobId, () => this.#panel(request, route));
 		const finish = async (report: QualityReport): Promise<ReviewWakeup> => {
 			// The registry substitutes `{ operational }` when the waiter throws; for
 			// the panel that is not a report, and no report is written for it.
@@ -278,19 +280,23 @@ export class QualityPass {
 			await wait();
 			return this.read(request.jobId);
 		}
-		mkdirSync(join(this.#options.home, paths.qualityRunDir(request.jobId, QUALITY_PANEL_SLOT)), { recursive: true });
-		return {
-			...reviews.start<QualityReport>({
-				jobId: request.jobId,
+		try {
+			mkdirSync(join(this.#options.home, paths.qualityRunDir(request.jobId, QUALITY_PANEL_SLOT)), { recursive: true });
+			return {
+				...reviews.start<QualityReport>({
+					jobId: request.jobId,
+					surface: "quality",
+					attempt: 1,
+					model,
+					deadline,
+					wait,
+					finish,
+				}),
 				surface: "quality",
-				attempt: 1,
-				model,
-				deadline,
-				wait,
-				finish,
-			}),
-			surface: "quality",
-		};
+			};
+		} catch (error) {
+			return holdReviewerSlot(this.#options.home, request.jobId, () => Promise.reject(error)); // no waiter frees the slot
+		}
 	}
 
 	/** The whole panel: votes, completeness, tally, the write-once report. Runs in the background. */
@@ -413,7 +419,7 @@ export class QualityPass {
 		const { home, artifacts, manager } = this.#options;
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
 		const record = this.#options.fleet?.get(request.jobId);
-		const model = route.decision.model;
+		let model = route.decision.model;
 		const runDir = join(home, paths.qualityRunDir(request.jobId, options.slot));
 		const scratch = join(runDir, "review");
 		mkdirSync(scratch, { recursive: true });
@@ -440,25 +446,36 @@ export class QualityPass {
 		recorder.cp("routing_resolved", reviewerRoutingEvent({ surface: `quality/${options.slot}`, ...route }));
 		await manager.ready();
 		const key = `${request.jobId}#quality-${options.slot}`;
+		const spawn = (decision: RoutingDecision) => manager.spawn({
+			key,
+			identity: {
+				jobId: request.jobId,
+				kind: "research",
+				delivery: (record?.delivery ?? "pipeline") as Delivery,
+				runDir,
+				worktree: scratch,
+			},
+			profile,
+			model: decision.model,
+			// The voter spawns at the effort routing resolved, not the profile's.
+			...(decision.thinking ? { thinking: decision.thinking } : {}),
+			...nativeSpawn(decision),
+			brief,
+			sessionDir: join(home, LAYOUT.sessions),
+			sessionName: key,
+		});
 		try {
-			const managed = manager.spawn({
-				key,
-				identity: {
-					jobId: request.jobId,
-					kind: "research",
-					delivery: (record?.delivery ?? "pipeline") as Delivery,
-					runDir,
-					worktree: scratch,
-				},
-				profile,
-				model,
-				// The voter spawns at the effort routing resolved, not the profile's.
-				...(route.decision.thinking ? { thinking: route.decision.thinking } : {}),
-				...nativeSpawn(route.decision),
-				brief,
-				sessionDir: join(home, LAYOUT.sessions),
-				sessionName: key,
-			});
+			let managed: ReturnType<typeof spawn>;
+			try {
+				managed = await holdReviewerSlot(home, request.jobId, async () => spawn(route.decision));
+			} catch (error) {
+				// A native worker took the slot after the panel's route: this voter runs on pi rather than abstain.
+				if (!(error instanceof SpawnSafetyError && /native concurrency/.test(error.message))) throw error;
+				const pi = await this.#route(profile, request, record, "pi");
+				recorder.cp("routing_resolved", reviewerRoutingEvent({ surface: `quality/${options.slot}`, ...pi }));
+				model = pi.decision.model;
+				managed = spawn(pi.decision);
+			}
 			recorder.markSpawned({ pid: managed.worker.pid, model, profile: profile.frontmatter.name });
 			recorder.attach(managed.worker);
 			const receipt = await managed.worker.send(brief);
@@ -493,7 +510,7 @@ export class QualityPass {
 	 * is still an explicit override and still wins; what it no longer does is
 	 * throw away the effort and the subject's impact on the way to the spawn.
 	 */
-	async #route(profile: WorkerProfile, request: QualityRequest, record?: { project: string; routing?: JobRouting }): Promise<ReviewerRoute> {
+	async #route(profile: WorkerProfile, request: QualityRequest, record?: { project: string; routing?: JobRouting }, explicit?: "pi"): Promise<ReviewerRoute> {
 		const inputs = reviewerRoutingInputs(record);
 		const decision = await resolveReviewerRoute(
 			{
@@ -508,7 +525,10 @@ export class QualityPass {
 			this.#options.routing,
 			this.#options.probe,
 			this.#options.capacity,
-			{ home: this.#options.home, jobId: request.jobId, record: this.#options.fleet?.get(request.jobId), jobs: this.#options.fleet?.read().jobs ?? [], manager: this.#options.manager },
+			{
+				home: this.#options.home, jobId: request.jobId, record: this.#options.fleet?.get(request.jobId), jobs: this.#options.fleet?.read().jobs ?? [],
+				manager: this.#options.manager, ...(explicit ? { explicit } : { reserve: true }),
+			},
 		);
 		return { decision, inputs };
 	}
