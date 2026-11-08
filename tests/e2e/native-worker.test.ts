@@ -19,6 +19,7 @@ import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { nativeAvailabilityFile, readNativeAvailability } from "../../src/native-availability.ts";
 import { NATIVE_REPORTED_GRACE_MS, NATIVE_RESULT_GRACE_MS } from "../../src/drivers/claude-usage.ts";
 import { checkBudget } from "../../src/failures.ts";
+import { updatePending } from "../../src/update-hold.ts";
 import type { JobTranscriptResponse } from "../../src/viewer/api-types.ts";
 import { jobsView } from "../../src/viewer/jobs-view.ts";
 import { startViewer } from "../harness/dashboard.ts";
@@ -276,6 +277,8 @@ test("P3b/f/g: switch off and a drain freeze refuse before any spawn; an unrepor
 	const ids: string[] = [];
 	const h = await nativeHome(t, [
 		{ kind: "text", text: "No report from me." },
+		// The Stop hook blocks the first unreported stop once; this second stop ends the turn unreported.
+		{ kind: "text", text: "Still no report." },
 		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
 		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
 		{ kind: "text", text: "Reported after the nudge." },
@@ -316,6 +319,39 @@ test("P3b/f/g: switch off and a drain freeze refuse before any spawn; an unrepor
 	const calls = h.claude.requests.filter((request) => request.path.startsWith("/v1/messages") && Array.isArray(request.body.tools));
 	assert.match(JSON.stringify(calls.at(-1)?.body.messages ?? ""), /No report from me\.[\s\S]*You have stopped without calling report_result/, "the nudge resumed the same session");
 	assert.equal(h.claude.overrun(), 0);
+});
+
+// Scenario: picp's report nudge reaches an idle native worker while an auto-update waits for mid-turn workers
+//   Given a native research worker whose turn is running when an auto-update starts waiting on busy workers
+//   When the turn ends unreported and settle nudges the idle worker
+//   Then the nudge is delivered, not refused by the update hold, and the resumed turn reports
+test("update hold: picp's report nudge to an idle unreported native worker passes a pending auto-update", { skip, timeout: 300_000 }, async (t) => {
+	const ids: string[] = [];
+	const hold = async () => {
+		writeFileSync(join(h.b.home, LAYOUT.data, "update.json"), JSON.stringify({ enabled: true }));
+		writeFileSync(join(h.b.home, LAYOUT.state, "update.json"), JSON.stringify({ last_result: "skipped_busy", busy_since: new Date().toISOString(), to: "cc2833047290" }));
+	};
+	const h = await nativeHome(t, [
+		{ kind: "text", text: "No report from me.", beforeAnswer: hold },
+		{ kind: "text", text: "Still no report." },
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		{ kind: "text", text: "Reported after the nudge." },
+	]);
+	h.toggle(true);
+	const job = await h.job();
+	ids.push(job.id);
+	await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(job.id)) } }] },
+	], h.env);
+	assert.ok(updatePending(h.b.home), "the update hold stayed in force");
+	const events = readRunEvents(h.b.home, job.id);
+	const nudge = events.find((event) => event.type === "report_nudged")?.payload as { receipt?: string; error?: string } | undefined;
+	assert.equal(nudge?.receipt, "delivered", JSON.stringify(nudge));
+	const runs = events.filter((event) => event.type === "native_run").map((event) => (event.payload as { report?: boolean }).report);
+	assert.deepEqual(runs, [false, true]);
+	assert.equal(events.filter((event) => event.type === "envelope_received").length, 1);
 });
 
 test("N4e lockdown: a refused lockdown is a named failure, never a nudge", { skip, timeout: 300_000 }, async (t) => {

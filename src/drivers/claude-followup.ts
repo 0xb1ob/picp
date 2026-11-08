@@ -7,7 +7,7 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { isScriptFleetRecord, type JobKind, type Usage } from "../contracts.ts";
-import { assertDispatchOpen } from "../drain.ts";
+import { assertDispatchOpen, assertNotDraining } from "../drain.ts";
 import { checkBudget } from "../failures.ts";
 import { FleetStore } from "../fleet.ts";
 import { projectDenial } from "../mandate-defaults.ts";
@@ -152,18 +152,18 @@ export function returnClaim(runDir: string): void {
 }
 
 /**
- * Every native resume's admission, in dispatch's order and before any claude process starts: the drain freeze and the
- * update hold, trust (a denied project), the per-job budget on the recorded running total (plus `pending`, usage a
- * turn reported that the run log has not yet recorded), then the N3b selection (switch, role, concurrency 1, floor).
+ * A native resume's admission before any claude process starts: drain and update hold, trust, per-job budget (plus
+ * `pending`, unrecorded turn usage), the N3b selection. `ownPrompt` (picp's settle nudge) skips only the update hold.
  */
-export async function assertNativeResume(input: { home: string; jobId: string; what: string; pending?: Usage; env?: NodeJS.ProcessEnv }): Promise<void> {
+export async function assertNativeResume(input: { home: string; jobId: string; what: string; pending?: Usage; env?: NodeJS.ProcessEnv; ownPrompt?: boolean }): Promise<void> {
 	const jobs = new FleetStore({ home: input.home }).read().jobs;
 	const record = jobs.find((job) => job.job_id === input.jobId);
 	const refuse = (why: string): never => {
 		throw new NativeDriverError(`refused: ${input.what} of native ${input.jobId}: ${why}`);
 	};
 	if (!record || isScriptFleetRecord(record) || !record.worker.driver) return refuse("no native fleet record");
-	assertDispatchOpen(input.home, `${input.what} of native ${input.jobId}`);
+	// The update hold stops fresh work; a nudge finishes held work, so it passes the hold, never a drain.
+	(input.ownPrompt ? assertNotDraining : assertDispatchOpen)(input.home, `${input.what} of native ${input.jobId}`);
 	try {
 		nativeModelId(record.worker.model);
 	} catch (error) {
