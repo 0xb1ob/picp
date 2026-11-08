@@ -54,8 +54,12 @@ async function press(tab: Tab, key: string, isComposing = false) {
 	await settle();
 }
 async function pick(tab: Tab, command: string) {
-	tab.click(tab.$(".operator-composer-slash")!);
-	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith(command)));
+	// Re-click only while the menu is closed: a re-render under load can swallow the first click.
+	const button = await until(() => {
+		if (tab.$(".operator-composer-slash")?.getAttribute("aria-expanded") !== "true") tab.click(tab.$(".operator-composer-slash")!);
+		return tab.$$("#operator-composer-command-menu button").find((b) => b.textContent!.startsWith(command)) ?? null;
+	}, Boolean, `the ${command} menu button`);
+	tab.click(button!);
 	await tab.find(".operator-composer-command code", (c) => c.textContent!.startsWith(command));
 }
 const open = async (t: Context, ports: Parameters<typeof operatorSession>[3], isIdle = () => true) => {
@@ -168,6 +172,7 @@ test("commands-retry: a refusal that injected nothing frees its retry; an unknow
 
 	// The session injects but its answer frame is unreadable: an unknown outcome (504), never a fresh-id retry.
 	tab.click(tab.$(".operator-composer-command-remove")!);
+	await until(() => tab.$(".operator-composer-command"), (el) => el === null, "command removed");
 	tab.globals.fetch = real;
 	// The record must name the standard socket path, so the bridge's socket moves aside behind a garbling relay.
 	const socket = controlSocketFile(d.stateDir), moved = `${socket}.real`;

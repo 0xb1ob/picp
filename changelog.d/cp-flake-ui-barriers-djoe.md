@@ -1,0 +1,1 @@
+- Flaky UI e2e tests (commands-retry, P20-settings-compaction, M3-context-phone) wait on events instead of fixed delays or a single click: command removed, the restore POST recorded, the draft restored; the slash menu is re-opened until it shows. Test-only.

@@ -255,7 +255,7 @@ test("M3-context-phone: the context sheet and the Conversations drawer are modal
 	assert.deepEqual([tab.$("dialog"), tab.$(".workspace-sessions-open")], [null, null], "no chat surface outside the operator chat");
 	tab.go(`${CHAT}&project=atlas`);
 	await tab.find(".workspace-context-open");
-	await new Promise((done) => setTimeout(done, 50));
+	await until(() => (tab.$(".operator-composer textarea") as unknown as { value: string } | null)?.value, (v) => v === "KEEP-DRAFT", "the draft restored");
 	assert.equal(tab.$("dialog"), null, "back in the chat no surface is left from before");
 	assert.equal((tab.$(".operator-composer textarea") as unknown as { value: string }).value, "KEEP-DRAFT", "the draft survives");
 });

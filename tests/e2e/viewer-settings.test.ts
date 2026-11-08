@@ -570,6 +570,7 @@ test("P20-settings-compaction: both keys with what is in force; a bad threshold 
 	await until(effective, (now) => now[0] === "In force: 175000 tokens, from file", "the re-read snapshot");
 	assert.deepEqual(effective(), ["In force: 175000 tokens, from file", "In force: 200000 tokens, from code"], "the re-read snapshot shows the written file");
 	await ui.press(compaction, "Restore defaults");
+	await until(() => ui.posts()[1], Boolean, "the restore post");
 	assert.deepEqual(ui.posts()[1]!.json.keys, ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"]);
 	assert.equal(await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => typeof value === "number" && value !== 175000, "the restore"), 150000, "the restored default");
 });
