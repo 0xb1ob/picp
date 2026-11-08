@@ -577,7 +577,7 @@ export class Reviver {
 					delivery: record.delivery,
 					runDir: this.#options.runs.open(jobId).runDir,
 					worktree: record.worktree,
-					...(record.worker.driver && record.kind === "research" ? { artifactPath: join(this.#options.home, paths.artifactFile(jobId)) } : {}),
+					...(record.worker.driver && record.kind === "research" ? { artifactPath: join(this.#options.home, record.delivery === "board" ? join(paths.artifactDir(jobId), "board.json") : paths.artifactFile(jobId)) } : {}),
 				},
 				profile,
 				model: plan.model,

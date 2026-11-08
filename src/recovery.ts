@@ -517,7 +517,7 @@ export class BoundedRecovery {
 				delivery: record.delivery,
 				runDir,
 				worktree: record.worktree,
-				...(record.kind === "research" ? { artifactPath: `${home}/${paths.artifactFile(jobId)}` } : {}),
+				...(record.kind === "research" ? { artifactPath: `${home}/${record.delivery === "board" ? `${paths.artifactDir(jobId)}/board.json` : paths.artifactFile(jobId)}` } : {}),
 			},
 			profile,
 			model: route.model,
