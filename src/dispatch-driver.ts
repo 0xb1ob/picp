@@ -26,6 +26,9 @@ export interface DriverContext {
 	reserve?: boolean;
 	/** Native workers live in this parent that the fleet does not list (reviewers, N4h); each holds the native slot. */
 	nativeLive?: readonly string[];
+	/** The selected profile's name and the per-job skill count: both can make a job ineligible for native. */
+	profile?: string;
+	skills?: number;
 }
 
 type Capacity = Parameters<typeof resolveWithCapacity>[3];
@@ -72,7 +75,8 @@ export async function resolveDriverRoute(
 		...(route.override ? { requested: route.override } : {}),
 		...(route.thinking ? { requested_thinking: route.thinking } : {}),
 	};
-	const selection = { home: ctx.home, jobId: ctx.jobId, driver: "claude" as const, kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs: ctx.jobs };
+	const selection = { home: ctx.home, jobId: ctx.jobId, driver: "claude" as const, kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs: ctx.jobs,
+		...(ctx.profile !== undefined ? { profile: ctx.profile } : {}), ...(ctx.skills !== undefined ? { skills: ctx.skills } : {}) };
 	let note: string | undefined;
 	// S2: passive subscription evidence from earlier native runs; the slot is still taken after the last await.
 	const refusal = allowRefusal(config, ctx.role, picked.model)

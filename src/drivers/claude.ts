@@ -46,6 +46,10 @@ export interface NativeSelection {
 	delivery: Delivery;
 	jobs: readonly FleetRecord[];
 	env?: NodeJS.ProcessEnv;
+	/** The worker profile's name; `ops` never runs native. */
+	profile?: string;
+	/** How many per-job skills the dispatch names; any runs pi. */
+	skills?: number;
 }
 
 /** The switch a job's role/kind/delivery falls under, or undefined when no native class takes it (N4f). Research
@@ -68,6 +72,8 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 	const nativeClass = nativeClassOf(input.kind, input.role, input.delivery);
 	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local or answer), ship (role implementer, delivery pr or local) and gate-reviewer jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
 	if (nativeClass === undefined) return ineligible;
+	if (input.profile === "ops") return { category: "ineligible", why: "the ops profile needs ssh/scp, which the native Bash policy refuses" };
+	if ((input.skills ?? 0) > 0) return { category: "ineligible", why: "per-job skills load only on pi (`--skill`)" };
 	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
 	// A reviewer is one-shot and never sent to: the pipeline rule guards the planner's queued sends, not its gate (N4h).
 	if (nativeClass !== "claude_review" && existsSync(join(input.home, paths.pipelineFile(input.jobId)))) {

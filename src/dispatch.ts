@@ -490,7 +490,7 @@ export class Dispatcher {
 				},
 				options.routing,
 				options.probe,
-				options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, jobs: options.fleet.read().jobs, ...(request.driver ? { explicit: request.driver } : {}) },
+				options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, profile: profile.frontmatter.name, skills: skills.length, jobs: options.fleet.read().jobs, ...(request.driver ? { explicit: request.driver } : {}) },
 			);
 		} catch (thrown) {
 			if (!(thrown instanceof RoutingError)) throw thrown;
@@ -571,7 +571,7 @@ export class Dispatcher {
 			},
 			options.routing,
 			options.probe,
-			options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, jobs: options.fleet.read().jobs, reserve: true, nativeLive: liveNativeWorkers(options.manager, issue.id), ...(request.driver ? { explicit: request.driver } : {}) },
+			options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, profile: profile.frontmatter.name, skills: skills.length, jobs: options.fleet.read().jobs, reserve: true, nativeLive: liveNativeWorkers(options.manager, issue.id), ...(request.driver ? { explicit: request.driver } : {}) },
 		);
 
 		// Frozen on the record below; an invalid data/worker-bounds.json refuses before any lease.
