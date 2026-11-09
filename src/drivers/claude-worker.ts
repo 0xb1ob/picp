@@ -179,7 +179,7 @@ async function turn(prompt: string): Promise<Turn> {
 	turnSeen = [];
 	const resumed = resuming;
 	if (!transcript) {
-		transcript = nativeTranscript(nativeTranscriptFile(runDir, jobId), { jobId, cwd: worktree }, toolName);
+		transcript = nativeTranscript(nativeTranscriptFile(runDir, jobId), { id: jobId, cwd: worktree }, toolName);
 		write({ type: "native_transcript", transcript_file: transcript.file });
 	}
 	transcript.prompt(prompt, resumed);

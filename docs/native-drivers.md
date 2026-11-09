@@ -639,6 +639,12 @@ events. Each turn is one Agent SDK `query()` that resumes the claude session id 
 (`sessions/cp-parent.jsonl`) also logs every operator text as it enters the model's input, and that log is what
 `get_entries` serves. Wake-ups reach the model behind a `[fleet wake-up <type> — …]` line, so a resumed session can still
 tell them from operator sends. A send that arrives while a turn runs is queued to the next turn (no mid-turn steer).
+The dashboard's parent view reads a pi-format log beside the record, `sessions/native-parent-log/<record name>`
+(`claude-parent-log.ts`, 0600, 64 KiB block cap): operator texts as user messages, wake-ups as custom messages,
+assistant text, thinking, tool calls with their results, entry-side errors and compactions, appended as they land. The
+viewer switches to it only when the control file's `sessionFile` opens with the native `record` line; `get_entries`
+and a relaunch still read the record. A record with no log yet imports its claude sessions once from the CLI's
+`native-parent-claude/config/projects/*/<session_id>.jsonl`; a rotation starts a new record and so a new log.
 Not yet on native (Stage 2): `compact`, `new_session`, `set_model`, `set_thinking_level` and the slash diagnostics. Each
 one is refused by name, and `get_commands` lists none.
 
