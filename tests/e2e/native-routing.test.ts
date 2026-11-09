@@ -489,6 +489,28 @@ test("J5 fallback walk: a spent opus window runs the row's native sonnet fallbac
 	assert.equal(first?.body.model, `${FAKE_CLAUDE_MODEL}-sonnet`, "the CLI ran the sonnet fallback");
 });
 
+// Scenario: Given seven_day_opus rejected with a future reset and a claude row with a native sonnet fallback
+//   When a job dispatches with the explicit model override anthropic/claude-opus-5-5
+//   Then it does not run sonnet natively: the opus window refuses native and the override is never substituted
+test("J5 fallback walk: a blocked explicit opus override never runs the row's sonnet fallback natively", { skip, timeout: 300_000 }, async (t) => {
+	const h = await routedHome(t, []);
+	const [opus, sonnet] = ["anthropic/claude-opus-5-5", `${FAKE_NATIVE_MODEL}-sonnet`];
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ ...JSON.parse(h.routing({ driver: "claude", fallbacks: [sonnet, h.piModel] })) as object,
+		allow: ["mock/*", FAKE_NATIVE_MODEL, sonnet] }));
+	routeNativeModel(h.b.home, [opus]);
+	h.toggle(true);
+	mkdirSync(dirname(nativeAvailabilityFile(h.b.home)), { recursive: true });
+	writeFileSync(nativeAvailabilityFile(h.b.home), JSON.stringify({ version: 1, windows: { seven_day_opus: { status: "rejected", observed_at: Date.now(), resets_at: Date.now() + 3_600_000 } }, seen: [] }));
+	const job = await h.job();
+	const ends = (await h.b.run([{ kind: "tool_calls", calls: [dispatch(job.id, { model: opus, dry_run: true })] }], h.env)) as Tool[];
+	const end = ends.find((e) => e.toolName === "cp_dispatch");
+	const decision = (end?.result.details as { decision?: { model?: string; driver?: string; driver_reason?: string } } | undefined)?.decision;
+	assert.notEqual(end?.isError, true, text(end));
+	assert.deepEqual([decision?.model, decision?.driver], [opus, "pi"], decision?.driver_reason);
+	assert.match(decision?.driver_reason ?? "", /^window: seven_day_opus rejected until /);
+	assert.equal(h.claude.requests.length, 0, "a preview reached the native model");
+});
+
 // Scenario: Given a claude implementer row and a pipeline implementer_model anthropic/claude-sonnet-5-5
 //   When advance dispatches the implementer
 //   Then it runs native on sonnet

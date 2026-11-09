@@ -78,7 +78,9 @@ export async function resolveDriverRoute(
 	let model: string | undefined;
 	let skipped: { category: NativeRefusal; why: string } | undefined;
 	// J5: the row's native candidates in order; the first allowed one S2's subscription evidence does not block wins.
-	for (const candidate of [picked.model, ...(rule?.fallbacks ?? [])].filter(isNativeModel)) {
+	// An explicit model is never substituted: a blocked override refuses (then pi), as before J5.
+	const candidates = route.override ? [picked.model] : [picked.model, ...(rule?.fallbacks ?? [])];
+	for (const candidate of candidates.filter(isNativeModel)) {
 		const blocked = allowRefusal(config, ctx.role, candidate)
 			?? await (selected ??= nativeSelectionRefusal(selection))
 			?? await nativeAvailability(ctx.home, candidate).then((seen) => ((note = seen.note), seen.blocked));
