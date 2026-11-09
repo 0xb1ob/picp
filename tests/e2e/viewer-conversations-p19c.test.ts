@@ -713,10 +713,12 @@ test("P19-bridge-steps: a wake and the calls after it are one run of steps; noti
 	assert.deepEqual([pills(shapes), shapes.$$(".session-steps-open .session-steps-card").length, shapes.$(".session-steps-link") === null], [[], 1, true], "no pills; the run's card; no job link without a recorded job");
 });
 
-test("P19-tools-sheet: the ⋯ sheet's tool toggle is the same remembered choice; pinned decisions collapse to one bar and close after a click; the 390 px toggle and notice rules hold at 1440", { timeout: 120_000 }, async (t) => {
-	let askId = "";
+// Scenario: the phone's ⋯ sheet shares the tool toggle and the chat shows no decisions panel
+//   Given an operator chat with a tool run and an open ask   When the ⋯ sheet's toggle is tapped
+//   Then tool calls show and the choice is remembered, no decisions panel renders, and the 390 px rules hold at 1440
+test("P19-tools-sheet: the ⋯ sheet's tool toggle is the same remembered choice; an open ask renders no decisions panel; the 390 px toggle and notice rules hold at 1440", { timeout: 120_000 }, async (t) => {
 	const d = await chat(t, [line("14:00", { role: "user", content: [{ type: "text", text: "MESSAGE-ONE" }] }), ...toolRun("t1", "read", "Read 42 lines\nTOOL-ONE")], (stateDir) => {
-		askId = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "demo", question: "PINNED-QUESTION", recommendation: "Keep", options: [{ label: "Keep", consequence: "Paused" }] }).id;
+		new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "demo", question: "OPEN-QUESTION", recommendation: "Keep", options: [{ label: "Keep", consequence: "Paused" }] });
 	});
 	await operatorSession(t, d.stateDir);
 	const tab = await d.open(OPERATOR);
@@ -725,14 +727,7 @@ test("P19-tools-sheet: the ⋯ sheet's tool toggle is the same remembered choice
 	tab.click(sheet);
 	await until(() => toolTexts(tab).length, (n) => n === 1, "the sheet's toggle shows tool calls");
 	assert.deepEqual([tab.storage.get(TOOLS_KEY), tab.$(".session-tools-toggle")?.textContent], ["1", "Tools 1"], "remembered like the heading toggle: one state behind both");
-	const pinned = () => tab.$(".session-pinned")!, bar = () => tab.$(".session-pinned h2 button")!;
-	assert.deepEqual([pinned().getAttribute("class"), bar().textContent], ["session-pinned", "1 decision waiting ▾"], "pinned decisions collapse to one bar");
-	tab.click(bar());
-	assert.equal((await tab.find(".session-pinned.session-pinned-open")).getAttribute("class"), "session-pinned session-pinned-open", "tapped open into the sheet");
-	assert.equal(bar().getAttribute("aria-expanded"), "true");
-	tab.click(await tab.find(".session-pinned .decision-card-option", (b) => !b.hasAttribute("disabled")));
-	assert.deepEqual(pick(await posted(tab, 1), ["kind", "ask_id", "label"]), { kind: "answer", ask_id: askId, label: "Keep" }, "the card's button answers, once");
-	assert.equal(await until(() => pinned().getAttribute("class"), (c) => c === "session-pinned", "the sheet collapsed"), "session-pinned", "and the sheet collapses after the click");
+	assert.deepEqual([tab.$$(".session-pinned, .decision-card").length, /decisions? waiting/.test(tab.text())], [0, false], "no inline decisions panel");
 	const css = await servedCss(d);
 	const wide = css.indexOf(".session-entries{max-width:720px"), desktop = css.slice(css.lastIndexOf("@media(min-width:900px)", wide), css.indexOf("}}", wide) + 2);
 	assert.match(cssRules(css, ".session-tools-toggle"), /^display:flex;.*min-height:44px;.*white-space:nowrap/, "a 44px touch target that never wraps at 390px");

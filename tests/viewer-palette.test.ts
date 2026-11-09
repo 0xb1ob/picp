@@ -52,8 +52,6 @@ test("Stats chart colours are only --blue, --green, --muted and --dim", () => {
 /** Amber/coral (and the ask/error/stranded tokens that paint them) only on an open human decision or CI that is actually red. */
 const KEEP = [
  /^\.awaiting-(?:card|index|reason|origin)(?![\w-])/,
- /^\.session-pinned(?![\w-])/,
- /^\.session-pinned-open(?![\w-])/,
  /^\.decision-card-option\.decision-card-recommended(?![\w-])/,
  /^\.shell-count(?![\w-])/,
  /^\.overview-square-attention(?![\w-])/,

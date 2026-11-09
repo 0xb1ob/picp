@@ -17,12 +17,12 @@ type Worker = SessionsResponse["workers"][number];
 export interface ContextProps {
  asks: AwaitingDetail[]; live: Worker[]; selection: ProjectSelection; control: ControlView | undefined; answering: Answering;
  jobs: Map<string, ViewerJob> | null; jobsError: string | null; current: boolean;
- onClose: () => void; onAnswer: () => void; onJob: (id: string) => void; onJobs: () => void;
+ onClose: () => void; onJob: (id: string) => void; onJobs: () => void;
 }
 const NONE = "not recorded";
 
 /** The recorded context and the exact recorded options, answered through the chat's one shared answer path. */
-function AskCard({ask, control, answering, current, onAnswer}: {ask: AwaitingDetail; control: ControlView | undefined; answering: Answering; current: boolean; onAnswer: () => void}) {
+function AskCard({ask, control, answering, current}: {ask: AwaitingDetail; control: ControlView | undefined; answering: Answering; current: boolean}) {
  const {disabled} = answerView(ask, control, answering);
  const lines = ask.context?.split("\n").map(line => line.replace(/^\s*(?:[-*•]\s+)?/, "").trim()).filter(Boolean) ?? [];
  return <li class="workspace-context-ask">
@@ -39,7 +39,6 @@ function AskCard({ask, control, answering, current, onAnswer}: {ask: AwaitingDet
    </button>
   </li>)}</ul>
   <AnswerLine ask={ask} control={control} answering={answering}/>
-  <button type="button" class="workspace-context-chat" onClick={onAnswer}>Answer in chat instead →</button>
  </li>;
 }
 /** Wall clock as `elapsed / limit`, its bar only when both are recorded; an unknown never reads as 0. */
@@ -51,7 +50,7 @@ function Clock({job}: {job: ViewerJob | undefined}) {
 }
 
 /** The open asks and live workers, joined to `/api/jobs` by exact id; nothing the record lacks is shown as a value. */
-function Body({asks, live, selection, control, answering, jobs, jobsError, current, onClose, onAnswer, onJob, onJobs}: ContextProps) {
+function Body({asks, live, selection, control, answering, jobs, jobsError, current, onClose, onJob, onJobs}: ContextProps) {
  return <>
   <header class="workspace-context-head">
    <h2>This conversation</h2>
@@ -61,7 +60,7 @@ function Body({asks, live, selection, control, answering, jobs, jobsError, curre
   <div class="workspace-context-body">
    <section aria-label="Asked you">
     <h3 class={asks.length ? "workspace-context-asked" : undefined}>Asked you · {asks.length}</h3>
-    {asks.length ? <ul>{asks.map(ask => <AskCard key={ask.id} ask={ask} control={control} answering={answering} current={current} onAnswer={onAnswer}/>)}</ul> : <p>Nothing is waiting on you.</p>}
+    {asks.length ? <ul>{asks.map(ask => <AskCard key={ask.id} ask={ask} control={control} answering={answering} current={current}/>)}</ul> : <p>Nothing is waiting on you.</p>}
    </section>
    <section aria-label="In flight">
     <h3>In flight · {live.length}</h3>

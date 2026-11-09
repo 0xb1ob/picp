@@ -1,0 +1,1 @@
+- Dashboard chat: the inline "N decisions waiting ▾" panel above the composer is gone, with its CSS, its remembered open/seen `localStorage` keys and the Context card's "Answer in chat instead →" hop that opened it. Open asks are answered from the Context sidebar card (or the chat's quick replies), which still posts the same `<ask-id>: <label>` dashboard message.

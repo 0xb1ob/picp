@@ -959,9 +959,12 @@ const OPERATOR = "#sessions?view=you&transcript=1", RESTART = "/api/operator/res
 const XSS = "<img src=x onerror=alert(1)>";
 const choice = (question: string, labels: string[]) => ({ project: "demo", question, options: labels.map((label) => ({ label, consequence: `${label} it` })), recommendation: labels[0]! });
 const posts = (tab: Tab, path: string) => tab.requests.filter((r) => r.method === "POST" && r.path === path);
-const bar = (tab: Tab, ok: (b: Element) => boolean = () => true) => tab.find(".session-pinned h2 button", ok);
 
-test("P17-composer: open asks pin above the composer behind one remembered toggle; it sends, steers and aborts; off or gone, it says why", { timeout: 180_000 }, async (t) => {
+// Scenario: open asks stay out of the operator chat
+//   Given two open asks and one withdrawn, carded in the transcript   When the operator chat opens
+//   Then no decisions panel renders, the inline cards are history and the chips offer the open ask
+//   And the composer sends, steers and aborts; off or gone, it says why
+test("P17-composer: open asks render no decisions panel in the chat; it sends, steers and aborts; off or gone, it says why", { timeout: 180_000 }, async (t) => {
 	let busy = false;
 	const d = await dashboard(t);
 	const asks = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl"));
@@ -975,23 +978,11 @@ test("P17-composer: open asks pin above the composer behind one remembered toggl
 	write(operatorSessionsFile(join(d.stateDir, "sessions")), `${JSON.stringify({ at: AT, session_file: transcript })}\n`);
 	const session = await operatorSession(t, d.stateDir, () => !busy);
 	let tab = await d.open(OPERATOR);
-	const toggle = await bar(tab);
-	assert.deepEqual([toggle.textContent, toggle.getAttribute("aria-expanded"), toggle.closest("section")!.getAttribute("aria-label")], ["2 decisions waiting ▾", "false", "Open decisions"]);
-	const html = tab.root.innerHTML;
-	assert.ok(html.indexOf("session-pinned") < html.indexOf("operator-composer"), "the pinned block sits directly above the composer");
-	assert.deepEqual(tab.$$(".session-ask-pointer, .session-ask-settled").map((p) => p.textContent), ["open, answer below", "Withdrawn: No longer needed", "open, answer below"], "inline cards are history");
-	assert.equal(tab.$$(".session-pinned button.decision-card-option").length, 4, "one button per option, per card");
-	assert.deepEqual([tab.$(".session-pinned .decision-card-recommended .overview-rec-badge")?.textContent, tab.$(".session-pinned a.glossary-link")?.getAttribute("href")], ["recommended", "https://github.com/0xb1ob/picp#words-you-will-see"]);
-	assert.equal(tab.storage.get("cp-sessions-pinned-open"), undefined, "nothing remembered before the operator chooses");
-	tab.click(toggle);
-	await bar(tab, (b) => b.getAttribute("aria-expanded") === "true");
-	assert.equal(tab.storage.get("cp-sessions-pinned-open"), "1");
-	tab = await tab.reopen();
-	tab.click(await bar(tab, (b) => b.getAttribute("aria-expanded") === "true"));
-	await until(() => tab.storage.get("cp-sessions-pinned-open"), (v) => v === "0", "the collapsed choice");
+	await tab.find(".session-ask-pointer");
+	assert.deepEqual([tab.$$(".session-pinned, .decision-card").length, /decisions? waiting/.test(tab.text())], [0, false], "no inline decisions panel");
+	assert.deepEqual(tab.$$(".session-ask-pointer, .session-ask-settled").map((p) => p.textContent), ["open, answer in Context", "Withdrawn: No longer needed", "open, answer in Context"], "inline cards are history");
 	asks.answer(first.id, "Keep");
 	tab.refresh();
-	assert.equal((await bar(tab, (b) => b.textContent === "1 decision waiting ▾")).getAttribute("aria-expanded"), "false", "an ask leaving never opens it");
 	assert.match((await tab.find(".session-ask-settled", (p) => /^Answered/.test(p.textContent ?? ""))).textContent ?? "", /^Answered: Keep · /);
 	const replies = await tab.find(".session-entries > .session-replies");
 	assert.deepEqual([replies.querySelector(".session-replies-to")?.textContent, ...[...replies.querySelectorAll("button.session-reply")].map((b) => b.textContent)], [`Options from ${merge.id}: Merge now?`, "Yes", "No"], "the one carded open ask's quick replies");
@@ -999,30 +990,6 @@ test("P17-composer: open asks pin above the composer behind one remembered toggl
 	assert.deepEqual([sheet.parentElement?.querySelector("summary")?.getAttribute("aria-label"), sheet.querySelector('.session-bar-views a[aria-current="page"]')?.textContent, [...sheet.querySelectorAll("button")].some((b) => b.textContent === "Search"), sheet.querySelector(".session-bar-state .session-dot")?.getAttribute("class")], ["More", "Operator ↔ you", true, "session-dot session-dot-idle"], "the ⋯ sheet");
 	assert.match(sheet.querySelector(".session-bar-file")?.textContent ?? "", /^Delivers to \S+\.jsonl$/);
 	assert.deepEqual([[404, 401, 403].includes(tab.requests.find((r) => r.path === "/api/devices/notices")?.status ?? 0), tab.$(".device-notices")?.outerHTML], [true, undefined], "off: no notices");
-	asks.open(choice("Tag it?", ["Yes"]));
-	tab.refresh();
-	const opened = await bar(tab, (b) => b.textContent === "2 decisions waiting ▾" && b.getAttribute("aria-expanded") === "true");
-	assert.equal(tab.storage.get("cp-sessions-pinned-open"), "0", "a new ask id opened it by itself; that is not the operator's choice");
-	tab.click(opened);
-	await bar(tab, (b) => b.getAttribute("aria-expanded") === "false");
-	asks.open(choice("Ship it?", ["Yes"]));
-	tab = await tab.reopen();
-	await bar(tab, (b) => b.textContent === "3 decisions waiting ▾" && b.getAttribute("aria-expanded") === "true");
-	// A browser whose storage refuses writes: the bar still toggles for this view and the refusal is a warning.
-	const warn = t.mock.method(console, "warn", () => {});
-	const refusing = new (class extends Map<string, string> { override set(): this { throw new Error("QuotaExceededError"); } })();
-	const strict = await openTab(t, d.port, OPERATOR, refusing);
-	strict.click(await bar(strict, (b) => b.getAttribute("aria-expanded") === "false"));
-	assert.ok(await bar(strict, (b) => b.getAttribute("aria-expanded") === "true"), "the toggle still works");
-	assert.ok(warn.mock.calls.some((c) => c.arguments[0] === "decisions bar not persisted: QuotaExceededError"), "the refused write warns");
-	strict.close();
-	warn.mock.restore();
-	const held = await d.open(OPERATOR, /^\/api\/operator\/message$/);
-	held.click(await held.find(".session-pinned button.decision-card-option", (b) => !b.hasAttribute("disabled")));
-	assert.equal((await held.find(".decision-card-delivery")).textContent, "Sending — the card closes when the session records the answer");
-	held.release();
-	await until(() => posts(held, MESSAGE), (rows) => rows.length === 1, "the held answer");
-	held.close();
 
 	const field = await tab.find("textarea");
 	assert.deepEqual([field.getAttribute("aria-label"), field.getAttribute("placeholder")], ["Message to the operator session", "Message Operator…"]);
@@ -1056,7 +1023,6 @@ test("P17-composer: open asks pin above the composer behind one remembered toggl
 	tab = await tab.reopen();
 	assert.ok(await tab.waitText(/Dashboard control is off/), "off: the reason");
 	assert.equal(tab.$("textarea")?.outerHTML, undefined);
-	assert.ok(tab.$$(".session-pinned button.decision-card-option").every((b) => b.hasAttribute("disabled")), "the cards stay, disabled");
 	rmSync(controlConfigFile(d.stateDir));
 	for (const hash of ["#sessions?view=parent", "#sessions?view=workers"]) {
 		tab = await tab.reopen(hash);
@@ -1374,6 +1340,9 @@ function cssRules(css: string): Array<{ media: string; selector: string; body: s
 	return out;
 }
 
+// Scenario: the served stylesheet holds the control blocks at 390 px and 1440 px
+//   Given the dashboard's served CSS   Then the cards, launchers, restart and device blocks wrap on a phone
+//   And widen from 900 px, and no inline decisions panel rule ships
 test("P17-layout: the served stylesheet wraps the control blocks at 390 px and widens them at 1440 px", { timeout: 120_000 }, async (t) => {
 	const d = await dashboard(t);
 	const href = /<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"|<link[^>]*href="([^"]+\.css)"/.exec((await d.get("/")).text)!;
@@ -1381,12 +1350,6 @@ test("P17-layout: the served stylesheet wraps the control blocks at 390 px and w
 	const rule = (selector: string, media = "") => all.filter((r) => r.selector === selector && r.media === media).map((r) => r.body).join(";");
 	const WIDE = "@media(min-width:900px)";
 	for (const [selector, media, want] of [
-		[".session-pinned", "", /display:flex;.*max-height:45vh;overflow-y:auto;padding:0 16px/],
-		[".session-pinned:not(.session-pinned-open)>:not(h2)", "", /^display:none$/],
-		[".session-pinned-open>h2", "", /position:sticky/],
-		[".session-pinned-open", "@media(max-width:899px)", /max-height:60dvh/],
-		[".session-pinned", WIDE, /padding:0 40px/],
-		[".session-pinned>*", WIDE, /max-width:none/],
 		[".decision-card", "", /^display:flex;flex-direction:column;gap:12px;min-width:0;overflow-wrap:anywhere$/],
 		[".decision-card-options", "", /display:grid;grid-template-columns:minmax\(0,1fr\)/],
 		[".decision-card-options", WIDE, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/],
@@ -1405,7 +1368,7 @@ test("P17-layout: the served stylesheet wraps the control blocks at 390 px and w
 	assert.match(rule(".devices-qr-dark"), /fill:var\(--qr-dark\)/, "QR colours are tokens");
 	const narrow = all.filter((r) => /^\.(operator-restart-(button|line)|device-notice)/.test(r.selector));
 	assert.deepEqual(narrow.filter((r) => /white-space:nowrap|(^|[^-])width:\d/.test(r.body)).map((r) => r.selector), [], "no fixed width or nowrap: long names break");
-	assert.deepEqual(all.filter((r) => r.media === WIDE && /\.session-pinned/.test(r.selector) && /pointer-events:none|>h2>button>span/.test(r.selector + r.body)).length, 0, "at 1440 px the bar is a real toggle");
+	assert.deepEqual(all.filter((r) => /\.session-pinned/.test(r.selector)), [], "no inline decisions panel rule ships");
 });
 
 // Restart clean against a launcher that predates `fresh`: two taps post the clean body, the line names the missing
