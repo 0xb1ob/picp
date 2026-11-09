@@ -71,7 +71,7 @@ let record = new ParentRecord(sessionFile);
 let sessionId = record.sessionId();
 /** The `--model` this process was launched with; a recorded `set_model` on top of it survives a relaunch. */
 const launchModel = modelId;
-modelId = record.model(launchModel) ?? modelId;
+modelId = record.model(launchModel);
 /** pi's thinking level, applied to the next query as the native effort (`nativeEffortOptions`). */
 let thinking = record.thinking();
 let busy = false;

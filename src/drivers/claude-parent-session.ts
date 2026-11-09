@@ -76,12 +76,16 @@ export class ParentRecord {
 	}
 
 	/**
-	 * The model `set_model` last applied while the parent ran on `--model launch`: a relaunch on that same `--model`
-	 * keeps the switch, as pi's session does; a launch on another model is the operator's newer choice and wins.
+	 * The model in force for a launch on `--model launch`: the last `set_model` on that same `--model` (a relaunch keeps
+	 * the switch, as pi's session does), else `launch` itself, the operator's newer choice, which is then recorded.
 	 */
-	model(launch: string): string | undefined {
+	model(launch: string): string {
 		const last = this.lines().filter((line) => line.type === "model").at(-1);
-		return last?.type === "model" && last.launch === launch ? last.id : undefined;
+		if (last?.type !== "model") return launch;
+		if (last.launch === launch) return last.id;
+		// The new launch model is recorded, so a later relaunch on the old one never brings back its stale switch.
+		this.setModel(launch, launch);
+		return launch;
 	}
 
 	setModel(id: string, launch: string): void {

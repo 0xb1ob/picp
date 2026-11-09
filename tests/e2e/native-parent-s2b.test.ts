@@ -204,7 +204,7 @@ test("native parent S2b: abort interrupts the query and leaves no stale tool-cal
 
 // Scenario (#826 review): Given a native entry launched on --model M, When set_model switches it to M2 and the entry is
 // SIGKILLed, Then a relaunch on the same --model M answers get_state with M2 (the session record keeps the switch),
-// And a launch on another --model M3 is the newer choice, so get_state reports M3.
+// And a launch on another --model M3 wins (M3), after which a relaunch on M reports M, never the stale M2.
 test("native parent S2b: a set_model switch survives a kill and relaunch", { timeout: 120_000 }, async (t) => {
 	const f = await nativeFleet(t, () => []);
 	const modelOf = async (proc: WorkerProcess) => ((await proc.getState(30_000)) as { model?: { id?: string } }).model?.id;
@@ -218,6 +218,9 @@ test("native parent S2b: a set_model switch survives a kill and relaunch", { tim
 	await second.shutdown();
 	const third = spawnEntry(t, f, "anthropic/claude-picp-third");
 	assert.equal(await modelOf(third), "claude-picp-third", "a launch on a new --model wins over the recorded switch");
+	await third.shutdown();
+	const fourth = spawnEntry(t, f, FAKE_NATIVE_MODEL);
+	assert.equal(await modelOf(fourth), FAKE_CLAUDE_MODEL, "a relaunch on the first --model never brings back the stale switch");
 });
 
 // Scenario: Given a drained record an earlier parent left, a pending durable wake-up, a queued operator answer and a
