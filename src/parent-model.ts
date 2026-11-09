@@ -1,5 +1,7 @@
 /** The parent model resolvers `cp_parent start` uses; moved out of cp-bridge.ts unchanged (size cap), re-exported there. */
 import { CpBridgeError } from "./cp-bridge-error.ts";
+import { isNativeModel } from "./drivers/claude.ts";
+import type { ParentDriver } from "./parent-context.ts";
 import type { ModelProbe } from "./routing.ts";
 
 /**
@@ -24,8 +26,12 @@ export function resolveParentModel(
 	);
 }
 
-/** Refuse an unknown/unauthenticated model before spawn, naming what pi does know. */
-export function requireAvailableParentModel(model: string, probe: ModelProbe): void {
+/** Refuse an unknown/unauthenticated model before spawn; driver claude takes any `anthropic/claude-*` ref unprobed. */
+export function requireAvailableParentModel(model: string, probe: ModelProbe, driver: ParentDriver = "pi"): void {
+	if (driver === "claude") {
+		if (isNativeModel(model)) return;
+		throw new CpBridgeError(`cp_parent start refuses ${model}: the claude parent driver runs an explicit anthropic/claude-… model`);
+	}
 	if (probe.isAvailable(model)) return;
 	const available = probe.available?.() ?? [];
 	throw new CpBridgeError(
