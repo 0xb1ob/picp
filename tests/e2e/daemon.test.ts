@@ -406,6 +406,8 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 
 	// The parent and viewer start with their unit argv and env — the user manager's session keys, nothing else
 	// ambient — and nothing more runs (no remote feature: no sender).
+	// Scenario: the inner's scaled ready timer fires before a loaded stand-in logs its start; read starts once logged.
+	await r.until("the parent and viewer starts", () => r.starts("parent").length > 0 && r.starts("viewer").length > 0);
 	const [parent] = r.starts("parent"), [viewer] = r.starts("viewer");
 	const core = { HOME: r.home, ...session, CP_HOME: r.home, CP_MODE: "multi", PATH: r.PATH };
 	assert.deepEqual([parent!.argv, roleEnv(parent!.env)], [[], { ...core, CP_VIEWER_PORT: "1" }]);

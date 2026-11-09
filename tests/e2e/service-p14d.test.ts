@@ -68,14 +68,14 @@ const state = (record: HealthRecord, name: keyof HealthRecord["checks"]) => {
 	return check ? `${check.status}${check.key ? ` ${check.key}` : ""}` : "none";
 };
 
-/** A listener that answers /api/identity for `home`, as the viewer does; a closed port when `home` is undefined. */
+/** A listener answering /api/identity for `home` as the viewer does; with no `home`, it resets every connection. */
 async function identity(t: TestContext, home?: string): Promise<string> {
 	const server = createServer((_req, res) => res.end(JSON.stringify({ home })));
+	// Scenario: a closed port went back to the kernel, which handed it to the next listen(0) — the "up" viewer's.
+	if (home === undefined) server.on("connection", (socket) => socket.destroy());
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const port = String((server.address() as AddressInfo).port);
-	if (home === undefined) await new Promise((resolve) => server.close(resolve));
-	else t.after(() => server.close());
-	return port;
+	t.after(() => server.close());
+	return String((server.address() as AddressInfo).port);
 }
 
 test("P14-health: the health oneshot records each check's failure and recovery, counts parent and viewer after two, and keys update failures", { timeout: 300_000 }, async (t) => {
@@ -128,7 +128,7 @@ test("P14-health: the health oneshot records each check's failure and recovery, 
 	}
 	assert.deepEqual(parent, ["ok", "ok", "fail down"]);
 	assert.equal(readHealth(p.stateDir)!.checks.parent!.detail, "no parent host is running");
-	assert.match(readHealth(p.stateDir)!.checks.viewer!.detail, /did not answer: /, "a refused viewer");
+	assert.match(readHealth(p.stateDir)!.checks.viewer!.detail, /did not answer: /, "a viewer that never answers");
 	// Mid-update suppresses parent and viewer; a rollback held back by live workers is watched; one in flight is not.
 	writeFileSync(update, JSON.stringify({ phase: "draining" }));
 	assert.match((await p.run((at += 5 * MIN), viewer(down))).out, /parent: skipped \(update phase draining\)\n.*viewer: skipped \(update phase draining\)/);
