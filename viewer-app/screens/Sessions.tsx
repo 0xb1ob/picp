@@ -12,7 +12,6 @@ import { PrChips } from "../components/PrChip.tsx";
 import { Icon } from "../components/icons.tsx";
 import { OperatorComposer } from "../components/OperatorComposer.tsx";
 import { useWorkspaceSurfaces } from "../components/WorkspaceSurfaces.tsx";
-import { DecisionCard } from "../components/DecisionCard.tsx";
 import { TranscriptAsk } from "../components/TranscriptAsk.tsx";
 import { TranscriptImages } from "../components/TranscriptImages.tsx";
 import { TranscriptFiles } from "../components/TranscriptFiles.tsx";
@@ -83,14 +82,6 @@ function remember(key: string, value: string, what: string) {
 const TOOLS_KEY = "cp-sessions-tool-calls";
 const readToolCalls = (): boolean => readStored(TOOLS_KEY) === "1";
 const rememberToolCalls = (show: boolean) => remember(TOOLS_KEY, show ? "1" : "0", "tool-call toggle");
-/** The pinned decisions bar (cp-6kt6): the operator's open/collapsed choice, and the open ask ids it last showed. */
-const PINNED_KEY = "cp-sessions-pinned-open", PINNED_SEEN_KEY = "cp-sessions-pinned-seen";
-function readSeen(): string[] | null {
- const raw = readStored(PINNED_SEEN_KEY);
- if (raw === null) return null;
- try { const ids: unknown = JSON.parse(raw); return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : null; }
- catch (error) { console.warn(`seen decisions unreadable, starting over: ${(error as Error).message}`); return null; }
-}
 
 const isBubble = (e: SessionEntry) => e.kind === "say" || e.kind === "via";
 type Segment = NonNullable<SessionEntry["segments"]>[number];
@@ -301,21 +292,6 @@ export function Sessions({data,control,draft,reference,selection:asked=null}: {d
  const follow=useRef(true);
  // The ref, not `atBottom`: a scroll up between a render and its deferred effect must not be undone by stale state.
  useEffect(()=>{if(follow.current) scrollToEnd();},[lastEntry,pendingKey,showTools,openRuns]);
- // The pinned decisions bar opens and collapses at every width; the choice is remembered per browser. It opens by
- // itself only when an ask id it has not shown before appears — never because the count alone changed.
- const askIds=data.transcript === true ? (data.open_asks ?? []).map(a=>a.id) : null, askKey=JSON.stringify(askIds);
- const seen=useRef<string[] | null>(null);
- if (seen.current === null && askIds) seen.current=readSeen() ?? askIds;
- const [pinOpen,setPinOpen]=useState(()=>askIds?.some(id=>!seen.current!.includes(id)) === true || readStored(PINNED_KEY) === "1");
- useEffect(()=>{
-  if (!askIds) return;
-  const shown=seen.current ?? [];
-  if (askIds.some(id=>!shown.includes(id))) setPinOpen(true);
-  if (JSON.stringify(shown) !== askKey) { seen.current=askIds; remember(PINNED_SEEN_KEY,askKey,"seen decisions"); }
- },[askKey]);
- const togglePin=()=>{const next=!pinOpen; setPinOpen(next); remember(PINNED_KEY,next ? "1" : "0","decisions bar");};
- // Any answer from the pinned sheet (a button, or "Other answer") collapses it back to its one-line bar.
- const pinControl=control && {...control,send:(body:Parameters<ControlView["send"]>[0],ask?:string)=>{setPinOpen(false); control.send(body,ask);}};
 // The on-screen keyboard shrinks — and, on iOS, pans — the visual viewport: keep the shell on the visible
 // slice and the page itself un-panned, so the composer sits above the keyboard with the chat history above it.
 useViewportFit(()=>{if(follow.current) scrollToEnd();});
@@ -380,8 +356,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  /** Chats: the sidebar from 900 px; the phone's Conversations drawer passes an Operator href keeping the selection. */
  const chats=(you:string)=><><section aria-label="Operator">{row(you,"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}{projectRows(you)}</section>
   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section></>;
- const workspace=useWorkspaceSurfaces(filterable,selection,{session:data.operator_session ?? null,current:!history,asks:open,live:data.workers.filter(countedLive),chats,control,answering,
-  onAnswer:()=>{setPinOpen(true); remember(PINNED_KEY,"1","decisions bar");}});
+ const workspace=useWorkspaceSurfaces(filterable,selection,{session:data.operator_session ?? null,current:!history,asks:open,live:data.workers.filter(countedLive),chats,control,answering});
  // Live counts held and idle workers too; the strip calls working only a recorded `working` run.
  const working=data.workers.filter(w=>countedLive(w) && w.run_phase === "working");
  // C1: the first working job's elapsed, joined by exact id; unknown is omitted, never 0.
@@ -417,10 +392,6 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
     <div class="session-entries"><PrChips.Provider value={data.pr_chips ?? {}}><VisibleSections.Provider value={picked.sections}>{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{data.entries.length > 0 && !shown.length && selection && <p class="session-empty" role="status">{"project" in selection ? `No loaded entries for ${selection.project}` : "No untagged loaded entries"}</p>}{renderRows(shown,null)}{!replyAt && replies}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</VisibleSections.Provider></PrChips.Provider></div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
-   {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">
-    <h2><button type="button" aria-expanded={pinOpen} onClick={togglePin}>{open.length === 1 ? "1 decision waiting" : `${open.length} decisions waiting`}<span aria-hidden="true"> ▾</span></button></h2>
-    {open.map(ask=><DecisionCard key={ask.id} ask={ask} control={pinControl} level={3} contextOpen={false}/>)}
-   </section>}
    {data.transcript === true && control && <OperatorComposer control={control} draft={draft} reference={reference} chat={workspace.composer}/>}
   </div>
   {workspace.surfaces}

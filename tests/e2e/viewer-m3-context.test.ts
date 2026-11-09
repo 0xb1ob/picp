@@ -63,7 +63,10 @@ async function pick(tab: Tab, project: string) {
 	await until(() => tab.$('.session-sidebar .project-row[aria-current="page"]')?.textContent, (name) => name === `#${project}`, `the ${project} selection`);
 }
 
-test("M3-context-inspector: Context opens the desktop inspector with the open ask and the selection's live workers; Answer, a job and Escape keep the chat", { timeout: 180_000 }, async (t) => {
+// Scenario: the desktop inspector carries the open ask and the selection's live workers
+//   Given a chat with one open ask and two live workers   When the operator chat opens from 900 px
+//   Then the inspector shows the ask (no answer-in-chat hop) and in-flight jobs; a job and Escape keep the chat
+test("M3-context-inspector: Context opens the desktop inspector with the open ask and the selection's live workers; a job and Escape keep the chat", { timeout: 180_000 }, async (t) => {
 	const d = await start(t);
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	const focused = browserShims(t, tab);
@@ -83,8 +86,8 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	const context = [...ask.querySelectorAll("details.workspace-context-why[open] li")].map((li) => li.textContent).join("\n");
 	assert.deepEqual([/^Operator asked · \d\d:\d\d · picp$/.test(ask.querySelector("small")!.textContent!), ask.querySelector("b")!.textContent, ask.querySelector("details > summary")?.textContent, context,
 		tab.$$(".workspace-context-option").map((o) => [o.querySelector("b")!.textContent, o.querySelector("small")!.textContent, o.classList.contains("workspace-context-option-suggested")]),
-		ask.querySelector(".workspace-context-chat")?.textContent], [true, QUESTION, "Context", CONTEXT,
-		[["Merge now · suggested", "Lands on green CI", true], ["Hold", "Waits for a review", false]], "Answer in chat instead →"], "the real ask; its context one bullet a line");
+		!!ask.querySelector(".workspace-context-chat")], [true, QUESTION, "Context", CONTEXT,
+		[["Merge now · suggested", "Lands on green CI", true], ["Hold", "Waits for a review", false]], false], "the real ask; its context one bullet a line; no answer-in-chat hop");
 	await tab.find(".workspace-context-job-title", (b) => b.textContent === "Ship the transcript slice");
 	// The worker list's own order: cp-other (no dispatch time) first.
 	const [other, live] = tab.$$(".workspace-context-job");
@@ -105,10 +108,7 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	assert.doesNotMatch(tab.text(), /Started from chat|Today on/, "no thread joins to show");
 
 	await pick(tab, "atlas");
-	assert.deepEqual([texts(tab, "aside.workspace-context h3"), tab.$(".workspace-context-head > span")!.textContent], [["Asked you · 1", "In flight · 1"], "atlas"], "M1 narrows in-flight; asks stay whole like the pinned block");
-	tab.click(tab.$(".workspace-context-ask > .workspace-context-chat")!);
-	await tab.find(".session-pinned-open");
-	assert.ok(tab.$("aside.workspace-context"), "Answer opens the pinned decisions and keeps the inspector");
+	assert.deepEqual([texts(tab, "aside.workspace-context h3"), tab.$(".workspace-context-head > span")!.textContent], [["Asked you · 1", "In flight · 1"], "atlas"], "M1 narrows in-flight; asks stay whole");
 
 	tab.click(tab.$$(".workspace-context-links > button").find((b) => b.textContent === "Open job")!);
 	await tab.find(".sessions > section.workspace-job[aria-label='Job cp-other']");
@@ -169,6 +169,31 @@ test("M3-context-answer: the context card's options and the inline chips share o
 	assert.deepEqual([answers().map((r) => JSON.parse(r.body!).label), held(".workspace-context-option"), held(".session-entries .session-reply")],
 		[["Merge now"], true, true], "one answer, both surfaces held");
 	assert.match(tab.$(".workspace-context-ask [role=status]")?.textContent ?? "", /the options close when the session records/, "the card says it is on its way");
+});
+
+// Scenario: the sidebar card is the one place in the chat to answer an open ask
+//   Given an open ask carded in the operator chat   When the chat opens on a phone and from 900 px
+//   Then the main chat view renders no decisions panel and the sidebar card shows the ask, its options and context
+//   When its "Hold" option is clicked   Then the session receives the dashboard message "<ask-id>: Hold"
+test("M3-context-sole-answer: an open ask renders no decisions panel in the chat; the sidebar card shows it and its answer reaches the session", { timeout: 180_000 }, async (t) => {
+	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed: (stateDir: string, home: string) => seed(stateDir, home) });
+	const session = await operatorSession(t, d.stateDir);
+	const [ask] = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl")).open();
+	const panel = (tab: Tab) => [tab.$$(".session-panel .session-pinned, .session-panel .decision-card").length, /decisions? waiting/.test(tab.$(".session-panel")!.textContent!)];
+	const phone = await openTab(t, d.port, CHAT);
+	await phone.waitText(/REPLY-CARD/);
+	assert.deepEqual(panel(phone), [0, false], "phone: no decisions panel in the chat");
+	phone.close();
+	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
+	browserShims(t, tab);
+	await tab.waitText(/REPLY-CARD/);
+	assert.deepEqual(panel(tab), [0, false], "desktop: no decisions panel in the chat");
+	const card = await tab.find("aside.workspace-context .workspace-context-ask");
+	assert.deepEqual([card.querySelector("b")!.textContent, texts(tab, ".workspace-context-option > b"), !!card.querySelector("details.workspace-context-why[open]")],
+		[QUESTION, ["Merge now · suggested", "Hold"], true], "the sidebar card: the question, its options with the suggested one, the context");
+	tab.click(await tab.find(".workspace-context-option", (o) => o.textContent!.startsWith("Hold") && !o.hasAttribute("disabled")));
+	const [text] = (await until(() => session.injected, (rows) => rows.length > 0, "the injected answer")).at(-1)!;
+	assert.match(text, new RegExp(`^${ask!.id}: Hold\\n\\n\\[cp-dashboard dc-.* — from the dashboard; ask=${ask!.id}\\]$`), "the same ask-id: label dashboard message");
 });
 
 test("M3-context-history: a context-less ask reads not recorded; on an older session file its options refuse, like the chips", { timeout: 180_000 }, async (t) => {

@@ -110,7 +110,6 @@
 .workspace-context-option > small { font-size: 12.5px; line-height: 18px; color: var(--muted); }
 .workspace-context-option:disabled { cursor: default; opacity: 0.6; }
 .workspace-context-ask .session-replies-state { font-size: 12.5px; }
-.workspace-context-ask > .workspace-context-chat { align-self: flex-start; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 12.5px; color: var(--dim); cursor: pointer; }
 .workspace-context-links > button, .workspace-context-jobs { min-height: 44px; padding: 0 12px; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13px; cursor: pointer; }
 /* Frame 1: glyph, short id, status on the right, then the title; glyph and status stay neutral (palette rule). */
 .workspace-context-job-head { display: flex; align-items: center; gap: 8px; min-width: 0; }

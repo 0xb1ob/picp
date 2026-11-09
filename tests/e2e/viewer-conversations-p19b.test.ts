@@ -620,7 +620,10 @@ test("M1-sections: a project shows only its sections, the original toggle the un
 	assert.doesNotMatch(shown(reloaded), /No loaded entries for/, "no records is not no matches");
 });
 
-test("M1-sections-composer: a selection keeps the P1 reference, pending sends and pinned decisions on the full data", { timeout: 120_000 }, async (t) => {
+// Scenario: a project selection narrows only the transcript
+//   Given an atlas ask and a P1 job reference   When the operator picks picp
+//   Then the reference, the open-ask count and a pending send keep the full data
+test("M1-sections-composer: a selection keeps the P1 reference, pending sends and the open-ask count on the full data", { timeout: 120_000 }, async (t) => {
 	const d = await tagged(t);
 	write(join(d.stateDir, "operator/asks.jsonl"), jsonl([{ type: "open", id: "ask-aaaa", project: "atlas", question: "Merge atlas?", created_at: local(15, 8), recommendation: "Merge", options: [{ label: "Merge", consequence: "Lands" }] }]));
 	const session = await operatorSession(t, d.stateDir);
@@ -631,7 +634,7 @@ test("M1-sections-composer: a selection keeps the P1 reference, pending sends an
 	assert.equal(new URLSearchParams(tab.window.location.hash.split("?")[1]).get("ref"), JSON.stringify(reference), "the selection never clobbers the reference link");
 	await until(() => shown(tab), (text) => !text.includes("general chatter"), "the picp selection");
 	assert.equal(tab.$(".evidence-chip summary")?.textContent, "job cp-a (picp)", "the chip is unchanged");
-	assert.match(tab.$(".session-pinned")?.textContent ?? "", /1 decision waiting/, "an atlas decision stays pinned under picp");
+	assert.deepEqual([tab.$(".session-strip .workspace-badge-ask")?.textContent, tab.$$(".session-pinned, .decision-card").length], ["1", 0], "an atlas ask still counts under picp; no inline decisions panel");
 	tab.type(tab.$("textarea")!, "What is left on cp-a?");
 	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
 	const [message] = (await until(() => session.injected, (rows) => rows.length === 1, "the one send"))[0]!;
