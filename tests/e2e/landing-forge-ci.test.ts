@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { build } from "esbuild";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
+import { formatCiNotice } from "../../src/ci-watch.ts";
 import { CommandPost } from "../../src/command-post.ts";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
@@ -857,6 +858,7 @@ test(
 		const s = await startStack(t, { packageRoot: root });
 		const c = await s.held("flake refused", 85);
 		const d = await s.held("flake rerun", 86);
+		const f = await s.held("flake in diff", 88, { command: (branch) => `mkdir -p tests && printf 'x\\n' > tests/flaky.test.ts && git add -A && git commit -q -m v1 && git push -q -u origin ${branch}` });
 		const claimsFile = join(s.home, LAYOUT.ciRerunsFile);
 		const claims = () => (existsSync(claimsFile) ? (JSON.parse(readFileSync(claimsFile, "utf8")) as { entries: Array<Record<string, unknown>> }).entries : []);
 		const reruns = () => s.ghCalls().filter((call) => call.startsWith("run rerun"));
@@ -898,6 +900,24 @@ test(
 			assert.match(refused.fact, /^ci rerun: none — run 61: job shard 1 failed in "Run suite shard"|^ci rerun: none — run 61: job gate first failed/, refused.text);
 			assert.match(refused.fact, reason, refused.text);
 		}
+		// Scenario: a known flake inside the PR's diff is repaired, never rerun
+		//   Given every listed failure is in the registry, When the PR itself changed tests/flaky.test.ts,
+		//   Then nothing is claimed or rerun and the red head takes the normal red path (the implementer's repair).
+		const red63 = [run(63, f.head, "completed", "failure")];
+		const inDiff = await advance(f.jobId, red63, { 63: [shard, gate] }, [{ match: view(63), replies: [{ stdout: log([known]) }] }]);
+		assert.notEqual(inDiff.record.next, "wait", inDiff.text);
+		assert.match(inDiff.fact, /not a known flake: "flaky case" \(.*tests\/flaky\.test\.ts\) is in the PR's diff/, inDiff.text);
+		assert.match(inDiff.record.reason, /No merge, and no merge authorization was requested/, inDiff.text);
+		// Scenario: the CI-red wake names the failing tests
+		//   Given a red run whose failed log lists one test, When the CI watch observes it, Then the cp-ci notice names
+		//   that test; an unreadable log still wakes, saying why no test is named.
+		s.setGh({ runs: red61, jobs: { 61: [shard, gate] }, routes: [{ match: view(61), replies: [{ stdout: log([known]) }] }] });
+		const named = (await s.tick(c.jobId)).observations.find((fact) => fact.job_id === c.jobId && fact.event === "ci_failed");
+		assert.deepEqual(named?.failing_tests, [`flaky case (${known[0]})`], JSON.stringify(named));
+		assert.match(formatCiNotice(named ? [named] : []), /CI RED .*\n {4}failing tests \(1\): flaky case \(.*tests\/flaky\.test\.ts\)/);
+		s.setGh({ runs: red63, jobs: { 63: [shard, gate] }, routes: [{ match: view(63), replies: [{ code: 1, stderr: "HTTP 410: logs expired" }] }] });
+		const unread = (await s.tick(f.jobId)).observations.find((fact) => fact.job_id === f.jobId && fact.event === "ci_failed");
+		assert.match(formatCiNotice(unread ? [unread] : []), /failing tests: none named — gh run view 63 -R example\/demo --attempt 1 --log-failed failed: HTTP 410: logs expired/);
 		assert.ok(s.ghCalls().every((call) => !call.includes("--log-failed") || call.includes("--attempt 1")), "never a log read without the attempt");
 		assert.deepEqual([reruns(), claims()], [[], []], "none of those reran or claimed");
 		// A crash between claim and outcome leaves `uncertain`: the next call settles it from the run's attempts
