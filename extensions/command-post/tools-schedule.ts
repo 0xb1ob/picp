@@ -10,11 +10,11 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { PolicyAction } from "../../src/schedule-run-fire.ts";
 import { Type } from "typebox";
 import type { Delivery, JobKind } from "../../src/contracts.ts";
-import { operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
+import { requireOperatorQuote } from "../../src/decide.ts";
 import { DEFAULT_TOKEN_CEILING, loadMandateDefaults } from "../../src/mandate-defaults.ts";
 import { githubRepoFromCloneUrl } from "../../src/mandate.ts";
 import type { IntakeResult } from "../../src/intake.ts";
@@ -22,7 +22,7 @@ import { RUNNER_DELIVERIES, ScheduleRunner } from "../../src/schedule-runner.ts"
 import { formatExpansionWake, pendingExpansions } from "../../src/schedule-expand.ts";
 import { SCHEDULE_CONTROL_POLL_MS, ScheduleControl } from "../../src/schedule-control.ts";
 import { formatScheduleEvent, formatSchedules, SCHEDULE_SKILLS, type ScheduleEvent, Scheduler, schedulerTickMs } from "../../src/scheduler.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, type ParentToolContext, piToolContext } from "./shared.ts";
 
 import { schedulePolicyView } from "../../src/viewer/schedule-policy-view.ts";
 import { RUN_THINKING_LEVELS } from "../../src/viewer/schedule-policy.ts";
@@ -42,8 +42,8 @@ export function namesToken(text: string, word: string, flags: "" | "i"): boolean
 }
 
 /** A verified operator sentence naming the schedule (id case-sensitive, name not), as the policy action it authorizes. */
-function quotedAction(quote: string, names: { id?: string; name: string }, ctx: ExtensionContext, toolCallId: string): PolicyAction {
-	const verified = requireOperatorQuote(quote, { operatorTexts: operatorTextsFromEntries(ctx.sessionManager.getEntries()) });
+function quotedAction(quote: string, names: { id?: string; name: string }, tc: ParentToolContext, toolCallId: string): PolicyAction {
+	const verified = requireOperatorQuote(quote, { operatorTexts: tc.operatorTexts() });
 	const said = verified.stored.operator_quote;
 	if (!(names.id !== undefined && namesToken(said, names.id, "")) && !namesToken(said, names.name, "i")) throw new Error("the operator quote must name this schedule as a whole token");
 	const quote_sha = createHash("sha256").update(verified.source).digest("hex").slice(0, 12);
@@ -248,6 +248,7 @@ export function registerScheduleTools(
 		parameters,
 		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			deps.setLive(ctx);
+			const tc = piToolContext(ctx);
 			const s = (scheduler ??= build());
 			const need = (key: keyof typeof params): string => {
 				const value = params[key];
@@ -260,7 +261,7 @@ export function registerScheduleTools(
 				// No hidden inputs: a parameter outside the schema (a removed opt-in) is refused, never ignored.
 				const unknown = Object.keys(params).filter((key) => !Object.hasOwn(parameters.properties, key));
 				if (unknown.length) throw new Error(`cp_schedule add refused: unknown parameter ${unknown.join(", ")}; a schedule's bounds are its saved policy, with nothing to opt into`);
-				const native = { action: quotedAction(need("operator_quote"), { name: need("name") }, ctx, toolCallId), limits: params.limits ?? {} };
+				const native = { action: quotedAction(need("operator_quote"), { name: need("name") }, tc, toolCallId), limits: params.limits ?? {} };
 				const added = await s.add({
 					name: need("name"), project: need("project"), native, title: need("title"),
 					kind: need("kind") as JobKind, delivery: need("delivery") as Delivery,
@@ -302,7 +303,7 @@ export function registerScheduleTools(
 				if (!holdsLock()) throw new Error("only the parent holding the fleet lock may change schedule authority");
 				const id = need("id"), schedule = s.list().find(entry=>entry.id === id);
 				if (!schedule) throw new Error(`no schedule ${id}`);
-				const action = quotedAction(need("operator_quote"), { id, name: schedule.name }, ctx, toolCallId);
+				const action = quotedAction(need("operator_quote"), { id, name: schedule.name }, tc, toolCallId);
 				if (params.action === "adopt" && params.revision === undefined) throw new Error("adopt needs revision: read cp_schedule policy first");
 				const record = params.action === "adopt" ? await s.activatePolicy(id,action,params.revision!) : await s.deactivatePolicy(id,action);
 				text = params.action === "adopt" ? `Settings saved · revision ${record.active_revision} (applies to the next run)` : "Deactivated · no new runs until a revision is adopted";

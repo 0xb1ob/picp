@@ -13,9 +13,8 @@ import { classifyIntake, formatAdvance } from "../../src/pipeline.ts";
 import { formatDispatchResult } from "../../src/dispatch.ts";
 import { formatGate, formatGateStatus, formatGateWait, isGateWait } from "../../src/gate.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
-import { operatorTextsFromEntries } from "../../src/decide.ts";
 import { currentRuntime, diffReviewToolPayload, awaitingListText } from "./helpers.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, piToolContext } from "./shared.ts";
 
 export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
 	const { commandPost, setLive, refreshWidget } = deps;
@@ -40,7 +39,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			id: Type.Optional(Type.String({ description: "withdraw: the item id (from a prior list)" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const post = commandPost(ctx.modelRegistry);
+			const post = commandPost(piToolContext(ctx).registry);
 			if (params.action === "list") {
 				const { text, items, deferred } = await awaitingListText(post);
 				return { content: [{ type: "text", text }], details: { items, deferred } as unknown as Record<string, unknown> };
@@ -151,7 +150,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const runner = commandPost(ctx.modelRegistry).pipeline();
+			const runner = commandPost(piToolContext(ctx).registry).pipeline();
 			if (params.action === "classify") {
 				if (!params.task) throw new Error("cp_pipeline classify needs `task`");
 				const classification = classifyIntake({
@@ -289,7 +288,8 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const post = commandPost(ctx.modelRegistry);
+			const tc = piToolContext(ctx);
+			const post = commandPost(tc.registry);
 			if (params.action === "handoff") {
 				if (!params.source_job_id || !params.dependent_job_ids || Object.keys(params).some((key) => !["action", "job_id", "source_job_id", "dependent_job_ids"].includes(key))) throw new Error("handoff accepts only job_id, source_job_id and dependent_job_ids");
 				const result = await post.handoffGate({ job_id: params.job_id, source_job_id: params.source_job_id, dependent_job_ids: params.dependent_job_ids });
@@ -302,7 +302,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 				}
 				const result = post.authorizeRecovery({ ...params, authority_mode: params.authority_mode === "standing" ? "standing" : "single_use",
 					operator_control_id: params.operator_control_id, operator_send_id: params.operator_send_id,
-					dependent_job_ids: params.dependent_job_ids }, operatorTextsFromEntries(ctx.sessionManager.getEntries()));
+					dependent_job_ids: params.dependent_job_ids }, tc.operatorTexts());
 				return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
 			}
 			if (params.action === "prepare_attempt") {
@@ -397,7 +397,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			// preconditions are the dispatch record, kind:ship and origin/<branch>,
 			// and `DiffReview` owns all three. A missing pipeline record removes the
 			// automation, never the reachability.
-			const post = commandPost(ctx.modelRegistry);
+			const post = commandPost(piToolContext(ctx).registry);
 			if (params.action === "status") {
 				const status = diffReviewStatusOf(
 					resolveHome(),
