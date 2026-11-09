@@ -3,7 +3,7 @@
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { awaitingRowsNotSupplied } from "../../src/awaiting.ts";
 import { isoTimestamp, type AwaitingItem } from "../../src/contracts.ts";
@@ -20,10 +20,11 @@ import {
 } from "../../src/status-block.ts";
 import { resolveAwaitingRows } from "../../src/awaiting-rows.ts";
 import { formatRevivePlan, formatReviveResult } from "../../src/revive.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 
 export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, toolContext } = deps;
+	const { commandPost } = deps;
+	const toolContext = (ctx: ExtensionContext) => toolContextOf(deps, ctx);
 
 	pi.registerTool({
 		name: "cp_send",

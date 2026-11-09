@@ -3,7 +3,7 @@
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveHome } from "../../src/home.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
@@ -14,10 +14,11 @@ import { formatDispatchResult } from "../../src/dispatch.ts";
 import { formatGate, formatGateStatus, formatGateWait, isGateWait } from "../../src/gate.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
 import { currentRuntime, diffReviewToolPayload, awaitingListText } from "./helpers.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 
 export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, toolContext } = deps;
+	const { commandPost } = deps;
+	const toolContext = (ctx: ExtensionContext) => toolContextOf(deps, ctx);
 
 	// The read/withdraw half of Awaiting-you, as a tool (cp-av8). Deliberately NOT
 	// a dialog and NOT an approve/decline surface: answering is /cp-decide only,

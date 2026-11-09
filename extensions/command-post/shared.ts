@@ -51,6 +51,14 @@ export function piToolContext(ctx: ExtensionContext, live: Pick<ParentToolContex
 	};
 }
 
+/** `deps.toolContext(ctx)`; deps built without one get pi's, from their `setLive`/`refreshWidget`. */
+export function toolContextOf(
+	deps: Partial<Pick<ExtensionDeps, "toolContext" | "setLive" | "refreshWidget">>,
+	ctx: ExtensionContext,
+): ParentToolContext {
+	return deps.toolContext?.(ctx) ?? piToolContext(ctx, { setLive: () => deps.setLive?.(ctx), refresh: () => deps.refreshWidget?.(ctx) });
+}
+
 /** A native parent's override: it receives pi's context for the same ctx and returns the one the tools read. */
 export type ToolContextOverride = (ctx: ExtensionContext, base: ParentToolContext) => ParentToolContext;
 

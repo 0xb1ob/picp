@@ -3,7 +3,7 @@
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { formatMerge } from "../../src/merges.ts";
 import { formatIntegration } from "../../src/integrate.ts";
@@ -14,10 +14,11 @@ import { FORWARDED_RESULTS, type ForwardedResult, recordForwardedCi } from "../.
 import { parsePrUrl } from "../../src/ci-watch.ts";
 import { pendingStackActions, StackFollowups } from "../../src/stack-followups.ts";
 import { formatTeardown } from "../../src/teardown.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 
 export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, toolContext } = deps;
+	const { commandPost } = deps;
+	const toolContext = (ctx: ExtensionContext) => toolContextOf(deps, ctx);
 
 	pi.registerTool({
 		name: "cp_teardown",

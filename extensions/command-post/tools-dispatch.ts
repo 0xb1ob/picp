@@ -3,7 +3,7 @@
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { OperatorModelPickReferenceSchema, type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, SkillNameSchema, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
@@ -13,7 +13,7 @@ import { checkStoredPick } from "../../src/reroute.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
 import { currentRuntime } from "./helpers.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 
 /** R1 D2: the reference `cp_parent model_pick` returned; only with an explicit model it names. */
 const OperatorQuoteParam = Type.Object(OperatorModelPickReferenceSchema.properties, {
@@ -24,7 +24,8 @@ const OperatorQuoteParam = Type.Object(OperatorModelPickReferenceSchema.properti
 });
 
 export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, toolContext, askQuestion } = deps;
+	const { commandPost, askQuestion } = deps;
+	const toolContext = (ctx: ExtensionContext) => toolContextOf(deps, ctx);
 	/**
 	 * cp-u3o4: the Q&A path as a tool, for a question the operator asked in chat.
 	 *

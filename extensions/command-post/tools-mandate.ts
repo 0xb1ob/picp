@@ -3,7 +3,7 @@
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
 	isoTimestamp,
@@ -31,11 +31,12 @@ import { loadRoutingConfig } from "../../src/routing.ts";
 import { EscalationError } from "../../src/escalation.ts";
 import { batchRiskHigh } from "../../src/risk-batch.ts";
 import { currentRuntime, escalateToolText } from "./helpers.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 import { SCHEDULE_RUN_ID } from "../../src/viewer/schedule-run-core.ts";
 
 export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, toolContext, projectOf } = deps;
+	const { commandPost, projectOf } = deps;
+	const toolContext = (ctx: ExtensionContext) => toolContextOf(deps, ctx);
 	const seenNext = new Map<string, { text: string; at: string }>();
 	// The parent may have lost the earlier answer (compaction) or never had it (rotated session): forget what was shown.
 	pi.on("session_start", () => seenNext.clear());
