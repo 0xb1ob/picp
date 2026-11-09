@@ -71,20 +71,24 @@ export async function resolveDriverRoute(
 	// A config error, never a silent fallback: the native primary is the row's (or caller's) own explicit model.
 	nativeModelId(picked.model);
 	assertNativeEffort(picked.thinking);
-	const native: RoutingDecision = {
-		model: picked.model, source: picked.source, rule: picked.rule,
-		...(picked.thinking ? { thinking: picked.thinking } : {}),
-		...(route.override ? { requested: route.override } : {}),
-		...(route.thinking ? { requested_thinking: route.thinking } : {}),
-	};
 	const selection = { home: ctx.home, jobId: ctx.jobId, driver: "claude" as const, kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs: ctx.jobs,
 		...(ctx.profile !== undefined ? { profile: ctx.profile } : {}), ...(ctx.skills !== undefined ? { skills: ctx.skills } : {}) };
+	let selected: ReturnType<typeof nativeSelectionRefusal> | undefined;
 	let note: string | undefined;
-	// S2: passive subscription evidence from earlier native runs; the slot is still taken after the last await.
-	const refusal = allowRefusal(config, ctx.role, picked.model)
-		?? await nativeSelectionRefusal(selection)
-		?? await nativeAvailability(ctx.home, picked.model).then((seen) => ((note = seen.note), seen.blocked))
-		?? slotRefusal(ctx);
+	let model: string | undefined;
+	let skipped: { category: NativeRefusal; why: string } | undefined;
+	// J5: the row's native candidates in order; the first allowed one S2's subscription evidence does not block wins.
+	// An explicit model is never substituted: a blocked override refuses (then pi), as before J5.
+	const candidates = route.override ? [picked.model] : [picked.model, ...(rule?.fallbacks ?? [])];
+	for (const candidate of candidates.filter(isNativeModel)) {
+		const blocked = allowRefusal(config, ctx.role, candidate)
+			?? await (selected ??= nativeSelectionRefusal(selection))
+			?? await nativeAvailability(ctx.home, candidate).then((seen) => ((note = seen.note), seen.blocked));
+		if (!blocked) { model = candidate; break; }
+		skipped ??= blocked;
+	}
+	// The slot is still taken synchronously after the last await.
+	const refusal = model === undefined ? skipped : slotRefusal(ctx);
 	if (refusal && (ctx.explicit || locked)) {
 		throw new NativeDriverError(`refused: ${ctx.jobId} cannot run on the native claude driver: ${refusal.why}`, refusal.category);
 	}
@@ -93,13 +97,23 @@ export async function resolveDriverRoute(
 		return { ...pi, requested_driver: "claude", driver: "pi", driver_reason: bounded(`${refusal.category}: ${refusal.why}`) };
 	}
 	if (ctx.reserve) slots.set(ctx.home, (slots.get(ctx.home) ?? new Set<string>()).add(ctx.jobId));
-	return { ...native, requested_driver: "claude", driver: "claude", driver_reason: bounded(`${why}; effort ${picked.thinking ?? "CLI default"}${note ? `; ${note}` : ""}`) };
+	const native: RoutingDecision = {
+		model: model!, source: picked.source, rule: picked.rule,
+		...(picked.thinking ? { thinking: picked.thinking } : {}),
+		...(route.override ? { requested: route.override } : {}),
+		...(route.thinking ? { requested_thinking: route.thinking } : {}),
+	};
+	const fellBack = skipped ? `; ${skipped.category}: ${skipped.why}; native fallback ${model}` : "";
+	return { ...native, requested_driver: "claude", driver: "claude", driver_reason: bounded(`${why}; effort ${picked.thinking ?? "CLI default"}${fellBack}${note ? `; ${note}` : ""}`) };
 }
 
 const rowOf = (picked: ReturnType<typeof pickModel>, config: RoutingConfig) =>
 	picked.source === "rubric" ? config.rubric.find((row) => row.id === picked.rule) : undefined;
 
-/** J4: the row the role would get without the override; only its `driver` is read. No row (or a refused one) is pi. */
+/**
+ * J4: the row the role would get without the override; only its `driver` is read. No row (or a refused one) is pi.
+ * The J5 walk reads a row's fallbacks only without an override: an explicit model is never substituted.
+ */
 function overrideRow(route: RouteRequest, config: RoutingConfig): RoutingConfig["rubric"][number] | undefined {
 	try {
 		return rowOf(pickModel({ ...route, override: undefined }, config), config);
