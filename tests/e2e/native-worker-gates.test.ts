@@ -360,7 +360,7 @@ test("N4c: an implementer's Edit inside the worktree lands; a Write outside is d
 		assert.deepEqual(offered, [...roleTools("implementer"), REPORT_TOOL, ...roleMcpTools("implementer")].sort());
 		assert.equal(readFileSync(file, "utf8"), "export const x = 2;\n");
 		assert.deepEqual(readdirSync(root).sort(), ["artifacts", "repo"]);
-		assert.deepEqual(nativeDenials(result.denials), ["Write: Refused: an implementer edits only inside its worktree <path>, outside .git; a path outside the worktree (<path>) is denied."]);
+		assert.deepEqual(nativeDenials(result.denials), ["Write: Refused: an implementer edits only inside its worktree <path>, outside .git, and inside its own artifact directory <path>; a path outside the worktree (<path>) is denied."]);
 	});
 });
 

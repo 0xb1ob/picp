@@ -1,6 +1,7 @@
 /** N4c: the native tool set and the Edit/Write scope per role: planner (research), implementer and (N4h) reviewer. */
-import { dirname, isAbsolute, relative, resolve } from "node:path";
-import type { Role } from "../contracts.ts";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { paths, type Role } from "../contracts.ts";
 import { liveGrants, MandateStore } from "../mandate.ts";
 import { loadMandateDefaults } from "../mandate-defaults.ts";
 import { secretPathIn } from "./claude-bash-policy.ts";
@@ -53,8 +54,16 @@ export function implementerExclusions(home: string): string[] {
 	return [...new Set([...loadMandateDefaults(home).exclude_paths, ...grants])];
 }
 
-/** Edit/Write scope: research its artifact dir; an implementer its worktree, no .git, secret or exclusion;
- * a reviewer none. */
+/** The implementer's own `state/artifacts/<job id>/report.md` under `home`, its directory created for the Write guard. */
+export function implementerArtifactPath(home: string, jobId: string): string {
+	if (home === "") throw new Error("native claude worker started without CP_HOME; its artifact directory cannot be named");
+	const file = join(home, paths.artifactFile(jobId));
+	mkdirSync(dirname(file), { recursive: true });
+	return file;
+}
+
+/** Edit/Write scope: research its artifact dir; an implementer its worktree (no .git, secret or exclusion) and its
+ * own artifact dir, never another job's or the rest of the home; a reviewer none. */
 export function writeScopeGuard(job: SpikeJob, secrets: readonly string[], role: NativeRole): SpikeGuard {
 	if (role === "reviewer") return (call) => (call.name === "write" || call.name === "edit" ? "Refused: a reviewer has no Edit or Write; it only reads." : undefined);
 	if (role === "research") {
@@ -71,11 +80,18 @@ export function writeScopeGuard(job: SpikeJob, secrets: readonly string[], role:
 	}
 	const excluded = job.excludePaths;
 	if (excluded === undefined) throw new Error(`implementer ${job.job_id} has no exclude_paths; an implementer never runs without them`);
+	const artifactDir = job.artifactPath === undefined ? undefined : dirname(resolve(job.artifactPath));
+	// Absolute only: a relative path lands in the worktree (the cwd), never in the artifact dir.
+	const ownArtifact = (path: string): boolean =>
+		artifactDir !== undefined && isAbsolute(path) && existsSync(artifactDir) && worktreePathRefusal(path, artifactDir) === undefined;
+	const scope = `Refused: an implementer edits only inside its worktree ${job.worktree}, outside .git${artifactDir === undefined ? "" : `, and inside its own artifact directory ${artifactDir}`}`;
 	return (call) => {
 		if (call.name !== "write" && call.name !== "edit") return undefined;
 		const path = call.input.path;
 		if (typeof path !== "string" || path === "") return "Refused: an implementer's Edit/Write needs a file path.";
-		const why = secretPathIn(path, job.worktree, secrets) ? `a secret path (${path})` : worktreePathRefusal(path, job.worktree, excluded);
-		return why === undefined ? undefined : `Refused: an implementer edits only inside its worktree ${job.worktree}, outside .git; ${why} is denied.`;
+		if (secretPathIn(path, job.worktree, secrets)) return `${scope}; a secret path (${path}) is denied.`;
+		if (ownArtifact(path)) return undefined;
+		const why = worktreePathRefusal(path, job.worktree, excluded);
+		return why === undefined ? undefined : `${scope}; ${why} is denied.`;
 	};
 }

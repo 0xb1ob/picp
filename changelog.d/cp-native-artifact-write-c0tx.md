@@ -1,0 +1,1 @@
+- Native implementers may now Write and Edit their own job's `state/artifacts/<job id>/` (report.md the report_result tool names); another job's artifact dir, the rest of `state/` and the home stay refused.

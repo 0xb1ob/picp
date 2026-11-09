@@ -14,7 +14,7 @@ import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sd
 import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
 import { estimatedRunUsage, liveUsageUpdate, NATIVE_REPORTED_GRACE_MS, NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage, noteStreamedUsage, type StreamedUsage } from "./claude-usage.ts";
 import { commitIdentityEnv } from "./claude-forge-tools.ts";
-import { implementerExclusions, nativeRole } from "./claude-roles.ts";
+import { implementerArtifactPath, implementerExclusions, nativeRole } from "./claude-roles.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
 import { VERDICT_TOOL } from "./claude-verdict.ts";
 import { type NativeTranscript, nativeTranscript, nativeTranscriptFile } from "./claude-transcript.ts";
@@ -156,7 +156,8 @@ async function turn(prompt: string): Promise<Turn> {
 	if (!["research/planner", "research/gate-reviewer", "ship/implementer"].includes(`${kind}/${role}`)) {
 		throw new Error(`native claude runs research/planner, research/gate-reviewer and ship/implementer jobs only, not ${kind}/${role}`);
 	}
-	const [jobId, runDir, worktree, artifactPath] = [env.CP_JOB_ID, env.CP_RUN_DIR, env.CP_WORKTREE, env.CP_ARTIFACT_PATH];
+	const [jobId, runDir, worktree] = [env.CP_JOB_ID, env.CP_RUN_DIR, env.CP_WORKTREE];
+	let artifactPath = env.CP_ARTIFACT_PATH;
 	if (!jobId || !runDir || !worktree || (role === "planner" && !artifactPath)) throw new Error("native claude worker started without its job identity");
 	const systemPrompt = readSystemPrompt();
 	let current = resuming ? readNativeSession(sessionFile) : freshSession(worktree);
@@ -183,6 +184,8 @@ async function turn(prompt: string): Promise<Turn> {
 	}
 	transcript.prompt(prompt, resumed);
 	const implementer = nativeRole(role) === "implementer";
+	// Dispatch predeclares no ship artifact; the implementer's own is named here from the home and job id alone.
+	if (implementer) artifactPath = implementerArtifactPath(env.CP_HOME ?? "", jobId);
 	// Per turn, so a checkpoint aborts only this run; a stop or freeze already under way keeps its aborted controller.
 	if (!stopping && !freezing) abort = new AbortController();
 	const result = await runClaudeSpike({

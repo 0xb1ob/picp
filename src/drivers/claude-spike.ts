@@ -98,7 +98,8 @@ export interface SpikeJob {
 	delivery: Delivery;
 	runDir: string;
 	worktree: string;
-	/** Predeclared research artifact; its directory is the only place a research Write may touch. Ship has none. */
+	/** Research: the predeclared artifact, whose directory is its only Write scope. Implementer: its own
+	 * `state/artifacts/<job id>/report.md`, whose directory is the one Write scope beside its worktree. */
 	artifactPath?: string;
 	/** Implementer only: grant and home `exclude_paths` no Edit/Write may touch, read by the worker process. */
 	excludePaths?: readonly string[];
@@ -314,9 +315,13 @@ function reportServer(job: SpikeJob, state: ReportState, extra: ReturnType<typeo
 		state.refusals.push(value);
 		return text(value, true);
 	};
+	// The one artifact an implementer's Write guard admits outside its worktree: details go there, never in the summary.
+	const artifact = job.kind === "ship" && job.artifactPath
+		? ` Details go in your own artifact ${job.artifactPath}, written with Write (no other path outside your worktree is writable); name it as artifact_path.`
+		: "";
 	const report = tool(
 		"report_result",
-		"Finish this job by reporting the envelope (job_id, kind, status, summary, artifact_path, plan_summary). Call it once.",
+		`Finish this job by reporting the envelope (job_id, kind, status, summary, artifact_path, plan_summary). Call it once.${artifact}`,
 		shape,
 		async (args) => {
 			state.attempts += 1;
