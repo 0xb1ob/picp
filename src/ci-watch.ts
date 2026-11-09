@@ -555,6 +555,7 @@ export class CiWatch {
 	 * every CI_WATCH_REDELIVERY_MS until confirmed or no longer derived: the old one-resend cap lost a rerun's result.
 	 */
 	readonly #inFlight = new Map<string, { sentAt: number; sends: number }>();
+	readonly #logs = new Map<string, string[]>();
 	#tick: Promise<CiWatchTick> | undefined;
 	#disabled: string | undefined;
 	#disabledNotified = false;
@@ -739,7 +740,10 @@ export class CiWatch {
 		const run = runs.find((entry) => entry.databaseId === observation.run_id);
 		try {
 			if (!this.#deps.failingTests || !run || observation.run_id === undefined) throw new Error("no failing run or log reader");
-			observation.failing_tests = await this.#deps.failingTests(record, { id: observation.run_id, attempt: run.attempt ?? 1 }, observation.pr_url);
+			const key = `${observation.run_id}.${run.attempt ?? 1}`; // a completed attempt's log never changes: download it once
+			observation.failing_tests = this.#logs.get(key) ?? (await this.#deps.failingTests(record, { id: observation.run_id, attempt: run.attempt ?? 1 }, observation.pr_url));
+			if (observation.failing_tests.length > 0) this.#logs.set(key, observation.failing_tests);
+			if (this.#logs.size > 64) this.#logs.delete(this.#logs.keys().next().value as string);
 		} catch (error) {
 			observation.failing_tests_unread = (error as Error).message.split("\n")[0]?.slice(0, 200) ?? "unreadable";
 		}
