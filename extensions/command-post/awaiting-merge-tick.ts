@@ -28,7 +28,7 @@ export function registerAwaitingMergeTick(pi: ExtensionAPI, deps: ExtensionDeps,
 		if (timer) return;
 		timer = setInterval(() => void operation("awaiting_merge_tick", tick), ciWatchIntervalMs());
 		timer.unref();
-		startup = setTimeout(() => void tick(), 0); // catch-up pass, after startup returns
+		startup = setTimeout(() => void operation("awaiting_merge_catchup", tick), 0); // catch-up pass, after startup returns
 		startup.unref();
 	});
 	pi.on("session_shutdown", async () => {
