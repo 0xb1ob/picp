@@ -8,7 +8,7 @@ import { CI_RERUNS_MAX, type CiFlakeEntry, type CiRerunEntry, type CiRerunsFile,
 import { readDrain } from "./drain.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { type ActionsJob, ACTIONS_CI_TIMEOUT_MS, readActionsJobs, statusRunner } from "./actions-ci.ts";
-import { type CiRun, GREEN_CONCLUSIONS, shaMatches } from "./merge-ask.ts";
+import { type CiRun, type CommandRunner as ThrowingRunner, GREEN_CONCLUSIONS, runCommand, shaMatches } from "./merge-ask.ts";
 import type { CommandRunner } from "./merges.ts";
 
 /** A first failed step with this whole name is setup, not the change under test. */
@@ -161,7 +161,7 @@ async function classifyFlake(input: InfraRerunInput, run: { id: number; attempt:
 	const read = await input.run(input.cwd, "gh", args, { timeoutMs: ACTIONS_CI_TIMEOUT_MS });
 	if (read.status !== 0) return { ok: false, reason: `gh ${args.join(" ")} failed: ${firstLine(read.stderr || read.stdout) || `exit ${read.status}`}` };
 	const listed = listedFailures(read.stdout);
-	const names = new Set<string>();
+	const all: ListedFailure[] = [];
 	for (const job of failed) {
 		const stepped = failedSteps(job);
 		if (stepped.length !== 1 || !TEST_STEP.test(stepped[0] ?? "")) return { ok: false, reason: `job ${job.name} failed in ${stepped.map((name) => `"${name}"`).join(", ") || "no step"}, not in its one test-suite step alone` };
@@ -173,9 +173,34 @@ async function classifyFlake(input: InfraRerunInput, run: { id: number; attempt:
 		}
 		const unknown = found.failures.find((failure) => !tests.some((entry) => covers(entry, failure)));
 		if (unknown) return { ok: false, reason: `job ${job.name} failed "${unknown.name}" (${unknown.file}), which no entry covers` };
-		for (const failure of found.failures) names.add(failure.name);
+		all.push(...found.failures);
 	}
-	return { ok: true, step: `known flake: ${[...names].join("; ")}`.slice(0, 200) };
+	if (!input.base) return { ok: false, reason: "no PR base to read the PR's diff against" };
+	const fetched = await input.run(input.cwd, "git", ["fetch", "--quiet", "origin"]);
+	const diff = fetched.status === 0 ? await input.run(input.cwd, "git", ["diff", "--name-only", `origin/${input.base}...${input.head}`]) : fetched;
+	if (diff.status !== 0) return { ok: false, reason: `the PR's diff against ${input.base} is unreadable: ${firstLine(diff.stderr || diff.stdout) || `exit ${diff.status}`}` };
+	const changed = diff.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+	const inside = all.find((failure) => changed.some((path) => failure.file === path || failure.file.endsWith(`/${path}`)));
+	if (inside) return { ok: false, reason: `"${inside.name}" (${inside.file}) is in the PR's diff — a failure inside the diff is the implementer's` };
+	return { ok: true, step: `known flake: ${[...new Set(all.map((failure) => failure.name))].join("; ")}`.slice(0, 200) };
+}
+
+/** `name (file)` of every failure a gh `--log-failed` text lists, across its jobs; empty when none is listed. */
+function failingTestNames(log: string): string[] {
+	return [...listedFailures(log).values()].flatMap(({ failures }) => failures.filter((failure) => failure.name).map((failure) => `${failure.name} (${failure.file})`));
+}
+
+/** `owner/repo` of a github.com PR URL, else undefined. */
+function prRepo(prUrl: string | undefined): string | undefined {
+	return /^https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/\d+/.exec(prUrl ?? "")?.[1];
+}
+
+/** The failing tests one run attempt's `--log-failed` lists; throws on a non-github.com PR or a failed read. */
+export async function readFailingTests(cwd: string, run: { id: number; attempt: number }, prUrl: string | undefined, exec: ThrowingRunner = runCommand): Promise<string[]> {
+	const repo = prRepo(prUrl);
+	if (!repo) throw new Error("no GitHub repository to read the failed log from");
+	const args = ["run", "view", String(run.id), "-R", repo, "--attempt", String(run.attempt), "--log-failed"];
+	return failingTestNames(await exec("gh", args, { cwd, timeoutMs: ACTIONS_CI_TIMEOUT_MS }));
 }
 
 /** `state/ci-reruns.json`: the claims, written before any `gh run rerun`. */
@@ -237,6 +262,8 @@ export interface InfraRerunInput {
 	/** The job's project and PR, for the known-flake registry and its `-R` log read; absent means infra only. */
 	project?: string;
 	prUrl?: string;
+	/** The PR's base branch: a known flake whose file `origin/<base>...<head>` changed is the implementer's. */
+	base?: string;
 }
 
 export interface InfraRerunOutcome {
@@ -266,7 +293,7 @@ function flakePolicy(input: InfraRerunInput & InfraRerunPorts): { entries: CiFla
 		return firstLine((error as Error).message);
 	}
 	if (entries.length === 0) return undefined;
-	const repo = /^https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/\d+/.exec(input.prUrl ?? "")?.[1];
+	const repo = prRepo(input.prUrl);
 	return repo ? { entries, repo } : "no GitHub repository to read the failed log from";
 }
 
