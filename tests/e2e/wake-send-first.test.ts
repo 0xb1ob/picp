@@ -39,7 +39,8 @@ test("wake S19: assistant and custom send markers do not hold ordinary parent wa
 	p.enqueue("s19-custom-marker", frameBatch([{ id: "ps-20300101000000-0000000b", text: "S19 custom marker" }]));
 	await waitFor(p.requests, (requests) => requests.length === 2, { timeoutMs: 10_000, what: "idle wake after assistant marker" });
 	p.enqueue("s19-idle-next", "S19_IDLE_NEXT");
-	await waitFor(() => p.outbox.read().sends ?? [], (entries) => entries.some((entry) => entry.id === "s19-idle-next"),
+	// The whole outbox is the waited value, so a timeout names whether the wake stayed pending, was discarded or lost.
+	await waitFor(() => p.outbox.read(), (file) => (file.sends ?? []).some((entry) => entry.id === "s19-idle-next"),
 		{ timeoutMs: 10_000, what: "ordinary wake offered after custom marker" });
 	await p.request("clear_queue");
 	await waitFor(() => p.child.eventsOfType("agent_settled"), (events) => events.length >= 2,

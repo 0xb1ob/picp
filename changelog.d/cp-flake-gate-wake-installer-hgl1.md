@@ -1,0 +1,1 @@
+- Test reliability: `routeNamed` writes `routing.json` atomically, so the gate-recovery race children no longer read a torn file and exit early ("both standing claimants" timeout); the installer sandbox retries the treehouse release download (bounded curl retry, download then extract); the S19 custom-marker wait now reports the whole wake outbox on timeout.

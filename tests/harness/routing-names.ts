@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { LAYOUT } from "../../src/contracts.ts";
+import { atomicWriteJson } from "../../src/json-store.ts";
 import { DEFAULT_ROUTING_CONFIG } from "../../src/routing.ts";
 import { REPO_ROOT } from "./pi-child.ts";
 
@@ -29,6 +30,6 @@ export function routeNamed(home: string, models: readonly string[], options: { s
 		rows.push({ id: `test-routed-names-${k}`, role: "implementer", project: `__test-routed-names-${k}__`, model, ...(fallbacks.length ? { fallbacks } : {}) });
 	}
 	config.rubric = [...rows, ...rubric];
-	mkdirSync(dirname(file), { recursive: true });
-	writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+	// Atomic: concurrent child processes (gate-recovery races) read this file while another writes it.
+	atomicWriteJson(file, config);
 }
