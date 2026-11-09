@@ -1,0 +1,1 @@
+- Native routing: a claude row whose native primary is denied or blocked by subscription availability now runs native on its first allowed, unblocked `anthropic/claude-…` fallback, and `driver_reason` names the skipped window; switch, eligibility, CLI and slot refusals still go to pi.

@@ -444,6 +444,9 @@ changes until a row carries `driver: "claude"` **and** the switch is ON; the shi
 `anthropic/claude-…` id; any other ref refuses the dispatch with no lease. The row's effort maps to SDK options: `off`
 disables thinking, `low`/`medium`/`high`/`xhigh`/`max` set `effort`, `minimal` refuses, absent leaves the CLI default and
 the reason records `effort CLI default`. The worker gets it as `CP_NATIVE_THINKING`; revive passes the same level.
+When the native primary is `denied` or blocked by `window`/`auth`/`lockdown`, the row's `anthropic/claude-…`
+fallbacks are tried in order (allowlist, then availability); the first unblocked one runs native and `driver_reason`
+appends `<code>: <why>; native fallback <model>`. Switch, eligibility, CLI and slot refusals still go to pi.
 
 **Eligibility (D2).** Only local and answer research (role `planner`) routes native; a pipeline's research child is
 recognised by its pipeline record, not its role, and stays on pi.

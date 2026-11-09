@@ -465,6 +465,30 @@ test("S3 carry: real opus and sonnet turns clear no-reset blocks by family; seve
 	assert.equal(h.claude.overrun(), 0);
 });
 
+// Scenario: Given seven_day_opus rejected with a future reset and a row opus with fallback sonnet
+//   When a row-preferred job dispatches
+//   Then it runs native on sonnet and driver_reason names the opus window
+test("J5 fallback walk: a spent opus window runs the row's native sonnet fallback, not pi", { skip, timeout: 300_000 }, async (t) => {
+	const h = await routedHome(t, [{ kind: "text", text: "Sonnet ran." }], { subscriber: true });
+	const [opus, sonnet] = [`${FAKE_NATIVE_MODEL}-opus`, `${FAKE_NATIVE_MODEL}-sonnet`];
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ ...JSON.parse(h.routing({ driver: "claude", model: opus, fallbacks: [sonnet, h.piModel] })) as object,
+		allow: ["mock/*", opus, sonnet] }));
+	h.toggle(true);
+	const reset = Date.now() + 3_600_000;
+	mkdirSync(dirname(nativeAvailabilityFile(h.b.home)), { recursive: true });
+	writeFileSync(nativeAvailabilityFile(h.b.home), JSON.stringify({ version: 1, windows: { seven_day_opus: { status: "rejected", observed_at: Date.now(), resets_at: reset } }, seen: [] }));
+	const job = await h.job();
+	const ends = (await h.b.run([{ kind: "tool_calls", calls: [dispatch(job.id)] }], { ...h.env, CP_NATIVE_MAX_TURNS: "1" })) as Tool[];
+	const end = ends.find((e) => e.toolName === "cp_dispatch");
+	assert.notEqual(end?.isError, true, text(end));
+	const record = h.fleet(job.id)!;
+	assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.requested_driver, record.routing?.driver], ["claude", sonnet, "claude", "claude"], record.routing?.driver_reason);
+	assert.match(record.routing?.driver_reason ?? "", /^rule: native-research prefers claude; effort high; window: seven_day_opus rejected until \S+; native fallback /);
+	const first = await waitFor(() => h.claude.requests.find((request) => request.path.split("?")[0] === "/v1/messages" && Array.isArray(request.body.tools)),
+		(request) => request !== undefined, { timeoutMs: 60_000, what: "the native job's first model call" });
+	assert.equal(first?.body.model, `${FAKE_CLAUDE_MODEL}-sonnet`, "the CLI ran the sonnet fallback");
+});
+
 // Scenario: Given a claude implementer row and a pipeline implementer_model anthropic/claude-sonnet-5-5
 //   When advance dispatches the implementer
 //   Then it runs native on sonnet
