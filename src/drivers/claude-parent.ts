@@ -5,7 +5,6 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -23,7 +22,7 @@ import { messageText } from "../parent-outbox.ts";
 import { recentWorkContext } from "../recent-work.ts";
 import { resolveClaude } from "./claude-cli.ts";
 import { type CustomMessage, HeadlessHost, ParentRecord, type SendOptions } from "./claude-parent-session.ts";
-import { buildChildEnv, CHILD_MANAGED_SETTINGS } from "./claude-spike.ts";
+import { buildChildEnv, CHILD_MANAGED_SETTINGS, operatorClaudeSettings } from "./claude-spike.ts";
 import { nativeModelId } from "./claude.ts";
 
 // stdout is the RPC channel: nothing the extension logs may land on it.
@@ -101,7 +100,7 @@ const { session } = registerCommandPost(host.api(), (_ctx, base) => ({
 	refresh: base.refresh,
 }));
 
-/** pi's `sendMessage`: digests become prompt sections; a quiet notice lands now, a triggering one starts or queues a turn. */
+/** pi's `sendMessage`: a digest becomes a prompt section, a quiet notice lands now, a triggering one starts a turn. */
 function deliver(message: CustomMessage, options: SendOptions): void {
 	if ((PROMPT_SECTIONS as readonly string[]).includes(message.customType)) {
 		promptSections.set(message.customType, messageText(message));
@@ -128,7 +127,12 @@ function pump(): void {
 	if (busy || stopping || queue.length === 0) return;
 	busy = true;
 	running = runTurn(queue.splice(0))
-		.catch((error: unknown) => void process.stderr.write(`[native claude parent] turn failed outside the query: ${(error as Error).message}\n`))
+		.catch((error: unknown) => {
+			const message = `the native parent's turn failed outside the query: ${(error as Error).message}`;
+			process.stderr.write(`[native claude parent] ${message}\n`);
+			// Never a hang: the bridge still sees the run fail and settle.
+			if (!stopping) for (const line of [{ type: "message_end", message: errorAssistant(message) }, { type: "agent_settled" }]) write(line);
+		})
 		.finally(() => {
 			busy = false;
 			running = undefined;
@@ -142,7 +146,7 @@ function blockOf(message: Message): string {
 	return message.role === "custom" ? `[fleet wake-up ${message.customType} — from the fleet, not an operator message]\n${text}` : text;
 }
 
-/** One turn: pi's before_agent_start, agent_start, the landed messages and context review, the query, then the settle. */
+/** One turn in pi's order: before_agent_start, agent_start, the landed messages, context review, query, settle. */
 async function runTurn(items: Message[]): Promise<void> {
 	await host.fire("before_agent_start", {
 		prompt: items.map(messageText).join("\n\n"),
@@ -313,7 +317,7 @@ const preToolUse: HookCallback = async (input) => {
 	return deny(reason);
 };
 
-/** A TypeBox property schema as zod for the MCP listing; one zod cannot express falls back to any (pi validates after). */
+/** TypeBox properties as zod for the MCP listing; one zod cannot express becomes any (pi validates after). */
 function zodShape(schema: unknown): Record<string, z.ZodType> {
 	const object = JSON.parse(JSON.stringify(schema), (key, value) => (key.startsWith("~") ? undefined : value)) as { properties?: Record<string, unknown>; required?: string[] };
 	const required = new Set(object.required ?? []);
@@ -362,7 +366,7 @@ function sdkOptions(claudePath: string, abort: AbortController): Options {
 	const root = join(dirname(sessionFile), "native-parent-claude");
 	const dirs = { home: join(root, "home"), configDir: join(root, "config"), tmp: join(root, "tmp") };
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-	const settings = join(homedir(), ".claude", "settings.json");
+	const settings = operatorClaudeSettings();
 	served ??= mcpTools();
 	return {
 		cwd: process.cwd(),

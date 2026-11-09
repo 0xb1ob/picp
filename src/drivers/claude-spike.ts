@@ -79,6 +79,9 @@ const EXIT_GRACE_MS = 10_000;
  */
 export const CHILD_MANAGED_SETTINGS = { disableAllHooks: true, strictKnownMarketplaces: [] } satisfies Options["managedSettings"];
 
+/** The operator's Claude settings file, which claude reads (`Options.settings`) and picp never opens. */
+export const operatorClaudeSettings = (): string => join(homedir(), ".claude", "settings.json");
+
 /** A routed thinking level as SDK options: off disables thinking, low…max is `effort`, absent is the CLI default. */
 export function nativeEffortOptions(level: string | undefined): Pick<Options, "thinking" | "effort"> {
 	assertNativeEffort(level);
@@ -429,7 +432,7 @@ async function runInScratch(
 ): Promise<SpikeResult> {
 	if (!relative(resolve(options.job.worktree), scratch).startsWith("..")) throw new ClaudeSpikeError("scratch dir is inside the worktree");
 	const dirs = { home: join(scratch, "home"), configDir: join(scratch, "config"), tmp: join(scratch, "tmp") };
-	const settingsPath = options.userSettings === undefined ? join(homedir(), ".claude", "settings.json") : options.userSettings;
+	const settingsPath = options.userSettings === undefined ? operatorClaudeSettings() : options.userSettings;
 	const secrets = secretPaths(settingsPath, [homedir(), userInfo().homedir]);
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const state: ReportState = { refusals: [], attempts: 0 };

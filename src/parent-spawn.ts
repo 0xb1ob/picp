@@ -48,7 +48,7 @@ export function assertParentDriver(home: string, model: string): ParentDriver {
 	return driver;
 }
 
-/** `piBin`/`argv` for one parent spawn: the native entry on driver `claude`, else pi with the command-post extension. */
+/** `piBin`/`argv` for one parent spawn: the native entry on driver `claude`, else pi with command-post. */
 export function parentSpawnArgs(home: string, sessionFile: string, options: { model: string; piBin?: string; commandPostExtension?: string; thinking?: ThinkingLevel }): Pick<WorkerSpawnOptions, "piBin" | "argv"> {
 	if (assertParentDriver(home, options.model) === "claude") return nativeParentSpawnOptions({ home, sessionFile, model: options.model });
 	const argv = buildParentArgv({
