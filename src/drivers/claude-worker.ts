@@ -1,5 +1,5 @@
 /**
- * The native Claude research worker process (N3b; follow-ups N3c; lifecycle N4e). It speaks the pi RPC lines dispatch
+ * The Claude CLI research worker process (N3b; follow-ups N3c; lifecycle N4e). It speaks the pi RPC lines dispatch
  * reads (`get_state`, `prompt`, `follow_up`, then events), runs each turn through `runClaudeSpike` with every N3a gate
  * on, and exits on stdin end or SIGTERM. A clean unreported turn settles idle; a named stop exits non-zero.
  */
@@ -131,14 +131,14 @@ function briefFor(jobId: string): string {
 /** The role contract the dispatch wrote; a missing or unreadable file stops the turn, never a run without it. */
 function readSystemPrompt(): string {
 	const file = env.CP_NATIVE_SYSTEM_PROMPT_FILE;
-	if (!file) throw new Error("native claude worker started without its system prompt file (CP_NATIVE_SYSTEM_PROMPT_FILE)");
+	if (!file) throw new Error("Claude CLI worker started without its system prompt file (CP_NATIVE_SYSTEM_PROMPT_FILE)");
 	try {
 		const body = readFileSync(file, "utf8");
 		if (body.trim() !== "") return body;
 	} catch (error) {
-		throw new Error(`native claude worker cannot read its system prompt ${file}: ${(error as Error).message}`);
+		throw new Error(`Claude CLI worker cannot read its system prompt ${file}: ${(error as Error).message}`);
 	}
-	throw new Error(`native claude worker's system prompt ${file} is empty`);
+	throw new Error(`Claude CLI worker's system prompt ${file} is empty`);
 }
 
 interface Turn {
@@ -154,17 +154,17 @@ interface Turn {
 async function turn(prompt: string): Promise<Turn> {
 	const [kind, role] = [env.CP_KIND, env.CP_ROLE] as ["research" | "ship", "planner" | "gate-reviewer" | "implementer"];
 	if (!["research/planner", "research/gate-reviewer", "ship/implementer"].includes(`${kind}/${role}`)) {
-		throw new Error(`native claude runs research/planner, research/gate-reviewer and ship/implementer jobs only, not ${kind}/${role}`);
+		throw new Error(`the Claude CLI runs research/planner, research/gate-reviewer and ship/implementer jobs only, not ${kind}/${role}`);
 	}
 	const [jobId, runDir, worktree] = [env.CP_JOB_ID, env.CP_RUN_DIR, env.CP_WORKTREE];
 	let artifactPath = env.CP_ARTIFACT_PATH;
-	if (!jobId || !runDir || !worktree || (role === "planner" && !artifactPath)) throw new Error("native claude worker started without its job identity");
+	if (!jobId || !runDir || !worktree || (role === "planner" && !artifactPath)) throw new Error("Claude CLI worker started without its job identity");
 	const systemPrompt = readSystemPrompt();
 	let current = resuming ? readNativeSession(sessionFile) : freshSession(worktree);
 	const moved = resuming ? nativeSessionMoved(current, worktree) : undefined;
 	if (moved) {
 		write({ type: "native_session_moved", from: current.cwd, to: worktree, reason: moved });
-		process.stderr.write(`[native claude] ${moved}\n`);
+		process.stderr.write(`[claude cli] ${moved}\n`);
 		resuming = false;
 		current = freshSession(worktree);
 		prompt = `${briefFor(jobId)}${prompt}`;
@@ -233,8 +233,8 @@ async function turn(prompt: string): Promise<Turn> {
 	const end = classifyTurn({ reported, resultSubtype: result.resultSubtype, isError, error: result.error, lockdown, observations: turnSeen, frozen: freezing });
 	const stop = nativeRunStop(end, maxTurns);
 	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: reported, result_subtype: result.resultSubtype ?? null, usage: measured.status === "estimated" ? "estimated" : usage ? "measured" : "unavailable", usage_status: measured.status, ...costUnknown, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...stop.fields });
-	if (stop.line) process.stderr.write(`[native claude] ${stop.line}\n`);
-	process.stderr.write(`[native claude] exit ${result.exit?.code ?? result.exit?.signal ?? "none"}; lockdown ${lockdown}; report ${reported ? "accepted" : "none"}${result.error ? `; ${result.error}` : ""}\n`);
+	if (stop.line) process.stderr.write(`[claude cli] ${stop.line}\n`);
+	process.stderr.write(`[claude cli] exit ${result.exit?.code ?? result.exit?.signal ?? "none"}; lockdown ${lockdown}; report ${reported ? "accepted" : "none"}${result.error ? `; ${result.error}` : ""}\n`);
 	return {
 		reported,
 		code: result.exit?.code || 1,
@@ -379,7 +379,7 @@ function command(line: string): void {
 				if (resuming) write({ type: "native_resume_failed", reason: (error as Error).message });
 				freezing = false;
 				for (const answer of checkpointReplies.splice(0)) answer({ success: false, error: `the turn failed before a checkpoint: ${(error as Error).message}` });
-				process.stderr.write(`[native claude] refused: ${(error as Error).message}\n`);
+				process.stderr.write(`[claude cli] refused: ${(error as Error).message}\n`);
 				return 1;
 			});
 			void run.then((code) => (code === 0 ? undefined : process.exit(code)));
@@ -388,7 +388,7 @@ function command(line: string): void {
 			if (refused === undefined) return;
 			admitting = false;
 			busy = false;
-			process.stderr.write(`[native claude] ${refused}\n`);
+			process.stderr.write(`[claude cli] ${refused}\n`);
 			reply({ success: false, error: refused });
 		});
 		return;

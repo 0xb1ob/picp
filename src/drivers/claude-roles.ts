@@ -21,7 +21,7 @@ export function nativeRole(role: Role): NativeRole {
 	if (role === "planner") return "research";
 	if (role === "implementer") return "implementer";
 	if (role === "gate-reviewer") return "reviewer";
-	throw new Error(`native claude has no tool set for role ${role}; only planner, implementer and gate-reviewer run native`);
+	throw new Error(`the Claude CLI has no tool set for role ${role}; only planner, implementer and gate-reviewer run on it`);
 }
 
 export const roleTools = (role: Role): readonly string[] => TOOLS[nativeRole(role)];
@@ -49,14 +49,14 @@ export const roleMcpTools = (role: Role): readonly string[] =>
 
 /** The home's `exclude_paths` and every live grant's exclusions, read by the worker process, never the CLI child. */
 export function implementerExclusions(home: string): string[] {
-	if (home === "") throw new Error("native claude worker started without CP_HOME; its exclude_paths cannot be read");
+	if (home === "") throw new Error("Claude CLI worker started without CP_HOME; its exclude_paths cannot be read");
 	const grants = liveGrants(new MandateStore(home).list()).flatMap((grant) => grant.exclusions?.paths ?? []);
 	return [...new Set([...loadMandateDefaults(home).exclude_paths, ...grants])];
 }
 
 /** The implementer's own `state/artifacts/<job id>/report.md` under `home`, its directory created for the Write guard. */
 export function implementerArtifactPath(home: string, jobId: string): string {
-	if (home === "") throw new Error("native claude worker started without CP_HOME; its artifact directory cannot be named");
+	if (home === "") throw new Error("Claude CLI worker started without CP_HOME; its artifact directory cannot be named");
 	const file = join(home, paths.artifactFile(jobId));
 	mkdirSync(dirname(file), { recursive: true });
 	return file;

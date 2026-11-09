@@ -22,10 +22,10 @@ export function cliChoices(status: SettingsResponse, cli: Cli | null, fallback: 
  return {cli, models: status.available_models?.filter(model => native.test(model)) ?? status.available_models, efforts: drivers.efforts.claude, native};
 }
 
-/** Why a model/effort pair cannot run on native Claude (the driver's own rule), or null; pi takes any pair. */
+/** Why a model/effort pair cannot run on the Claude CLI (the driver's own rule), or null; pi takes any pair. */
 export function cliError(choices: CliChoices, model: string | null | undefined, thinking: string | null | undefined): string | null {
  if (choices.cli !== "claude" || !choices.native) return null;
- if (model && !choices.native.test(model)) return `Native Claude runs only an anthropic/claude-… model, not ${model}: pick one`;
+ if (model && !choices.native.test(model)) return `The Claude CLI runs only an anthropic/claude-… model, not ${model}: pick one`;
  if (thinking && !choices.efforts.includes(thinking)) return `Effort ${thinking} has no Claude equivalent: pick ${choices.efforts.join(", ")}`;
  return null;
 }

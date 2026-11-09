@@ -329,7 +329,7 @@ export class DrainControl {
 			if (role === "implementer" && worker?.driver && this.#deps.checkpoint) {
 				try {
 					const done = (await this.#deps.checkpoint(key)) as { data?: { head?: string } } | undefined;
-					lines.push(`  freeze: ${key} checkpointed (native ${worker.driver}${done?.data?.head ? ` at ${done.data.head}` : ""})`);
+					lines.push(`  freeze: ${key} checkpointed (${worker.driver === "claude" ? "Claude CLI" : `native ${worker.driver}`}${done?.data?.head ? ` at ${done.data.head}` : ""})`);
 				} catch (error) {
 					lines.push(`  freeze: ${key} not checkpointed: ${(error as Error).message}`);
 				}

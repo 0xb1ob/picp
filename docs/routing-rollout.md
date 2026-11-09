@@ -172,7 +172,7 @@ its conversation or thinking state. The next spawn re-scores independently.
 - It does not let a fallback change the effort, cross from a rubric row to a
   row, or rescue an explicit override.
 
-## Native Claude research soak (opt-in)
+## Claude CLI research soak (opt-in)
 
 This section documents the soak; nothing here performs it, and no shipped row or default changes. Defaults stay pi and
 the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-drivers.md) (S1 to S3).
@@ -202,7 +202,7 @@ the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-driv
    switch OFF: new jobs run on pi, and resumes and revives of native jobs are refused (never moved to pi); teardown
    still works. Deleting `state/native-availability.json` only resets the snapshot to unknown.
 
-## Native Claude for ship and review workers (the flip)
+## Claude CLI for ship and review workers (the flip)
 
 The operator does this by hand. picp never edits the home's data files. The mechanism and the concurrency rules are in
 [native-drivers.md](native-drivers.md#native-concurrency-and-the-flip-n4i).

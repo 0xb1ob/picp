@@ -90,7 +90,7 @@ export async function resolveDriverRoute(
 	// The slot is still taken synchronously after the last await.
 	const refusal = model === undefined ? skipped : slotRefusal(ctx);
 	if (refusal && (ctx.explicit || locked)) {
-		throw new NativeDriverError(`refused: ${ctx.jobId} cannot run on the native claude driver: ${refusal.why}`, refusal.category);
+		throw new NativeDriverError(`refused: ${ctx.jobId} cannot run on the Claude CLI driver: ${refusal.why}`, refusal.category);
 	}
 	if (refusal) {
 		const pi = await resolveWithCapacity(route, config, probe, capacity);

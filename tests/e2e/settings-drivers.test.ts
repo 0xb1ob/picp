@@ -76,7 +76,7 @@ async function settingsTab(h: Awaited<ReturnType<typeof home>>) {
 
 // Scenario: switching the workers CLI pi↔native filters the model lists and validates rows
 //   Given the shipped rubric with small-ship on openai/gpt-5 and planner-default at thinking minimal
-//   When the operator picks Native Claude, then pi again
+//   When the operator picks the Claude CLI, then pi again
 //   Then only Claude models and efforts are offered, both rows are named and Save is off until they are fixed
 test("Workers CLI: native filters every row's model and effort list, names the rows to fix, saves rows and switches together", { timeout: 120_000 }, async (t) => {
 	const h = await home(t, (root) => {
@@ -104,7 +104,7 @@ test("Workers CLI: native filters every row's model and effort list, names the r
 	}
 	assert.deepEqual(optionValues(ui.thinking(ui.row("big-ship"))), ["", ...CLAUDE_EFFORTS], "the Claude driver's effort levels, from the session");
 	const block = ui.section("Model routing").querySelector(".settings-cli-block")?.textContent ?? "";
-	assert.match(block, /Native Claude needs a new model or effort on Small ship \(small-ship\), Planner \(planner-default\)\./);
+	assert.match(block, /The Claude CLI needs a new model or effort on Small ship \(small-ship\), Planner \(planner-default\)\./);
 	assert.match(small.querySelector(".settings-rule-error")?.textContent ?? "", /anthropic\/claude-… model, not openai\/gpt-5/);
 	assert.match(ui.row("planner-default").querySelector(".settings-rule-error")?.textContent ?? "", /Effort minimal has no Claude equivalent/);
 	assert.ok(save().hasAttribute("disabled"), "Save stays off while a row cannot run native");
@@ -139,7 +139,7 @@ test("Workers CLI: native filters every row's model and effort list, names the r
 
 // Scenario: the parent CLI switch writes driver and reports restart-needed
 //   Given a parent on pi with anthropic/claude-opus-5-5
-//   When the operator picks Native Claude for the parent and saves
+//   When the operator picks the Claude CLI for the parent and saves
 //   Then parent.json says driver claude, the answer says restart parent, and the page offers the drain-gated restart
 test("Parent CLI: native narrows the parent pickers, writes driver, reports restart and restarts only on request", { timeout: 120_000 }, async (t) => {
 	const h = await home(t, (root) => put(join(root, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 150000, model: "anthropic/claude-opus-5-5" })));
@@ -189,7 +189,7 @@ test("native + an openai model is refused before any write, for the parent and f
 	assert.equal((both.body.errors as string[]).length, 2, "the model and the effort, each named");
 	const workers = await h.post("/api/settings/apply", { changes: { "workers.driver": "claude" } });
 	assert.equal(workers.status, 400);
-	assert.deepEqual(workers.body.errors, ["row risky-any: native Claude runs only an anthropic/claude-… model, not openai/gpt-5; pick one for this row"]);
+	assert.deepEqual(workers.body.errors, ["row risky-any: the Claude CLI runs only an anthropic/claude-… model, not openai/gpt-5; pick one for this row"]);
 	assert.equal((await h.post("/api/settings/apply", { changes: { "workers.driver": "claude" } }, true)).status, 400, "a dry run refuses the same way");
 	assert.deepEqual([readFileSync(join(h.root, LAYOUT.data, "parent.json"), "utf8"), readFileSync(join(h.root, LAYOUT.routingFile), "utf8")], before, "nothing written");
 	assert.equal(existsSync(join(h.root, LAYOUT.data, "native.json")), false, "no native switch turned on");
@@ -205,7 +205,7 @@ test("native + an openai model is refused before any write, for the parent and f
 });
 
 // Scenario: restore works
-//   Given the parent and every worker on native Claude
+//   Given the parent and every worker on the Claude CLI
 //   When the operator restores the Model routing and the parent keys
 //   Then the rows lose their driver, the native switches go, the parent is back on pi and the read says pi
 test("restore puts the parent and every worker back on pi and turns the native switches off", { timeout: 120_000 }, async (t) => {
@@ -231,4 +231,30 @@ test("restore puts the parent and every worker back on pi and turns the native s
 	assert.deepEqual(h.json(`${LAYOUT.data}/parent.json`), { compact_at_tokens: 150000, model: "anthropic/claude-opus-5-5" });
 	assert.deepEqual([(await h.field("workers.driver"))?.value, (await h.field("models.parent_driver"))?.value], ["pi", "pi"]);
 	assert.equal((await h.post("/api/settings/restore", { keys: ["workers.driver", "models.parent_driver"] })).body.state, "unchanged");
+});
+
+// Scenario: the claude option is labelled "Claude CLI" and still saves `claude`
+//   Given a parent on anthropic/claude-opus-5-5 and the shipped rubric
+//   When the operator picks "Claude CLI" for the Workers CLI and the Parent CLI and saves each
+//   Then both options read "Claude CLI", no label keeps the old name, and the saved value is still `claude`
+test("Workers CLI and Parent CLI label the claude option Claude CLI and save the value claude", { timeout: 120_000 }, async (t) => {
+	const h = await home(t, (root) => put(join(root, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 150000, model: "anthropic/claude-opus-5-5" })));
+	const ui = await settingsTab(h);
+	const workers = ui.section("Model routing").querySelector("#setting-workers-driver")!;
+	const people = ui.section("Parent and operator models");
+	const parent = people.querySelector("#setting-models-parent_driver")!;
+	const labels = (select: Element) => [...select.querySelectorAll("option")].map((option) => [option.getAttribute("value"), option.textContent]);
+	for (const select of [workers, parent]) assert.deepEqual(labels(select), [["pi", "pi"], ["claude", "Claude CLI"]]);
+	assert.doesNotMatch(ui.tab.$(".settings-screen")?.textContent ?? "", /native[ -]claude/i);
+
+	await ui.choose(workers, "claude");
+	await ui.press(ui.section("Model routing"), "Save");
+	await until(() => ui.posts().length, (n) => n === 1, "the workers save");
+	await ui.choose(people.querySelector("#setting-models-parent_driver")!, "claude");
+	await ui.press(people, "Save");
+	await until(() => ui.posts().length, (n) => n === 2, "the parent save");
+	assert.deepEqual(ui.posts().map((post) => [post.status, post.json.changes]), [[200, { "workers.driver": "claude" }], [200, { "models.parent_driver": "claude" }]]);
+	assert.deepEqual([(await h.field("workers.driver"))?.value, (await h.field("models.parent_driver"))?.value], ["claude", "claude"]);
+	assert.equal(h.json(`${LAYOUT.data}/parent.json`).driver, "claude");
+	assert.ok((h.json(LAYOUT.routingFile).rubric as Json[]).every((row) => row.driver === "claude"));
 });

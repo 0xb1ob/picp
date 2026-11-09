@@ -258,7 +258,7 @@ test("claude-worker: a role/kind pair selection never allows and a missing or em
 		for (const [kind, role] of [["ship", "planner"], ["research", "implementer"], ["ship", "gate-reviewer"]]) {
 			const refused = startWorker({ ...job, CP_KIND: kind!, CP_ROLE: role! });
 			assert.equal(refused.status, 1, refused.stderr);
-			assert.match(refused.stderr, new RegExp(`refused: native claude runs research/planner, research/gate-reviewer and ship/implementer jobs only, not ${kind}/${role}`));
+			assert.match(refused.stderr, new RegExp(`refused: the Claude CLI runs research/planner, research/gate-reviewer and ship/implementer jobs only, not ${kind}/${role}`));
 		}
 		const reviewer = startWorker({ ...job, CP_ARTIFACT_PATH: "", CP_KIND: "research", CP_ROLE: "gate-reviewer" });
 		assert.match(reviewer.stderr, /started without its system prompt file/, "a reviewer with no artifact passes the pair check");
@@ -370,7 +370,7 @@ test("N4i concurrency: max_concurrent N admits N native jobs, refuses the next b
 	// A held job's own repair resumes its own slot; an explicit request is refused by name, never moved.
 	assert.equal((await nativeSelectionRefusal(select("cp-b", [live("cp-a"), live("cp-b", "held")])))?.category, "cli_missing");
 	await assert.rejects(assertNativeSelection(select("cp-c", [live("cp-a"), live("cp-b", "held")])),
-		(error: NativeDriverError) => error.category === "occupied" && /^refused: cp-c cannot run on the native claude driver: native concurrency is 2/.test(error.message));
+		(error: NativeDriverError) => error.category === "occupied" && /^refused: cp-c cannot run on the Claude CLI driver: native concurrency is 2/.test(error.message));
 	// Admission reservations and live records count once each; an unreadable file keeps the safe 1.
 	assert.equal(nativeSlotRefusal(["cp-a", "cp-a"], "cp-c", 2), undefined);
 	assert.equal(nativeSlotRefusal(["cp-a", "cp-b"], "cp-c", 2, "live or being admitted")?.why, "native concurrency is 2 and cp-a, cp-b are live or being admitted; tear one down first");

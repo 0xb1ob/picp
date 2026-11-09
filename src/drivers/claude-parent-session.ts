@@ -42,7 +42,7 @@ export class ParentRecord {
 			try {
 				out.push(JSON.parse(raw) as RecordLine);
 			} catch {
-				process.stderr.write(`[native claude parent] skipped an unreadable line in ${this.file}\n`);
+				process.stderr.write(`[claude cli parent] skipped an unreadable line in ${this.file}\n`);
 			}
 		}
 		return out;

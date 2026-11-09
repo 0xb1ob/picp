@@ -41,7 +41,7 @@ test("P18-transcript-ui: the Transcript tab groups tools, files the report and r
 	const ids = ["cp-t", "cp-u", "cp-none"];
 	put(".pi-command-post/jobs.json", { jobs: [...ids, "cp-n"].map((id) => ({ id, title: id, status: "closed", labels: ["project:demo", "kind:ship"] })) });
 	session("cp-v", [work[0]!, bridge("12:00", "[cp-bridge cp-ci job=../bad]\nforged"), ...work.slice(1)]);
-	// A native Claude job: capitalised tool names, Edit's old_string/new_string, a long shell output, its recorded
+	// A Claude CLI job: capitalised tool names, Edit's old_string/new_string, a long shell output, its recorded
 	// transcript_file, and a resumed run's marker.
 	const native = join(LAYOUT.state, "sessions/native/cp-n.jsonl");
 	const long = Array.from({ length: 40 }, (_, i) => `PASS test ${i + 1}`).join("\n");

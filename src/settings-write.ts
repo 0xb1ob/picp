@@ -348,12 +348,12 @@ function setNativeSwitches(doc: Record<string, unknown>, driver: string): boolea
 	return changed;
 }
 
-/** No claude row on a model or effort native Claude refuses, and no newly picked model routing refuses. */
+/** No claude row on a model or effort the Claude CLI refuses, and no newly picked model routing refuses. */
 function refuseRoutingRows(config: RoutingConfig, prior: Record<string, unknown>): void {
 	const was = new Map((Array.isArray(prior.rubric) ? prior.rubric : []).filter(isObject).map((row) => [row.id, row.model]));
 	const errors = config.rubric.flatMap((row: RoutingRule) => {
 		const out: string[] = [];
-		if (row.driver === "claude" && !isNativeModel(row.model)) out.push(`row ${row.id}: native Claude runs only an anthropic/claude-… model, not ${row.model}; pick one for this row`);
+		if (row.driver === "claude" && !isNativeModel(row.model)) out.push(`row ${row.id}: the Claude CLI runs only an anthropic/claude-… model, not ${row.model}; pick one for this row`);
 		if (row.driver === "claude" && row.thinking !== undefined && !CLAUDE_EFFORTS.includes(row.thinking)) out.push(`row ${row.id}: thinking ${row.thinking} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);
 		if (was.get(row.id) === row.model) return out;
 		if (!isAllowed(config, row.model)) out.push(`row ${row.id}: models.allow does not permit ${row.model}, so routing would refuse it`);
@@ -371,7 +371,7 @@ function refuseNativeParent(doc: Record<string, unknown>, env: NodeJS.ProcessEnv
 	const errors: string[] = [];
 	if (model !== undefined && !(typeof model === "string" && isNativeModel(model))) errors.push(`models.parent: the claude parent runs only an anthropic/claude-… model, not ${JSON.stringify(model)}`);
 	if (doc.thinking !== undefined && !(typeof doc.thinking === "string" && CLAUDE_EFFORTS.includes(doc.thinking))) errors.push(`models.parent_thinking: ${JSON.stringify(doc.thinking)} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);
-	if (errors.length) throw new Refusal(400, "the native Claude parent needs an anthropic/claude-… model and a Claude effort", errors);
+	if (errors.length) throw new Refusal(400, "the Claude CLI parent needs an anthropic/claude-… model and a Claude effort", errors);
 }
 
 /** The keys a request names, checked: unknown 400, not editable 403. Section/all skip non-editable fields. */
@@ -443,7 +443,7 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			const old = { old: view?.value ?? null, old_source: view?.source ?? "none" };
 			if (field.key === "workers.driver") {
 				const driver = workersDriver(request);
-				if (driver === "claude" && !(Array.isArray(doc.rubric) && doc.rubric.length)) throw new Refusal(409, `${status.path} has no rubric rows to run on native Claude`);
+				if (driver === "claude" && !(Array.isArray(doc.rubric) && doc.rubric.length)) throw new Refusal(409, `${status.path} has no rubric rows to run on the Claude CLI`);
 				if (!setRowDrivers(doc, driver)) continue;
 				changes.push({ key: field.key, file_key: "rubric[].driver", action: driver === "claude" ? "set" : "delete", ...old, new: driver, expected: driver });
 				// A rubric edit in the same write reads back with the new drivers.

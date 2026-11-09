@@ -205,7 +205,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		operator_thinking: { file_key: "thinking", type: "thinking_level", default: null, label: "Operator thinking", help: "Switches the running operator session when its current turn ends, and wins again at every session start (resumes and Restart clean included), over --thinking. A shift+tab change lasts until the next start. No env pin. pi clamps a level the model cannot serve. Empty unsets it." },
 	}),
 	...group("models", "parent", { applies: "next_parent_start", on_invalid: "refuse" }, {
-		parent_driver: { file_key: "driver", type: "driver", enum: [...ROUTING_DRIVERS], default: "pi", label: "Parent CLI", help: "pi, or the native Claude CLI (claude), for the CP parent. Applies at the next parent start: restart the parent to switch. Native runs only an Anthropic Claude model (provider anthropic, id claude-…) and the Claude effort levels; a write pairing claude with any other model is refused." },
+		parent_driver: { file_key: "driver", type: "driver", enum: [...ROUTING_DRIVERS], default: "pi", label: "Parent CLI", help: "pi, or the Claude CLI (claude), for the CP parent. Applies at the next parent start: restart the parent to switch. The Claude CLI runs only an Anthropic Claude model (provider anthropic, id claude-…) and the Claude effort levels; a write pairing claude with any other model is refused." },
 	}),
 	...group("review", "gate", { applies: "next_review_attempt", on_invalid: "refuse" }, {
 		timeout_ms: { file_key: "review_timeout_ms", type: "integer", minimum: GATE_REVIEW_TIMEOUT_MIN_MS, maximum: GATE_REVIEW_TIMEOUT_MAX_MS, default: 300_000, label: "Review timeout (ms)", help: "How long one review attempt may take before it counts as operational." },
@@ -230,10 +230,10 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		public_url: { file_key: "public_url", type: "url", default: null, applies: "next_board_link", label: "Public URL", help: "Where people reach this dashboard, e.g. a reverse proxy's https URL; board and report links use it. Links only: the bind address and the Host and Origin guards stay as they are. Empty clears it." },
 	}),
 	...group("workers", "native", { applies: "next_dispatch", on_invalid: "refuse" }, {
-		native_claude_research: { file_key: "claude_research", type: "boolean", default: false, label: "Native Claude research workers", help: "A job runs on the installed Claude CLI only when a routing rule (or the dispatch) says driver \"claude\" and this switch is on. Off stops new native jobs and refuses resumes and revives of native ones; they never move to pi. Turning it off then on clears a remembered sign-in, lockdown or no-reset limit block." },
+		native_claude_research: { file_key: "claude_research", type: "boolean", default: false, label: "Claude CLI research workers", help: "A job runs on the installed Claude CLI only when a routing rule (or the dispatch) says driver \"claude\" and this switch is on. Off stops new native jobs and refuses resumes and revives of native ones; they never move to pi. Turning it off then on clears a remembered sign-in, lockdown or no-reset limit block." },
 	}),
 	...group("workers", "routing", { applies: "next_dispatch", on_invalid: "refuse" }, {
-		driver: { type: "driver", enum: [...ROUTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or native Claude for every worker type at once: sets each data/routing.json rubric row's driver, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi." },
+		driver: { type: "driver", enum: [...ROUTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets each data/routing.json rubric row's driver, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi." },
 	}),
 ]);
 
