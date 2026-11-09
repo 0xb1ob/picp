@@ -6,6 +6,7 @@
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { LAYOUT } from "../../src/contracts.ts";
+import { operation } from "../../src/loop-stall.ts";
 import { escalateAnswerMigration } from "../../src/migrate-answer-reports.ts";
 import { serviceAlerts, syncServiceEscalations } from "../../src/service-alerts.ts";
 import { readHealth } from "../../src/service/health.ts";
@@ -41,7 +42,7 @@ export function registerServiceAlertTick(pi: ExtensionAPI, deps: ExtensionDeps, 
 	};
 	pi.on("session_start", async () => {
 		if (!holdsLock() || timer) return;
-		timer = setInterval(() => void tick(), SERVICE_ALERT_TICK_MS);
+		timer = setInterval(() => void operation("service_alert_tick", tick), SERVICE_ALERT_TICK_MS);
 		timer.unref();
 		setTimeout(() => void tick(), 0).unref();
 	});

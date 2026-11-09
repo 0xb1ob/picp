@@ -4,6 +4,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ciWatchIntervalMs } from "../../src/ci-watch.ts";
+import { operation } from "../../src/loop-stall.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 export function registerAwaitingMergeTick(pi: ExtensionAPI, deps: ExtensionDeps, holdsLock: () => boolean): void {
@@ -25,7 +26,7 @@ export function registerAwaitingMergeTick(pi: ExtensionAPI, deps: ExtensionDeps,
 	};
 	pi.on("session_start", async () => {
 		if (timer) return;
-		timer = setInterval(() => void tick(), ciWatchIntervalMs());
+		timer = setInterval(() => void operation("awaiting_merge_tick", tick), ciWatchIntervalMs());
 		timer.unref();
 		startup = setTimeout(() => void tick(), 0); // catch-up pass, after startup returns
 		startup.unref();
