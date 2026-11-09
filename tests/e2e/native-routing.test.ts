@@ -166,7 +166,7 @@ test("S1 fallback: switch off, CLI missing or too old, and a denied primary run 
 	assert.match(text(offEnds[1]), /workers\.native_claude_research is off/);
 	h.noLease(explicit.id);
 	assert.equal(deniedEnds[1]?.isError, true, text(deniedEnds[1]));
-	assert.match(text(deniedEnds[1]), /cannot run on the native claude driver: deny_by_role\.planner matches /);
+	assert.match(text(deniedEnds[1]), /cannot run on the Claude CLI driver: deny_by_role\.planner matches /);
 	h.noLease(deniedExplicit.id);
 	// D2: a pipeline's planner is no longer a fallback; it runs native (native-worker-followups.test.ts, J3).
 	assert.equal(h.claude.requests.length, 0, "no fallback reached the native model");
@@ -222,7 +222,7 @@ test("S1 config: an unknown driver or a non-anthropic claude model refuses with 
 	assert.equal(second?.isError, true, text(second));
 	assert.match(text(second), /explicit anthropic\/claude-… model/);
 	assert.equal(third?.isError, true, text(third));
-	assert.match(text(third), /thinking=minimal has no native claude effort/);
+	assert.match(text(third), /thinking=minimal has no Claude CLI effort/);
 	for (const id of [codex.id, badModel.id, minimal.id]) h.noLease(id);
 	// D1: the native job fails on its observed exit and stays native. With the row no longer preferring claude, a
 	// re-dispatch with the switch off refuses (never pi), and a revive after the switch is back respawns it native.
@@ -239,7 +239,7 @@ test("S1 config: an unknown driver or a non-anthropic claude model refuses with 
 	], limited)) as Tool[];
 	const redispatch = again.find((end) => end.toolName === "cp_dispatch");
 	assert.equal(redispatch?.isError, true, text(redispatch));
-	assert.match(text(redispatch), /cannot run on the native claude driver/);
+	assert.match(text(redispatch), /cannot run on the Claude CLI driver/);
 	const revive = again.find((end) => end.toolName === "cp_revive");
 	assert.notEqual(revive?.isError, true, text(revive));
 	const revived = h.fleet(locked.id);
@@ -366,7 +366,7 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 	const [revive, redispatch, reroute] = lock.filter((end) => end.toolName === "cp_revive" || end.toolName === "cp_dispatch");
 	assert.match(text(revive), /native_refused.*subscription window is spent.*Nothing was spawned/);
 	assert.equal(redispatch?.isError, true, text(redispatch));
-	assert.match(text(redispatch), /cannot run on the native claude driver: five_hour rejected until/);
+	assert.match(text(redispatch), /cannot run on the Claude CLI driver: five_hour rejected until/);
 	assert.equal(reroute?.isError, true, text(reroute));
 	assert.match(text(reroute), new RegExp(`runs an explicit anthropic/claude-… model, and ${h.piModel} is not one`));
 	ranNative(spent.id);

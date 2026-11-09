@@ -575,16 +575,16 @@ reveals a text input for any id. While the list loads or is unavailable each dro
 page says "Loading the model list…" or "Model list unavailable". Screenshots: `docs/tui-verification/settings-model-dropdown.md`.
 
 CLI switches (cp-settings-cli-model-effort; docs/contracts.md §Settings catalog, CLI keys). *Model routing* opens with a
-**Workers CLI** select (pi or Native Claude; "(rows disagree)" with the split named when rows differ). Each rubric row
+**Workers CLI** select (pi or Claude CLI; "(rows disagree)" with the split named when rows differ). Each rubric row
 shows a human label over its id: Planner, Small ship, Big ship, Risky (any job), Risky ship, Reviews, Big research,
-Native research. Any other id shows alone. With Native Claude drafted, each row's model select lists only the
+Native research. Any other id shows alone. With Claude CLI drafted, each row's model select lists only the
 models matching the session's `drivers.claude_model`. A current value outside it stays selected as "<id> (not a
 Claude model)". The thinking select lists `drivers.efforts.claude`; fallbacks keep pi's whole list. Each row that
-cannot run native gets an inline alert, and one section alert names them all ("Native Claude needs a new model or
+cannot run native gets an inline alert, and one section alert names them all ("The Claude CLI needs a new model or
 effort on …"). Save stays off until each is valid; one Save posts `workers.driver` with the edited rows. The section
 counts the CLI as one unsaved change, and picking the saved CLI again drops it. *Restore defaults* there restores
 `["models.rubric", "workers.driver"]`. *Parent and operator models* opens with **Parent CLI** (`models.parent_driver`);
-on Native Claude the parent model and thinking selects narrow the same way, with the same inline error and blocked Save.
+on Claude CLI the parent model and thinking selects narrow the same way, with the same inline error and blocked Save.
 A save answered `restart: "parent"` shows "Parent CLI saved: the parent keeps its current CLI until it restarts" and the
 drain-gated `ParentRestart` buttons (two taps, `POST /api/parent/restart`); nothing restarts on save. *Native workers*
 says that the Workers CLI sets its switch too. An older session without `drivers` gets pi's levels and no filtering.
@@ -753,7 +753,7 @@ Details on the job's Transcript tab; the drawer and Context open Details on its 
 (`>_ <id>`) was a second rendering of the same transcript and is gone: the Transcript tab words each tool call the way
 it did — `Read(path)` / `└ Read N lines`, `Ran 1 shell command` / `• <command>` and its output, `Update(path)` /
 `└ Added N lines, removed M lines` with the edit's block (pi's `oldText`/`newText` or native `old_string`/`new_string`)
-— for pi and native Claude tool names alike, plus `Search(pattern)` for native Grep and Glob. A shell or failed call
+— for pi and Claude CLI tool names alike, plus `Search(pattern)` for native Grep and Glob. A shell or failed call
 shows its output's head, with the first 2000 characters behind "Show full output".
 The `--stage full-match-log` captures under `docs/tui-verification/full-match-log/` predate that removal.
 

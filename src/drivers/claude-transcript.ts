@@ -51,7 +51,7 @@ export function nativeTranscript(file: string, header: { id: string; cwd: string
 			appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
 		} catch (error) {
 			failed = true;
-			process.stderr.write(`[native claude] transcript ${file} not written: ${(error as Error).message}\n`);
+			process.stderr.write(`[claude cli] transcript ${file} not written: ${(error as Error).message}\n`);
 		}
 	};
 	const stamp = (at?: string) => ({ id: randomUUID().slice(0, 8), timestamp: at ?? new Date().toISOString() });

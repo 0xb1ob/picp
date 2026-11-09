@@ -77,7 +77,7 @@ function backfill(log: NativeTranscript, claudeConfig: string, sessionIds: reado
 			if (!found) throw new Error("no CLI session file");
 			for (const raw of readFileSync(found, "utf8").split("\n")) if (raw.trim()) replay(log, raw);
 		} catch (error) {
-			process.stderr.write(`[native claude parent] claude session ${id} not imported into ${log.file}: ${(error as Error).message}\n`);
+			process.stderr.write(`[claude cli parent] claude session ${id} not imported into ${log.file}: ${(error as Error).message}\n`);
 		}
 	}
 }

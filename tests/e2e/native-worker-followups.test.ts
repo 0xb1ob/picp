@@ -1,5 +1,5 @@
 /**
- * N3c: follow-ups into native Claude research jobs through the real `cp_send`, `cp_revive` and `cp_teardown` of a pi
+ * N3c: follow-ups into Claude CLI research jobs through the real `cp_send`, `cp_revive` and `cp_teardown` of a pi
  * parent (mock parent model), the installed `claude` against the loopback fake model, synthetic credentials in a temp
  * HOME's settings file, a temp CLAUDE_CONFIG_DIR per job and no user setting sources. F1–F8 of the N3c task.
  */
@@ -239,7 +239,7 @@ test("F2/F5/F6: switch-off and freeze refuse resume and revive, revive resumes o
 	assert.match(text(offRevive), /native_refused.*workers\.native_claude_research is off/);
 	assert.match(text(frozenRevive), /native_refused.*draining/);
 	// F2: the revive resumes the session with picp's revive prompt and the job reports once more (generation 2).
-	assert.match(text(revived), /resumed its native Claude session/, text(revived));
+	assert.match(text(revived), /resumed its Claude CLI session/, text(revived));
 	const revivedRun = modelCalls(h.claude.requests).find((request) => messages(request).includes(nativeRevivePrompt("research").slice(0, 40)));
 	assert.ok(messages(revivedRun).includes("ls -l"), "the revive resumed the same session");
 	const stops = readRunEvents(h.b.home, id).filter((event) => event.type === "native_run").map((event) => (event.payload as { stop?: string }).stop);
@@ -305,7 +305,7 @@ test("H2: a resume that throws returns its claimed sends undelivered, and the ne
 		tool("cp_teardown", { job_id: id }),
 	], h.env)) as Tool[];
 	const revived = ends.find((end) => end.toolName === "cp_revive");
-	assert.match(text(revived), /resumed its native Claude session/, text(revived));
+	assert.match(text(revived), /resumed its Claude CLI session/, text(revived));
 	const events = readRunEvents(h.b.home, id);
 	assert.deepEqual(events.filter((event) => event.type === "native_followup_delivered").map((event) => (event.payload as { count?: number }).count), [1]);
 	assert.deepEqual(queuedFollowUps(runDir), []);
@@ -412,7 +412,7 @@ test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_r
 	], h.env)) as Tool[];
 	const [nativeRevive, piRevive] = ends.filter((end) => end.toolName === "cp_revive");
 	// L1: the plain revive resumed the same session with picp's revive prompt, and the job reported exactly once.
-	assert.match(text(nativeRevive), /resumed its native Claude session/, text(nativeRevive));
+	assert.match(text(nativeRevive), /resumed its Claude CLI session/, text(nativeRevive));
 	const revivedRun = modelCalls(h.claude.requests).find((request) => messages(request).includes(nativeRevivePrompt("research").slice(0, 40)));
 	assert.ok(messages(revivedRun).includes("Report the repo"), "the revive resumed the killed turn's conversation");
 	assert.equal(readNativeSession(sessionFile).session_id, before);
@@ -488,7 +488,7 @@ test("J7: bounded recovery resumes a crashed native job, a turn limit stays a hu
 		tool("cp_teardown", { job_id: ids.limited }),
 		tool("cp_teardown", { job_id: ids.crashed }),
 	], h.env)) as Tool[];
-	assert.match(text(ends.find((end) => end.toolName === "cp_revive")), /resumed its native Claude session/);
+	assert.match(text(ends.find((end) => end.toolName === "cp_revive")), /resumed its Claude CLI session/);
 	const continued = readRunEvents(h.b.home, ids.limited).find((event) => event.type === "worker_revived")?.payload as Record<string, unknown> | undefined;
 	assert.equal(continued?.continue_failed_as_revive, true, JSON.stringify(continued));
 	assert.equal(readRunEvents(h.b.home, ids.limited).filter((event) => event.type === "envelope_received").length, 1);

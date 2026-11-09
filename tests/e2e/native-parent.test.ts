@@ -1,5 +1,5 @@
 /**
- * The native-Claude parent's spawn seam (S1a) through the real `CpBridge.start` and the operator's `cp_parent start`:
+ * The Claude CLI parent's spawn seam (S1a) through the real `CpBridge.start` and the operator's `cp_parent start`:
  * `data/parent.json` `driver: "claude"` starts src/drivers/claude-parent.ts; the default still starts pi.
  */
 import assert from "node:assert/strict";

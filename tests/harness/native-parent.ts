@@ -1,5 +1,5 @@
 /**
- * The native-Claude parent's e2e fixture: a driver-claude home with a registered project, a no-op script job under a
+ * The Claude CLI parent's e2e fixture: a driver-claude home with a registered project, a no-op script job under a
  * mandate, the claude mock provider, and `claude` on PATH — tests/fixtures/fake-claude.ts unless CP_E2E_REAL_CLAUDE=1.
  */
 import { execFileSync } from "node:child_process";

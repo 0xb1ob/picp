@@ -15,7 +15,7 @@ const CUSTOM = "custom";
 const MAX_FALLBACKS = 4;
 const PEOPLE_MODELS: SettingKey[] = ["models.parent_driver", "models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"];
 const ROUTING: SettingKey[] = ["models.rubric", "workers.driver"];
-const CLI_LABEL: Record<string, string> = {pi: "pi", claude: "Native Claude"};
+const CLI_LABEL: Record<string, string> = {pi: "pi", claude: "Claude CLI"};
 /** The shipped and flip-era rubric ids in words; any other row shows its id alone. */
 const ROW_LABEL: Record<string, string> = {"planner-default": "Planner", "small-ship": "Small ship", "big-ship": "Big ship", "risky-any": "Risky (any job)", "risky-ship": "Risky ship", reviews: "Reviews", "research-big": "Big research", "native-research": "Native research"};
 const rowName = (id: string) => ROW_LABEL[id] ? `${ROW_LABEL[id]} (${id})` : id;
@@ -255,7 +255,7 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   <Section title="Model routing" help="First matching rule wins. The workers CLI, model, fallbacks and thinking apply from the next job or review; role, scope and risk stay fixed." keys={ROUTING} drafts={drafts} setDrafts={setDrafts} view={view} restore={routingAbsent ? null : {keys: ROUTING}} restoreText="Restore the shipped model, fallbacks and thinking on every rubric row whose id matches, and pi for every worker (native switches off)? Rows you added stay." disabled={disabled} invalid={needNew.length > 0} unsavedCount={rows.filter((row, index) => rowEdited(row, original[index])).length + ("workers.driver" in drafts ? 1 : 0)}>
    {routingAbsent ? <p class="settings-readonly">No data/routing.json: every worker route is refused until it exists.</p> : <>
     <WorkersCli field={fieldOf(data, "workers.driver")} cli={workersCli} saved={view_("workers.driver")} set={cli => setCli("workers.driver", cli)} disabled={editing}/>
-    {needNew.length > 0 && <p class="settings-warn settings-cli-block" role="alert">Native Claude needs a new model or effort on {needNew.join(", ")}. Save stays off until each row is valid.</p>}
+    {needNew.length > 0 && <p class="settings-warn settings-cli-block" role="alert">The Claude CLI needs a new model or effort on {needNew.join(", ")}. Save stays off until each row is valid.</p>}
     <Rubric rows={rows} original={original} setRow={setRow} disabled={editing} models={models} choices={routeChoices} errors={rowErrors}/>
    </>}
    {modelsNote}
@@ -274,7 +274,7 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   <Section title="Dashboard address" help="Public URL applies to the next board or report link; the Host pin applies to the next dashboard request. Neither restarts anything." keys={VIEWER} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: VIEWER}} restoreText="Unset the public URL and turn the Host pin off?" disabled={disabled}>
    {VIEWER.map(field)}
   </Section>
-  <Section title="Native workers" help="Off by default, and pi stays every job's driver; no shipped routing rule names claude. The Workers CLI under Model routing sets this switch too: on with native Claude, off with pi." keys={WORKERS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: WORKERS}} restoreText="Turn native Claude research workers off?" disabled={disabled}>
+  <Section title="Native workers" help="Off by default, and pi stays every job's driver; no shipped routing rule names claude. The Workers CLI under Model routing sets this switch too: on with the Claude CLI, off with pi." keys={WORKERS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: WORKERS}} restoreText="Turn Claude CLI research workers off?" disabled={disabled}>
    {WORKERS.map(field)}
   </Section>
   {children}

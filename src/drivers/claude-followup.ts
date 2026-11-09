@@ -1,5 +1,5 @@
 /**
- * Native Claude follow-ups (N3c): the durable session record that makes a native job resumable, the admission every
+ * Claude CLI follow-ups (N3c): the durable session record that makes a native job resumable, the admission every
  * resume passes before a claude process starts, the busy-send queue, and teardown's scratch removal.
  */
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -37,7 +37,7 @@ export function nativeSessionMoved(session: NativeSession, worktree: string): st
 
 export const NATIVE_ACK = {
 	resumed:
-		"resuming: one new native claude process resumes this job's session with the message as its next prompt (run event " +
+		"resuming: one new Claude CLI process resumes this job's session with the message as its next prompt (run event " +
 		"native_run, or the worker's named failure on its observed exit); nothing was steered",
 	queued:
 		"queued until the current turn ends: a resume after it delivers the message under the same admission and gates " +
@@ -212,5 +212,5 @@ export function nativeDoorRefusal(jobId: string, door: "bounded recovery" | "ste
 			"revives it with cp_revive",
 		steer: "the native driver takes no mid-turn steer; send with mode auto or follow_up to queue it until the turn ends",
 	}[door];
-	return `${jobId} runs on the native claude driver: ${door} is refused (${why}). Nothing was sent or spawned.`;
+	return `${jobId} runs on the Claude CLI driver: ${door} is refused (${why}). Nothing was sent or spawned.`;
 }

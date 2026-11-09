@@ -9087,7 +9087,7 @@ invalid `routing.json` today. Absent, nothing is denied.
 
 **Driver (native routing S1).** A rubric row may carry `driver: "pi" | "claude"`; absent (every legacy row) is
 `pi`, and any other value makes the whole file invalid. `claude` is a preference, resolved at dispatch by
-`src/dispatch-driver.ts`: an eligible job runs on the native Claude CLI with the row's own `model`, which must be an
+`src/dispatch-driver.ts`: an eligible job runs on the Claude CLI with the row's own `model`, which must be an
 explicit Anthropic Claude id (provider `anthropic`, model id starting `claude-`; anything else refuses the dispatch
 before any lease, never a silent fallback), and
 the row's effort (`off` disables thinking, `low`…`max` is the SDK `effort`, `minimal` refuses, absent is the CLI

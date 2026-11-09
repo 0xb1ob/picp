@@ -1,5 +1,5 @@
 /**
- * Native-Claude parent S2b through the real `CpBridge.start` with the native spawn and the claude mock provider
+ * Claude CLI parent S2b through the real `CpBridge.start` with the native spawn and the claude mock provider
  * (tests/fixtures/fake-claude.ts stands in for the CLI on CI): in-process diagnostics, steer, crash recovery, the
  * relaunch cap, an operator stop with queued sends, abort as Query.interrupt(), and the startup duties.
  */

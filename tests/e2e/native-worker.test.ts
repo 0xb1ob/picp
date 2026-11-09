@@ -1,5 +1,5 @@
 /**
- * N3b: research jobs on the native Claude driver through the real `cp_dispatch` of a pi parent (mock parent model),
+ * N3b: research jobs on the Claude CLI driver through the real `cp_dispatch` of a pi parent (mock parent model),
  * the installed `claude` against the loopback fake model, synthetic credentials in a temp HOME's settings file, a temp
  * CLAUDE_CONFIG_DIR per run and no user setting sources. P3a–P3j of the N3b task.
  */
@@ -222,7 +222,7 @@ test("J2 board: a native board job writes its board, survives a kill through cp_
 		{ kind: "tool_calls", calls: [{ name: "cp_revive", args: { job_id: job.id, confirm: true } }] },
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(job.id)) } }] },
 	], h.env)) as Tool[];
-	assert.match(text(revived.find((end) => end.toolName === "cp_revive")), /resumed its native Claude session/);
+	assert.match(text(revived.find((end) => end.toolName === "cp_revive")), /resumed its Claude CLI session/);
 	const events = readRunEvents(h.b.home, job.id);
 	assert.equal(events.filter((event) => event.type === "envelope_received").length, 1, JSON.stringify(events.filter((event) => event.type === "envelope_rejected")));
 	const record = readFleet(h.b.home).jobs.find((entry) => entry.job_id === job.id);
@@ -455,7 +455,7 @@ test("N4e window: a rejected window ends the run as provider_limit by name, and 
 		{ kind: "tool_calls", calls: [{ name: "cp_revive", args: { job_id: job.id, confirm: true } }] },
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(job.id)) } }] },
 	], h.env)) as Tool[];
-	assert.match(text(revived.find((end) => end.toolName === "cp_revive")), /resumed its native Claude session/);
+	assert.match(text(revived.find((end) => end.toolName === "cp_revive")), /resumed its Claude CLI session/);
 	const runs = readRunEvents(h.b.home, job.id).filter((event) => event.type === "native_run").map((event) => event.payload as { resumed?: boolean; report?: boolean });
 	assert.deepEqual(runs.map((entry) => [entry.resumed, entry.report]), [[false, false], [true, true]], JSON.stringify(runs));
 	assert.equal(readNativeSession(sessionFile).session_id, session, "the revive started a new session");
@@ -636,7 +636,7 @@ test("J6 freeze: /cp-drain freeze checkpoints a mid-turn native implementer, whi
 	};
 	const frozen = await drainLine("/cp-drain 120 freeze");
 	const head = git("rev-parse", "HEAD");
-	assert.ok(frozen.includes(`freeze: ${job.id} checkpointed (native claude at ${head})`), frozen);
+	assert.ok(frozen.includes(`freeze: ${job.id} checkpointed (Claude CLI at ${head})`), frozen);
 	assert.deepEqual([git("log", "-1", "--format=%s"), git("show", "HEAD:wip.txt"), git("status", "--porcelain")], ["WIP: freeze checkpoint", "half done", ""]);
 	const session = readNativeSession(join(h.b.home, paths.runDir(job.id), NATIVE_SESSION_FILE)).session_id;
 	await waitFor(() => readRunEvents(h.b.home, job.id).some((event) => event.type === "settled_without_report"), Boolean, { timeoutMs: 30_000, what: "the frozen worker settles idle" });
@@ -651,7 +651,7 @@ test("J6 freeze: /cp-drain freeze checkpoints a mid-turn native implementer, whi
 		{ kind: "tool_calls", calls: [{ name: "cp_revive", args: { job_id: job.id, confirm: true } }] },
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(job.id)) } }] },
 	], env)) as Tool[];
-	assert.match(text(ends.find((end) => end.toolName === "cp_revive")), /resumed its native Claude session/);
+	assert.match(text(ends.find((end) => end.toolName === "cp_revive")), /resumed its Claude CLI session/);
 	const filed = (JSON.parse(readFileSync(h.envelope(job.id), "utf8")) as { envelope: Envelope }).envelope;
 	assert.equal(filed.summary, "Resumed after the freeze.");
 	assert.equal(readNativeSession(join(h.b.home, paths.runDir(job.id), NATIVE_SESSION_FILE)).session_id, session, "the same session resumed");

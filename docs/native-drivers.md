@@ -302,7 +302,7 @@ default driver, and no shipped routing row names claude.
 
 **Selection and refusals.** `nativeSelectionRefusal` (`src/drivers/claude.ts`) runs from `resolveDriverRoute`
 (`src/dispatch-driver.ts`) when `Dispatcher` resolves the route, before preflight, the lease and any spawn. An explicit
-request refuses as `refused: <job> cannot run on the native claude driver: <reason>`, in this order:
+request refuses as `refused: <job> cannot run on the Claude CLI driver: <reason>`, in this order:
 
 | Condition | Refusal names |
 |---|---|
@@ -333,12 +333,12 @@ no longer test-only): every N3a gate is on and not optional.
 | Bounds | tool calls arrive as `tool_execution_start`; wall-clock and tool-call caps apply as for pi |
 | No report or crash | the worker exits non-zero; the job fails on the observed exit, never a guessed completion |
 | Teardown | stdin close aborts the run; the lease returns only after the observed child exit (`src/teardown.ts`) |
-| Ledger and dashboard | job detail shows `native claude` next to the model |
+| Ledger and dashboard | job detail shows `Claude CLI` next to the model |
 | Log transcript | each top-level assistant/user message (text, tool calls, tool result text, thinking text; never signatures, the init message or CLI config) is appended, flushed per message, as pi session lines to `state/sessions/native/<job>.jsonl` (mode 0600); each block is capped at 64 KiB with a visible truncation marker, a resumed run appends a "resumed" entry to the same file, and run status records it as `transcript_file`, which the dashboard job page's Transcript tab reads. It survives teardown; only the scratch dir is removed (`src/drivers/claude-transcript.ts`) |
 
 **Follow-ups.** N3c replaced the N3b "Refused until N3c" list; see [N3c follow-ups](#n3c-follow-ups).
 
-**Turn limit.** Each native claude process runs with an SDK turn cap of 500 (`NATIVE_MAX_TURNS` in
+**Turn limit.** Each Claude CLI process runs with an SDK turn cap of 500 (`NATIVE_MAX_TURNS` in
 `src/drivers/claude-worker.ts`); `CP_NATIVE_MAX_TURNS` overrides it with a positive integer, and any other value keeps
 500. Every `native_run` event records `max_turns`; a run the SDK ends with `error_max_turns` adds `stop: "max_turns"`
 and a stderr line. If the worker then exits without a report, the job fails as `turn_limit` ("Stopped at turn limit"),
@@ -389,7 +389,7 @@ the drain freeze and update hold, trust, the per-job budget on the recorded runn
 (switch, research role, concurrency 1, version floor). Every N3a gate stays on in a resumed run: `runClaudeSpike` is the
 only path, with the same Bash policy, R1, lockdown, managed hooks, env allow-list and fresh `CLAUDE_CONFIG_DIR`.
 
-| Follow-up | pi | native claude |
+| Follow-up | pi | Claude CLI |
 |---|---|---|
 | `cp_send`, worker idle | prompt into the live session | admission, then ONE new claude process resumes the session with the message; worker disposition `resuming` (admitted, process starting, not yet run), ack `native: resuming: …`; a resume that throws journals `native_resume_failed` and the worker exits non-zero |
 | `cp_send`, worker busy (auto/follow_up) | steer (auto) or follow_up | queued in `native-followups.jsonl`; ack `receipt: queued`, `native: queued until the current turn ends …` |
@@ -521,7 +521,7 @@ Viewer and parent-side only; nothing here changes selection.
   clears a remembered sign-in, lockdown or no-reset block.
 
 The opt-in soak (a claude row, the switch, what to watch, rollback) is in
-[`docs/routing-rollout.md`](routing-rollout.md#native-claude-research-soak-opt-in).
+[`docs/routing-rollout.md`](routing-rollout.md#claude-cli-research-soak-opt-in).
 
 ## Role contract (N4b)
 
@@ -618,7 +618,7 @@ live jobs. An explicit or locked native job is refused by name and never moved t
 started keep their driver.
 
 **The flip from Settings.** Dashboard Settings → *Model routing* → **Workers CLI** (`workers.driver`) does the flip for
-every worker type at once, through the audited settings path. Native Claude sets `driver: "claude"` on every rubric row
+every worker type at once, through the audited settings path. Claude CLI sets `driver: "claude"` on every rubric row
 and turns `claude_research`, `claude_ship` and `claude_review` on; pi deletes every row's `driver` (absent is pi) and
 deletes those three switches (absent is off). `max_concurrent` is never touched. The router reads the same files as
 before, so no routing code changed. Every rubric role has a native class (`nativeClassOf`), so no row stays pinned.

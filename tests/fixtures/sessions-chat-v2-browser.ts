@@ -310,7 +310,7 @@ try {
 	// (the live session is the only fake).
 	if (args.stage === "p3-quota") routes["/api/settings"] = { generated_at: GENERATED, enabled: true, running: true, supported: true, writable: true, reason: null,
 		snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS, audit: [], available_models: [], models_error: null, models_loading: false };
-	// CLI switches: the shipped rubric with small-ship on an openai model, so a Native Claude draft names a row to fix.
+	// CLI switches: the shipped rubric with small-ship on an openai model, so a Claude CLI draft names a row to fix.
 	if (args.stage === "settings-cli") {
 		const routing = JSON.parse(readFileSync(new URL("../../defaults/routing.default.json", import.meta.url), "utf8")) as { rubric: Array<Record<string, unknown>> };
 		for (const row of routing.rubric) if (row.id === "small-ship") row.model = "openai/gpt-6.1-sol";
@@ -691,7 +691,7 @@ try {
 		if (posts.length) throw new Error(`p3-quota sent ${posts.join(", ")}: the Job page only reads`);
 	}
 	if (SC) {
-		// Each capture drafts one CLI to Native Claude through the real select and shows its section; nothing is saved.
+		// Each capture drafts one CLI to the Claude CLI through the real select and shows its section; nothing is saved.
 		const draft = (select: string, section: string, ready: string): Step[] => [
 			[`(() => { const s = document.querySelector(${JSON.stringify(select)}); s.value = "claude"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`, ready],
 			[`document.querySelector(${JSON.stringify(section)}).scrollIntoView({ block: "start" })`, "true"], ["document.activeElement?.blur()", "true"]];

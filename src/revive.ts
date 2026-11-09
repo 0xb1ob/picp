@@ -689,6 +689,6 @@ export function formatReviveResult(result: ReviveResult): string {
 	const tool = result.interruptedTool ? ` (interrupted: ${result.interruptedTool.name})` : "";
 	const dirty = result.worktreeDirty ? " (worktree has uncommitted changes)" : "";
 	const failed = result.continuedFailure ? ` (continued from failed: ${result.continuedFailure.class})` : "";
-	const next = result.nativeResumed ? "resumed its native Claude session with picp's revive prompt" : "idle; send it a message to continue";
+	const next = result.nativeResumed ? "resumed its Claude CLI session with picp's revive prompt" : "idle; send it a message to continue";
 	return `${result.job_id} revived${failed}: pid ${result.pid}, session ${result.session_file}${tool}${dirty} \u2014 ${next}`;
 }

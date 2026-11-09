@@ -405,7 +405,7 @@ test("N4f: a kind-changing promotion of a native research worker is refused by n
 	for (const promotion of [{ task: "Now implement it." }, { taskFile: join(b.home, "ship.md") }]) {
 		await assert.rejects(b.sender.send({ jobId: b.jobId, message: "go", ...promotion }), (error: unknown) => {
 			assert.ok(error instanceof SendError);
-			assert.match(error.message, /^cp-aaa1 runs on the native claude driver as research: a kind-changing promotion .* is refused.*Nothing was sent\.$/);
+			assert.match(error.message, /^cp-aaa1 runs on the Claude CLI driver as research: a kind-changing promotion .* is refused.*Nothing was sent\.$/);
 			return true;
 		});
 	}

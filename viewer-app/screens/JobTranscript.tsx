@@ -16,7 +16,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 const ARGS = ["command", "path", "file_path", "url", "job_id", "action"];
 const head = (text: string) => text.split("\n").filter(l => l.trim()).slice(0, 3).join("\n").slice(0, 400);
 /** An edit's removed and added lines from its recorded old and new text (a line multiset diff); null if unrecorded.
- * pi records `oldText`/`newText`, native Claude `old_string`/`new_string`. */
+ * pi records `oldText`/`newText`, the Claude CLI `old_string`/`new_string`. */
 function editLines(args: Record<string, unknown>): {removed: string[]; added: string[]} | null {
  const edits: unknown[] = Array.isArray(args.edits) ? args.edits : [args];
  const removed: string[] = [], added: string[] = [];

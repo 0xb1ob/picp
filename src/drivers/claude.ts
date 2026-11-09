@@ -1,5 +1,5 @@
 /**
- * The native Claude research driver's dispatch side (N3b): which job may run on it, and the spawn that starts
+ * The Claude CLI research driver's dispatch side (N3b): which job may run on it, and the spawn that starts
  * src/drivers/claude-worker.ts in place of pi. Every refusal names its reason and happens before any process starts.
  */
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -92,7 +92,7 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 /** Throws the named refusal unless every N3b condition holds (explicit requests, resumes and revives). */
 export async function assertNativeSelection(input: NativeSelection): Promise<void> {
 	const refusal = await nativeSelectionRefusal(input);
-	if (refusal) throw new NativeDriverError(`refused: ${input.jobId} cannot run on the native ${input.driver} driver: ${refusal.why}`, refusal.category);
+	if (refusal) throw new NativeDriverError(`refused: ${input.jobId} cannot run on the Claude CLI driver: ${refusal.why}`, refusal.category);
 }
 
 /** The installed CLI's version (S2 invalidation iii), or undefined when it cannot be resolved. */
@@ -133,7 +133,7 @@ export const isNativeModel = (model: string): boolean => NATIVE_MODEL.test(model
 export function nativeModelId(model: string): string {
 	const id = NATIVE_MODEL.exec(model)?.[1];
 	if (id === undefined) {
-		throw new NativeDriverError(`the native claude driver runs an explicit anthropic/claude-… model, and ${model} is not one: fix the rubric row or the dispatch model`, "model");
+		throw new NativeDriverError(`the Claude CLI driver runs an explicit anthropic/claude-… model, and ${model} is not one: fix the rubric row or the dispatch model`, "model");
 	}
 	return id;
 }
@@ -188,7 +188,7 @@ export function nativeAddendum(kind: string | undefined, delivery: string | unde
  */
 export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env" | "shutdownGraceMs"> {
 	const runDir = env.CP_RUN_DIR;
-	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
+	if (!runDir) throw new NativeDriverError("the Claude CLI worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
 	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env.CP_KIND, env.CP_DELIVERY, env.CP_ROLE)}\n`, { mode: 0o600 });
@@ -216,7 +216,7 @@ export function nativeParentSpawnOptions(options: { home: string; sessionFile: s
 /** Refuses a routed level with no native effort; absent (the CLI default), `off` and low…max pass. */
 export function assertNativeEffort(level: string | undefined): asserts level is (typeof NATIVE_EFFORTS)[number] | "off" | "" | undefined {
 	if (level === undefined || level === "" || level === "off" || (NATIVE_EFFORTS as readonly string[]).includes(level)) return;
-	throw new NativeDriverError(`thinking=${level} has no native claude effort; route off, low, medium, high, xhigh or max`, "effort");
+	throw new NativeDriverError(`thinking=${level} has no Claude CLI effort; route off, low, medium, high, xhigh or max`, "effort");
 }
 
 /** The routed thinking level for the native worker's SDK options; absent leaves the CLI default (recorded as such). */

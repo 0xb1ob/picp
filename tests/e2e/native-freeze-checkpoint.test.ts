@@ -37,7 +37,7 @@ test("J6 freeze: a busy native implementer is checkpointed, a busy pi implemente
 	assert.equal(drain.start(60, { reason: "freeze" }).state, "draining");
 	const lines = await drain.freeze();
 	assert.deepEqual([checkpointed, steered], [["cp-native"], ["cp-pi"]], lines.join("\n"));
-	assert.deepEqual(lines, ["  freeze: cp-native checkpointed (native claude at abc123)", "  freeze: cp-pi steered (delivered)"]);
+	assert.deepEqual(lines, ["  freeze: cp-native checkpointed (Claude CLI at abc123)", "  freeze: cp-pi steered (delivered)"]);
 });
 
 // Scenario: a refused checkpoint reply is named on the drain line
@@ -94,7 +94,7 @@ test("J6 throw: a checkpoint pending when the turn throws is answered with the e
 	const worker = spawnSync(process.execPath, [WORKER], { input, env, encoding: "utf8", timeout: 60_000 });
 	const replies = worker.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Line).filter((line) => line.type === "response");
 	assert.deepEqual(replies.map((line) => [line.id, line.success]), [[1, true], [2, false]], worker.stdout + worker.stderr);
-	assert.match(replies[1]?.error ?? "", /^the turn failed before a checkpoint: native claude worker started without CP_HOME/);
+	assert.match(replies[1]?.error ?? "", /^the turn failed before a checkpoint: Claude CLI worker started without CP_HOME/);
 	assert.equal(worker.status, 1, worker.stderr);
 });
 

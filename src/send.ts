@@ -213,12 +213,12 @@ export class Sender {
 		if (native && request.mode === "steer") throw new SendError(nativeDoorRefusal(request.jobId, "steer"));
 		// A native worker's tool set, policy and env are fixed at spawn: a research worker never takes a ship brief.
 		if (native && record.kind === "research" && (request.task !== undefined || request.taskFile !== undefined)) {
-			throw new SendError(`${request.jobId} runs on the native claude driver as research: a kind-changing promotion (a new brief via task/task_file) is refused, since its tools and policy were fixed at spawn. Tear it down and dispatch a ship job. Nothing was sent.`);
+			throw new SendError(`${request.jobId} runs on the Claude CLI driver as research: a kind-changing promotion (a new brief via task/task_file) is refused, since its tools and policy were fixed at spawn. Tear it down and dispatch a ship job. Nothing was sent.`);
 		}
 		if (record.phase === "failed") {
 			throw new SendError(
 				native
-					? `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); cp_revive ${request.jobId} resumes its native Claude session (continue_failed runs as that same plain revive).`
+					? `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); cp_revive ${request.jobId} resumes its Claude CLI session (continue_failed runs as that same plain revive).`
 					: `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); a brief does not revive it. Continue it on ` +
 						`its original lease: cp_revive ${request.jobId} continue_failed:true (plan, then confirm), then cp_send — never a ` +
 						"takeover job, a new branch or a force push.",

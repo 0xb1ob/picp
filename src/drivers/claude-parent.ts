@@ -1,5 +1,5 @@
 /**
- * The native Claude parent's process (driver `claude`): it runs extensions/command-post on a headless host, serves its
+ * The Claude CLI parent's process (driver `claude`): it runs extensions/command-post on a headless host, serves its
  * cp_* tools over an in-process MCP server, takes one SDK `query()` per turn resumed by the recorded session id, and
  * speaks the pi RPC lines and events the bridge reads (tests/fixtures/fake-parent.mjs is the protocol reference).
  */
@@ -46,7 +46,7 @@ const NATIVE_PARENT_ADDENDUM = [
 
 const write = (record: Record<string, unknown>): void => void process.stdout.write(`${JSON.stringify(record)}\n`);
 const fail = (message: string): never => {
-	process.stderr.write(`[native claude parent] refused to start: ${message}\n`);
+	process.stderr.write(`[claude cli parent] refused to start: ${message}\n`);
 	process.exit(2);
 };
 
@@ -156,7 +156,7 @@ function pump(): void {
 	running = runTurn(queue.splice(0))
 		.catch((error: unknown) => {
 			const message = `the native parent's turn failed outside the query: ${(error as Error).message}`;
-			process.stderr.write(`[native claude parent] ${message}\n`);
+			process.stderr.write(`[claude cli parent] ${message}\n`);
 			// Never a hang: the bridge still sees the run fail and settle.
 			if (!stopping) for (const line of [{ type: "message_end", message: errorAssistant(message) }, { type: "agent_settled" }]) write(line);
 		})
@@ -318,7 +318,7 @@ async function readUsage(q: Query): Promise<ContextUsage | undefined> {
 			return usage;
 		}
 	} catch (error) {
-		process.stderr.write(`[native claude parent] context usage unread: ${(error as Error).message}\n`);
+		process.stderr.write(`[claude cli parent] context usage unread: ${(error as Error).message}\n`);
 	}
 	return undefined;
 }
@@ -355,7 +355,7 @@ function systemPrompt(): string {
 		try {
 			return get();
 		} catch (error) {
-			process.stderr.write(`[native claude parent] ${name} unavailable this turn: ${(error as Error).message}\n`);
+			process.stderr.write(`[claude cli parent] ${name} unavailable this turn: ${(error as Error).message}\n`);
 			return undefined;
 		}
 	};
@@ -462,7 +462,7 @@ function reapOrphan(): void {
 		return;
 	}
 	if (typeof recorded.pid === "number" && recorded.start !== undefined && procStart(recorded.pid) === recorded.start) {
-		process.stderr.write(`[native claude parent] killed claude pid ${recorded.pid}, orphaned by the previous parent process\n`);
+		process.stderr.write(`[claude cli parent] killed claude pid ${recorded.pid}, orphaned by the previous parent process\n`);
 		process.kill(recorded.pid, "SIGKILL");
 	}
 	rmSync(childFile(), { force: true });
@@ -703,7 +703,7 @@ function command(line: string): void {
 		return void between("compact", () => compact(instructions)).then((data) => reply({ success: true, data }), failed);
 	}
 	if (type === "new_session") return void between("rotate", rotate).then((done) => reply({ success: true, data: { cancelled: !done } }), failed);
-	reply({ success: false, error: `the native claude parent does not take ${type} yet` });
+	reply({ success: false, error: `the Claude CLI parent does not take ${type} yet` });
 }
 
 /** Stdin end or SIGTERM: the live query is aborted, then pi's session_shutdown releases the lock and the workers. */

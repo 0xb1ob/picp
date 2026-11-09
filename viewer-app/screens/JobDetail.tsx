@@ -18,7 +18,7 @@ function ModelFact({job}: {job: ViewerJob}) {
  const id = job.script_path ?? job.model;
  if (!id) return <>not recorded</>;
  const provider = !job.script_path && id.includes("/") ? id.slice(0,id.lastIndexOf("/")) : null;
- return job.script_path ? <code>{job.script_path}</code> : <><ModelName job={job}/>{provider && <span class="job-provider">{provider}</span>}{job.driver && <span class="job-provider">native {job.driver}</span>}</>;
+ return job.script_path ? <code>{job.script_path}</code> : <><ModelName job={job}/>{provider && <span class="job-provider">{provider}</span>}{job.driver && <span class="job-provider">{job.driver === "claude" ? "Claude CLI" : `native ${job.driver}`}</span>}</>;
 }
 
 function reviewFact(job: ViewerJob): string {

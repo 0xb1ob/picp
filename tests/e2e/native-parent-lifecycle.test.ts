@@ -1,5 +1,5 @@
 /**
- * The native-Claude parent's lifecycle (S2a) through the real `CpBridge` and src/drivers/claude-parent.ts, with
+ * The Claude CLI parent's lifecycle (S2a) through the real `CpBridge` and src/drivers/claude-parent.ts, with
  * tests/fixtures/fake-claude.ts as `claude` on PATH and the claude mock provider as the model: compact, rotate,
  * model and thinking switches, and context stats across a restart. No network, no login, no installed Claude Code.
  */
@@ -149,11 +149,11 @@ test("native parent lifecycle: set_model and set_thinking_level apply on the nex
 	assert.ok(p.spawns().at(-1)?.includes("--model=claude-picp-next"));
 	assert.ok(p.spawns().at(-1)?.includes("--effort=high"), String(p.spawns().at(-1)));
 	assert.deepEqual(p.calls().at(-1)?.body.output_config, { effort: "high" });
-	await assert.rejects(p.bridge.model("mock/parent"), /set_model mock\/parent rejected: the native claude driver runs an explicit anthropic\/claude-… model, and mock\/parent is not one/);
+	await assert.rejects(p.bridge.model("mock/parent"), /set_model mock\/parent rejected: the Claude CLI driver runs an explicit anthropic\/claude-… model, and mock\/parent is not one/);
 	settings("minimal");
 	await p.bridge.applySettings();
 	const refused = await waitFor(() => p.relays.find((relay) => relay.kind === "error" && relay.text.includes("set_thinking_level minimal rejected")), Boolean, { timeoutMs: 5_000, what: "the thinking refusal relay" });
-	assert.match(refused?.text ?? "", /thinking=minimal has no native claude effort/);
+	assert.match(refused?.text ?? "", /thinking=minimal has no Claude CLI effort/);
 	assert.equal(p.bridge.status().model, "anthropic/claude-picp-next");
 	assert.equal(await p.send("turn three"), "three");
 	assert.equal(p.calls().at(-1)?.body.model, "claude-picp-next");
