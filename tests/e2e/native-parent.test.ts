@@ -112,7 +112,7 @@ test("native parent: driver claude refuses a non-Claude model and an unknown dri
 
 // Scenario: Given an operator session whose pi registry does not know anthropic/claude-picp-fake, When cp_parent start
 // names it for a default home, Then the pi probe refuses it as today; for a driver "claude" home the same model starts
-// the native entry without the probe, And cp_parent model skips the probe there too, so the entry itself answers.
+// the native entry without the probe, And cp_parent model skips the probe there too, and the entry's set_model takes it.
 test("native parent: cp_parent start accepts an anthropic/claude model on driver claude without the pi probe", { skip: LINUX, timeout: 90_000 }, async (t) => {
 	const native = scratchHome({ driver: "claude" });
 	const plain = scratchHome();
@@ -140,7 +140,7 @@ test("native parent: cp_parent start accepts an anthropic/claude model on driver
 	entry = Number(pid);
 	assert.deepEqual(cmdline(entry).slice(0, 2), [process.execPath, ENTRY]);
 	assert.doesNotMatch(results[2]!, /not available/, "cp_parent model on a claude home skips pi's registry probe");
-	assert.match(results[2]!, /set_model anthropic\/claude-picp-fake rejected: the native claude parent does not take set_model yet/);
+	assert.match(results[2]!, /\{\\"model\\":\\"anthropic\/claude-picp-fake\\"\}/, "the entry's set_model takes it (S2a)");
 });
 
 const isModelCall = (request: RecordedClaudeRequest) => request.path.split("?")[0] === "/v1/messages" && Array.isArray(request.body.tools) && (request.body.tools as unknown[]).length > 0;

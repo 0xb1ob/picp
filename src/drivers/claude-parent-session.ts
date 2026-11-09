@@ -12,7 +12,12 @@ import type { SessionEntry } from "../worker-process.ts";
 type RecordLine =
 	| { type: "record"; driver: "claude"; created_at: string }
 	| { type: "session"; session_id: string; at: string }
-	| { type: "operator_text"; id: string; text: string; at: string };
+	| { type: "operator_text"; id: string; text: string; at: string }
+	| { type: "thinking"; level: string; at: string }
+	| ({ type: "usage"; at: string } & ContextUsage);
+
+/** `get_session_stats` `contextUsage`: the last `getContextUsage()` reading, null tokens before any. */
+export type ContextUsage = { tokens: number | null; contextWindow?: number; percent?: number };
 
 /** Append-only, so a death mid-write loses at most its own last line; an unparsable line is skipped. */
 export class ParentRecord {
@@ -58,6 +63,27 @@ export class ParentRecord {
 
 	operatorTexts(): string[] {
 		return this.lines().flatMap((line) => (line.type === "operator_text" ? [line.text] : []));
+	}
+
+	/** The thinking level `set_thinking_level` last applied (a relaunch keeps it, as pi's session does). */
+	thinking(): string | undefined {
+		return this.lines().reduce<string | undefined>((level, line) => (line.type === "thinking" ? line.level : level), undefined);
+	}
+
+	setThinking(level: string): void {
+		this.#append({ type: "thinking", level, at: new Date().toISOString() });
+	}
+
+	/** The last context reading, so `get_session_stats` after a relaunch answers before the first turn. */
+	usage(): ContextUsage {
+		const last = this.lines().filter((line) => line.type === "usage").at(-1);
+		if (last?.type !== "usage") return { tokens: null };
+		const { type: _type, at: _at, ...usage } = last;
+		return usage;
+	}
+
+	setUsage(usage: ContextUsage): void {
+		this.#append({ type: "usage", ...usage, at: new Date().toISOString() });
 	}
 
 	/** pi's `get_entries` rows for the operator texts; `since` is an entry id, and an unknown one is refused as pi does. */
