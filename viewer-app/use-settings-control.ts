@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { readControl } from "./control.ts";
+import { type ControlStatus, readControl } from "./control.ts";
 import { type Drafts, readSettings, type RestoreSelector, type SettingsStatus, type SettingsView, writeSettings } from "./settings-control.ts";
 import type { SettingKey } from "../src/contracts.ts";
 import type { ModelApplyRow } from "../src/viewer/api-types.ts";
@@ -26,6 +26,8 @@ function applyPending(rows: ModelApplyRow[], watch: {current: ApplyWatch}): bool
 export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, init)): SettingsView {
  const [status, setStatus] = useState<SettingsStatus | null>(null);
  const [token, setToken] = useState<string | null>(null);
+ const [control, setControl] = useState<ControlStatus | null>(null);
+ const [restart, setRestart] = useState(false);
  const [writes, setWrites] = useState(0);
  const pending = useRef(0), revision = useRef<string | undefined>(undefined), queue = useRef<Promise<unknown>>(Promise.resolve());
  const [notice, setNotice] = useState<SettingsView["notice"]>(null);
@@ -42,6 +44,7 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
    if (!("error" in settings) && pending.current === 0) revision.current = settings.snapshot?.revision;
    if (!("error" in settings)) lastAt.current = settings.model_apply?.at(-1)?.at ?? "";
    setToken("error" in control || !control.running ? null : control.token ?? null);
+   setControl(control);
    // The server answers at once while its first `pi --list-models` run is going: ask again shortly (bounded: that run ends in at most 8 s).
    if (!("error" in settings) && settings.models_loading) retry = setTimeout(() => setGeneration(value => value + 1), 2000);
    else if (!("error" in settings) && applyPending(settings.model_apply ?? [], watch)) retry = setTimeout(() => setGeneration(value => value + 1), APPLY_POLL_MS);
@@ -64,6 +67,7 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
   }
   if (answer.state === "applied" || answer.state === "unchanged") {
    setNotice({kind: "ok", text: answer.state === "applied" ? `Saved · ${answer.changes?.length ?? 0} change${answer.changes?.length === 1 ? "" : "s"}${answer.audit_warning ? ` · ${answer.audit_warning}` : ""}` : "Nothing to change", errors: []});
+   if (answer.restart === "parent") setRestart(true);
    if (answer.state === "applied" && answer.changes?.some(change => WATCHED.includes(change.key))) watch.current = {after: lastAt.current, since: Date.now()};
    setGeneration(value => value + 1);
    return true;
@@ -79,5 +83,5 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
   queue.current = run.catch(() => false);
   return run;
  };
- return {status, token, busy: writes > 0, notice, save: changes => write({changes}), restore: write};
+ return {status, token, busy: writes > 0, notice, control, restart, save: changes => write({changes}), restore: write};
 }

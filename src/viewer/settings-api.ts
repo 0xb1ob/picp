@@ -140,6 +140,7 @@ export async function handleSettingsStatus(req: IncomingMessage, options: Contro
 			catalog: Array.isArray(result?.catalog) ? result.catalog : null,
 			audit: Array.isArray(result?.audit) ? result.audit : [],
 			available_models: models.models, models_error: models.error, models_loading: models.loading, model_apply: modelApplyTail(options.stateDir),
+			drivers: isObject(result?.drivers) ? (result.drivers as SettingsResponse["drivers"]) : null,
 		} satisfies SettingsResponse,
 	};
 }

@@ -36,7 +36,7 @@ const SWITCH_WHERE: Record<NativeClass, string> = {
 	claude_ship: "data/native.json claude_ship",
 	claude_review: "data/native.json claude_review",
 };
-const NATIVE_MODEL = /^anthropic\/(claude-[A-Za-z0-9][A-Za-z0-9._[\]-]*)$/;
+export const NATIVE_MODEL = /^anthropic\/(claude-[A-Za-z0-9][A-Za-z0-9._[\]-]*)$/;
 /** Routed levels the SDK serves as `effort`; `off` disables thinking and `minimal` has no native equivalent. */
 export const NATIVE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 

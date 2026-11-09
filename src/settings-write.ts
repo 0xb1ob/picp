@@ -34,11 +34,15 @@ import {
 	validate,
 	validateSettingValue,
 	normalizeLegacyRoles,
+	type RoutingConfig,
 	RoutingConfigSchema,
+	type RoutingRule,
 } from "./contracts.ts";
+import { isNativeModel, NATIVE_EFFORTS } from "./drivers/claude.ts";
 import { PACKAGE_ROOT } from "./home.ts";
 import { atomicWriteText, durableAppend } from "./json-store.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
+import { deniedFor, isAllowed } from "./routing.ts";
 import { readSettings } from "./settings.ts";
 import { acquireSettingsLock } from "./settings-lock.ts";
 
@@ -73,6 +77,7 @@ export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "de
 	"models.operator": "delete",
 	"models.parent_thinking": "delete",
 	"models.operator_thinking": "delete",
+	"models.parent_driver": "delete",
 	"review.timeout_ms": "delete",
 	"review.quality_verify": "delete",
 	"review.quality_completeness": "delete",
@@ -86,6 +91,7 @@ export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "de
 	"viewer.strict_host": "delete",
 	"viewer.public_url": "delete",
 	"workers.native_claude_research": "delete",
+	"workers.driver": "default",
 });
 
 /** What cp-install writes to `data/update.json` (src/service/install.ts step 7). */
@@ -129,6 +135,8 @@ export interface SettingsApplyResult {
 	changes?: PlannedChange[];
 	audit_warning?: string;
 	audit?: string;
+	/** A planned or applied `models.parent_driver` change: it takes effect only when the parent restarts. */
+	restart?: "parent";
 }
 
 type Change = { key: SettingKey; file_key: string; action: "set" | "delete"; old: SettingValue; old_source: string; new: SettingValue; expected: SettingValue };
@@ -308,6 +316,64 @@ function installedHome(home: string): boolean {
 	}
 }
 
+/** The data/native.json switches the workers CLI turns on together (claude) or deletes (pi: absent is off). */
+const NATIVE_SWITCHES = ["claude_research", "claude_ship", "claude_review"] as const;
+/** What a claude parent or row may run: off, plus the levels the SDK serves as `effort` (`assertNativeEffort`). */
+const CLAUDE_EFFORTS: readonly string[] = ["off", ...NATIVE_EFFORTS];
+const PARENT_NATIVE_KEYS: readonly SettingKey[] = ["models.parent_driver", "models.parent", "models.parent_thinking"];
+
+/** The workers CLI a request asks for: the set value, or pi (the shipped rows name no driver) on restore. */
+const workersDriver = (request: SettingsWriteRequest): string => (request.mode === "set" ? String(request.changes["workers.driver"]) : "pi");
+
+/** Every rubric row runs `driver`: claude is stored, pi deletes the key (absent is pi). True when a row changed. */
+function setRowDrivers(doc: Record<string, unknown>, driver: string): boolean {
+	let changed = false;
+	for (const row of Array.isArray(doc.rubric) ? doc.rubric.filter(isObject) : []) {
+		if (driver === "claude" ? row.driver === "claude" : !("driver" in row)) continue;
+		if (driver === "claude") row.driver = "claude";
+		else delete row.driver;
+		changed = true;
+	}
+	return changed;
+}
+
+function setNativeSwitches(doc: Record<string, unknown>, driver: string): boolean {
+	let changed = false;
+	for (const name of NATIVE_SWITCHES) {
+		if (driver === "claude" ? doc[name] === true : !(name in doc)) continue;
+		if (driver === "claude") doc[name] = true;
+		else delete doc[name];
+		changed = true;
+	}
+	return changed;
+}
+
+/** No claude row on a model or effort native Claude refuses, and no newly picked model routing refuses. */
+function refuseRoutingRows(config: RoutingConfig, prior: Record<string, unknown>): void {
+	const was = new Map((Array.isArray(prior.rubric) ? prior.rubric : []).filter(isObject).map((row) => [row.id, row.model]));
+	const errors = config.rubric.flatMap((row: RoutingRule) => {
+		const out: string[] = [];
+		if (row.driver === "claude" && !isNativeModel(row.model)) out.push(`row ${row.id}: native Claude runs only an anthropic/claude-… model, not ${row.model}; pick one for this row`);
+		if (row.driver === "claude" && row.thinking !== undefined && !CLAUDE_EFFORTS.includes(row.thinking)) out.push(`row ${row.id}: thinking ${row.thinking} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);
+		if (was.get(row.id) === row.model) return out;
+		if (!isAllowed(config, row.model)) out.push(`row ${row.id}: models.allow does not permit ${row.model}, so routing would refuse it`);
+		const pattern = deniedFor(config, row.role, row.model);
+		if (pattern !== undefined) out.push(`row ${row.id}: deny_by_role.${row.role} matches ${pattern} for ${row.model}`);
+		return out;
+	});
+	if (errors.length) throw new Refusal(400, "data/routing.json would name a model its driver or allowlist refuses", errors);
+}
+
+/** The `NativeDriverError` rule before the write: a claude parent runs a Claude model and a Claude effort. */
+function refuseNativeParent(doc: Record<string, unknown>, env: NodeJS.ProcessEnv): void {
+	if (doc.driver !== "claude") return;
+	const model = doc.model !== undefined ? doc.model : env.CP_PARENT_MODEL?.trim() || undefined;
+	const errors: string[] = [];
+	if (model !== undefined && !(typeof model === "string" && isNativeModel(model))) errors.push(`models.parent: the claude parent runs only an anthropic/claude-… model, not ${JSON.stringify(model)}`);
+	if (doc.thinking !== undefined && !(typeof doc.thinking === "string" && CLAUDE_EFFORTS.includes(doc.thinking))) errors.push(`models.parent_thinking: ${JSON.stringify(doc.thinking)} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);
+	if (errors.length) throw new Refusal(400, "the native Claude parent needs an anthropic/claude-… model and a Claude effort", errors);
+}
+
 /** The keys a request names, checked: unknown 400, not editable 403. Section/all skip non-editable fields. */
 function resolveKeys(request: SettingsWriteRequest): SettingKey[] {
 	if (request.mode === "restore" && request.keys === undefined) {
@@ -325,6 +391,9 @@ function resolveKeys(request: SettingsWriteRequest): SettingKey[] {
 			return checked.ok ? [] : checked.errors.map((error) => `${key}: ${error}`);
 		});
 		if (errors.length) throw new Refusal(400, "invalid setting value", errors);
+		if ("workers.driver" in request.changes && "workers.native_claude_research" in request.changes) {
+			throw new Refusal(400, "workers.driver sets workers.native_claude_research itself; send one of them");
+		}
 	}
 	return [...new Set(keys)] as SettingKey[];
 }
@@ -337,8 +406,10 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 	const writes: Write[] = [];
 	let installed: boolean | undefined;
 	for (const owner of SETTING_FILE_OWNERS) {
-		const fields = keys.map((key) => FIELD.get(key) as SettingField).filter((field) => field.owner === owner);
-		if (!fields.length) continue;
+		// workers.driver goes after a rubric edit on its own owner, and its three switches ride the native owner.
+		const fields = keys.map((key) => FIELD.get(key) as SettingField).filter((field) => field.owner === owner).sort((a, b) => Number(a.key === "workers.driver") - Number(b.key === "workers.driver"));
+		const switches = owner === "native" && keys.includes("workers.driver");
+		if (!fields.length && !switches) continue;
 		const status = snapshot.owners.find((row) => row.owner === owner);
 		if (!status) throw new Refusal(500, `no snapshot row for ${owner}`);
 		if (status.state === "invalid" || status.state === "unstable") throw new Refusal(409, `${status.path} is ${status.state}${status.error ? ` (${status.error})` : ""}; fix ${status.path} by hand first`);
@@ -370,6 +441,15 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			const fileKey = field.file_key as string;
 			const view = snapshot.fields.find((row) => row.key === field.key);
 			const old = { old: view?.value ?? null, old_source: view?.source ?? "none" };
+			if (field.key === "workers.driver") {
+				const driver = workersDriver(request);
+				if (driver === "claude" && !(Array.isArray(doc.rubric) && doc.rubric.length)) throw new Refusal(409, `${status.path} has no rubric rows to run on native Claude`);
+				if (!setRowDrivers(doc, driver)) continue;
+				changes.push({ key: field.key, file_key: "rubric[].driver", action: driver === "claude" ? "set" : "delete", ...old, new: driver, expected: driver });
+				// A rubric edit in the same write reads back with the new drivers.
+				for (const change of changes) if (change.key === "models.rubric") change.expected = normalizeLegacyRoles(clone(doc.rubric)) as SettingValue;
+				continue;
+			}
 			const present = hasAt(doc, fileKey);
 			let action: "set" | "delete" = "set";
 			let value: SettingValue;
@@ -398,11 +478,20 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			}
 			changes.push({ key: field.key, file_key: fileKey, action, ...old, new: value, expected: readBackValue(field, action, value, context.env) });
 		}
+		if (switches) {
+			const driver = workersDriver(request);
+			const view = snapshot.fields.find((row) => row.key === "workers.driver");
+			if (setNativeSwitches(doc, driver)) {
+				changes.push({ key: "workers.driver", file_key: NATIVE_SWITCHES.join(", "), action: driver === "claude" ? "set" : "delete", old: view?.value ?? null, old_source: view?.source ?? "none", new: driver, expected: driver });
+			}
+		}
 		const schema = OWNER_SCHEMA[owner];
 		if (schema !== undefined) {
 			const checked = validate(schema, owner === "routing" ? normalizeLegacyRoles(clone(doc)) : doc);
 			if (!checked.ok) throw new Refusal(400, `${status.path} would violate its owner schema`, checked.errors);
 		}
+		if (owner === "routing" && changes.length) refuseRoutingRows(normalizeLegacyRoles(clone(doc)) as unknown as RoutingConfig, JSON.parse(before) as Record<string, unknown>);
+		if (owner === "parent" && changes.some((change) => PARENT_NATIVE_KEYS.includes(change.key))) refuseNativeParent(doc, context.env);
 		if (!changes.length || JSON.stringify(doc) === before) continue;
 		let mode: number | undefined;
 		try {
@@ -416,12 +505,13 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 }
 
 const publicChanges = (writes: Write[]): PlannedChange[] => writes.flatMap((write) => write.changes.map(({ expected: _expected, ...change }) => change));
+const restartFor = (changes: PlannedChange[]): Pick<SettingsApplyResult, "restart"> => (changes.some((change) => change.key === "models.parent_driver") ? { restart: "parent" } : {});
 
 /** The same planner a dry run and a real apply use: `{state: "planned"}` or the refusal, nothing written. */
 export function planSettings(home: string, snapshot: SettingsSnapshot, request: SettingsWriteRequest, context: PlanContext = { env: process.env, seams: {} }): SettingsApplyResult {
 	try {
-		const writes = planWrites(home, snapshot, request, context);
-		return { status: 200, state: "planned", revision: snapshot.revision, changes: publicChanges(writes) };
+		const changes = publicChanges(planWrites(home, snapshot, request, context));
+		return { status: 200, state: "planned", revision: snapshot.revision, changes, ...restartFor(changes) };
 	} catch (error) {
 		if (error instanceof Refusal) return { status: error.status, state: "refused", error: redact(error.message, home), ...(error.errors ? { errors: error.errors } : {}) };
 		throw error;
@@ -592,7 +682,8 @@ export function applySettings(home: string, input: SettingsApplyInput, seams: Se
 		} catch (error) {
 			audit_warning = `applied, but the audit line is unwritten (${redact(message(error), home)}); the next settings write records it as recovered`;
 		}
-		return { status: 200, state: "applied", revision: after.revision, snapshot: after, changes: publicChanges(writes), ...(audit_warning ? { audit_warning } : {}) };
+		const changes = publicChanges(writes);
+		return { status: 200, state: "applied", revision: after.revision, snapshot: after, changes, ...restartFor(changes), ...(audit_warning ? { audit_warning } : {}) };
 	} finally {
 		lock.release();
 	}

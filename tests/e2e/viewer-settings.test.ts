@@ -308,7 +308,7 @@ test("P20-settings-relay: the session's outcomes pass through with no viewer lin
 	const status = await view.get("/api/settings");
 	assert.equal(status.status, 200);
 	assert.deepEqual([status.body.enabled, status.body.running, status.body.supported, status.body.writable], [true, true, true, true]);
-	assert.equal((status.body.catalog as unknown[]).length, 36);
+	assert.equal((status.body.catalog as unknown[]).length, 38);
 	const native = (status.body.catalog as { key: string; help: string }[]).find((field) => field.key === "workers.native_claude_research")?.help ?? "";
 	for (const said of [/only when a routing rule .*driver "claude" and this switch is on/, /Off stops new native jobs and refuses resumes and revives .*never move to pi/, /off then on clears a remembered sign-in, lockdown or no-reset limit block/]) assert.match(native, said);
 	assert.ok("available_models" in status.body && "models_error" in status.body, "the model list rides the read: a list or a note, never missing");
@@ -369,7 +369,7 @@ test("P20-model-list: GET /api/settings never waits for pi --list-models; one sh
 	const models = (body: Line) => [body.available_models, body.models_error, body.models_loading];
 	stub.hold();
 	const first = await read();
-	assert.deepEqual([...models(first), (first.catalog as unknown[]).length], [null, null, true, 36], "a listing that never returns answers loading at once");
+	assert.deepEqual([...models(first), (first.catalog as unknown[]).length], [null, null, true, 38], "a listing that never returns answers loading at once");
 	assert.deepEqual(models(await read()), [null, null, true]);
 	await until(stub.calls, (n) => n === 1, "the one background run");
 	assert.equal(stub.calls(), 1, "repeat reads share the one background run");
@@ -502,8 +502,8 @@ test("P20-settings-rubric: rubric edits post the whole row list; restore bodies 
 	await ui.press(ui.section("Grant defaults"), "Restore defaults");
 	await until(() => ui.posts().length, (n) => n === 4, "three restores");
 	assert.deepEqual(ui.posts().slice(1).map((p) => [p.path, p.json.keys ?? p.json.section]), [
-		["/api/settings/restore", ["models.rubric"]],
-		["/api/settings/restore", ["models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]],
+		["/api/settings/restore", ["models.rubric", "workers.driver"]],
+		["/api/settings/restore", ["models.parent_driver", "models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]],
 		["/api/settings/restore", "grants"],
 	]);
 	const grants = ui.posts()[3]!;
@@ -540,8 +540,8 @@ test("P20-settings-restore-race: Restore in other sections while one is in fligh
 	await until(() => restores().length, (n) => n === 3, "three restores after the held one");
 	await until(() => restoreButton("Grant defaults").hasAttribute("disabled"), (busy) => !busy, "the last section settles");
 	assert.deepEqual(restores().map((p) => [p.status, p.json.keys ?? p.json.section]), [
-		[200, ["models.rubric"]],
-		[200, ["models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]],
+		[200, ["models.rubric", "workers.driver"]],
+		[200, ["models.parent_driver", "models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]],
 		[200, "grants"],
 	], "each section once, in click order, none refused as stale");
 	assert.equal(ui.posts().length, 3, "no duplicate POST");
@@ -688,7 +688,7 @@ test("P20-settings-unset: picking (unset) saves null", { timeout: 120_000 }, asy
 test("P20-settings-thinking: parent and operator thinking selects save to their owner files, badge the source, unset and restore", { timeout: 120_000 }, async (t) => {
 	const ui = await settingsTab(t);
 	const people = ui.section("Parent and operator models");
-	assert.deepEqual([...people.querySelectorAll("select[id^=setting-models-]")].map((s) => s.id), ["setting-models-parent", "setting-models-parent_thinking", "setting-models-operator", "setting-models-operator_thinking"]);
+	assert.deepEqual([...people.querySelectorAll("select[id^=setting-models-]")].map((s) => s.id), ["setting-models-parent_driver", "setting-models-parent", "setting-models-parent_thinking", "setting-models-operator", "setting-models-operator_thinking"]);
 	const parent = people.querySelector("#setting-models-parent_thinking")!;
 	const operator = people.querySelector("#setting-models-operator_thinking")!;
 	const badge = (select: Element) => select.parentElement!.querySelector(".settings-meta")?.textContent;
@@ -713,7 +713,7 @@ test("P20-settings-thinking: parent and operator thinking selects save to their 
 	await until(() => ownerJson("parent.json"), (doc) => !("thinking" in doc), "the unset write");
 	await ui.press(people, "Restore defaults");
 	await until(() => ui.posts().length, (n) => n === 3, "the restore post");
-	assert.deepEqual(ui.posts()[2]!.json.keys, ["models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]);
+	assert.deepEqual(ui.posts()[2]!.json.keys, ["models.parent_driver", "models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]);
 	await until(() => ownerJson("operator.json"), (doc) => !("thinking" in doc), "the restore");
 });
 
@@ -759,7 +759,7 @@ test("P20-settings-listing: while pi's first listing runs, the current value and
 	const ui = await settingsTab(t, { models: "provider model\nopenai gpt-5\n", pending: true });
 	const status = () => ui.section("Model routing").querySelector("p[role=status]");
 	assert.equal(status()?.textContent, "Loading the model list…");
-	assert.deepEqual(optionTexts(ui.section("Model routing").querySelector("select")!), ["anthropic/claude-opus-5-5", "Custom…"]);
+	assert.deepEqual(optionTexts(ui.section("Model routing").querySelector("li.settings-rule select")!), ["anthropic/claude-opus-5-5", "Custom…"]);
 	assert.deepEqual(optionTexts(ui.tab.$("#setting-models-parent")!), ["(unset)", "Custom…"]);
 	ui.stub.release();
 	await ui.tab.find("optgroup");

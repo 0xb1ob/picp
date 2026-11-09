@@ -566,7 +566,8 @@ passed. The same slice makes `git checkout -- <path>` and `git restore` paths ho
 
 ## Native ship jobs (N4f)
 
-**The switch.** `data/native.json` key `claude_ship` (no Settings row; N4j was cut) is OFF by default. It changes
+**The switch.** `data/native.json` key `claude_ship` (no Settings row of its own; N4j was cut, and the Settings Workers
+CLI sets it with the others, see [the flip](#native-concurrency-and-the-flip-n4i)) is OFF by default. It changes
 nothing on its own: an implementer runs native only when its routing row (or the dispatch) says `driver: "claude"`,
 the job is `kind:ship` with delivery `pr` or `local`, and `claude_ship` is on. Off, a claude row falls back to pi with
 `driver_reason` `switch: the switch workers.native_claude_ship is off …`; an explicit `driver: "claude"` is refused
@@ -616,6 +617,19 @@ live jobs. An explicit or locked native job is refused by name and never moved t
 **Rollback** means restoring both `.bak` files. New dispatches follow the restored files at once. Jobs that already
 started keep their driver.
 
+**The flip from Settings.** Dashboard Settings → *Model routing* → **Workers CLI** (`workers.driver`) does the flip for
+every worker type at once, through the audited settings path. Native Claude sets `driver: "claude"` on every rubric row
+and turns `claude_research`, `claude_ship` and `claude_review` on; pi deletes every row's `driver` (absent is pi) and
+deletes those three switches (absent is off). `max_concurrent` is never touched. The router reads the same files as
+before, so no routing code changed. Every rubric role has a native class (`nativeClassOf`), so no row stays pinned.
+Under native, each row's model picker lists only Anthropic Claude models and its thinking picker only the Claude
+effort levels. The page names each row that needs a new model or effort and keeps Save off until all are valid. A
+write that would leave a claude row on another model, or on `minimal`, is refused 400 and nothing is written. Fallbacks
+are kept as they are. A non-Claude fallback stays the row's pi lane, under the S1 router rules above. The read model
+reports `workers.driver` as the one driver every row names; when rows disagree it is null and names the split. A
+claude value also names any switch still off. *Restore defaults* on that section puts the shipped models back and sets
+pi.
+
 ## Native reviewer (N4h)
 
 `cp_review`, `cp_gate` and the quality review resolve their reviewer through the driver resolver. A reviewer runs native
@@ -632,6 +646,12 @@ dir. Rollback: set `claude_review` false.
 ## Native parent entry (S1c)
 
 `data/parent.json` `driver: "claude"` (default `pi`) starts `src/drivers/claude-parent.ts` in place of `pi --mode rpc`.
+The key is no longer file-only: dashboard Settings → *Parent and operator models* → **Parent CLI** (`models.parent_driver`)
+writes it through the audited settings path, and a hand edit still works. With native picked, the parent model picker
+lists only Anthropic Claude models and its thinking picker only the Claude effort levels (`off` plus `NATIVE_EFFORTS`).
+A write pairing `claude` with any other model, or with `minimal`, is refused 400 before anything is written (the
+`NativeDriverError` rule). The switch applies at the next parent start: the answer carries `restart: "parent"`, and the
+page offers the drain-gated parent restart (`POST /api/parent/restart`). Saving never restarts the parent on its own.
 The bridge, its outboxes and the pi RPC lines are unchanged. The entry runs `extensions/command-post` on a headless host
 (`claude-parent-session.ts`), so startup, shutdown, wake-ups and the `tool_call` guards are the pi parent's own code. It
 serves the 22 `cp_*` tools from an in-process MCP server `cp`, prefixed `mcp__cp__` for the model and unprefixed in

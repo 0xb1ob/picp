@@ -127,7 +127,11 @@ export interface SettingsResponse {
 	models_loading?: boolean;
 	/** The last rows of `state/model-apply.jsonl`, oldest first: how a model/thinking change reached each live session. */
 	model_apply?: ModelApplyRow[];
+	/** The CLI pickers' choices (src/settings-control.ts `DRIVER_CHOICES`); null from an older session. */
+	drivers?: SettingsDriverChoices | null;
 }
+/** Effort levels per CLI and the native model rule (a RegExp source over `provider/id`). */
+export interface SettingsDriverChoices { efforts: { pi: string[]; claude: string[] }; claude_model: string }
 /** One `state/model-apply.jsonl` row (src/session-model-apply.ts `ModelApplyLine`). */
 export interface ModelApplyRow { v: 1; type: "model_apply"; at: string; session: "parent" | "operator"; state: "queued" | "applied" | "cancelled" | "failed"; model: string | null; thinking: string | null; reason?: string }
 /** `POST /api/settings/apply|restore`: the owner transaction's result, passed through with its status. */
@@ -141,6 +145,8 @@ export interface SettingsWriteResponse {
 	changes?: Array<{ key: SettingKey; file_key: string; action: "set" | "delete"; old: SettingValue; old_source: string; new: SettingValue }>;
 	audit_warning?: string;
 	audit?: string;
+	/** A Parent CLI change: it applies only when the parent restarts. */
+	restart?: "parent";
 }
 /** `POST /api/operator/message` accepted: 202 (`held` while the operator session is offline). */
 export interface ControlSendResponse {
