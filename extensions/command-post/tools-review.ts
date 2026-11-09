@@ -14,10 +14,10 @@ import { formatDispatchResult } from "../../src/dispatch.ts";
 import { formatGate, formatGateStatus, formatGateWait, isGateWait } from "../../src/gate.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
 import { currentRuntime, diffReviewToolPayload, awaitingListText } from "./helpers.ts";
-import { type ExtensionDeps, piToolContext } from "./shared.ts";
+import type { ExtensionDeps } from "./shared.ts";
 
 export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, setLive, refreshWidget } = deps;
+	const { commandPost, toolContext } = deps;
 
 	// The read/withdraw half of Awaiting-you, as a tool (cp-av8). Deliberately NOT
 	// a dialog and NOT an approve/decline surface: answering is /cp-decide only,
@@ -39,7 +39,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			id: Type.Optional(Type.String({ description: "withdraw: the item id (from a prior list)" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const post = commandPost(piToolContext(ctx).registry);
+			const post = commandPost(toolContext(ctx).registry);
 			if (params.action === "list") {
 				const { text, items, deferred } = await awaitingListText(post);
 				return { content: [{ type: "text", text }], details: { items, deferred } as unknown as Record<string, unknown> };
@@ -149,8 +149,9 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const runner = commandPost(piToolContext(ctx).registry).pipeline();
+			const tc = toolContext(ctx);
+			tc.setLive();
+			const runner = commandPost(tc.registry).pipeline();
 			if (params.action === "classify") {
 				if (!params.task) throw new Error("cp_pipeline classify needs `task`");
 				const classification = classifyIntake({
@@ -186,7 +187,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					...(params.quality ? { quality: params.quality } : {}),
 					...(params.review ? { review: params.review } : {}),
 				});
-				refreshWidget(ctx);
+				tc.refresh();
 				return {
 					content: [
 						{
@@ -203,7 +204,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					throw new Error("cp_pipeline reanchor needs `replacement_research_id`");
 				}
 				const record = await runner.reanchor(params.research_id, params.replacement_research_id);
-				refreshWidget(ctx);
+				tc.refresh();
 				return {
 					content: [
 						{
@@ -227,7 +228,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 						params.implementer_model !== undefined ? { implementerModel: params.implementer_model } : {},
 					)
 					: await runner.recoverShip(params.research_id);
-			refreshWidget(ctx);
+			tc.refresh();
 			const payload = {
 				content: [{ type: "text" as const, text: formatAdvance(result) }],
 				details: result as unknown as Record<string, unknown>,
@@ -287,13 +288,13 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const tc = piToolContext(ctx);
+			const tc = toolContext(ctx);
+			tc.setLive();
 			const post = commandPost(tc.registry);
 			if (params.action === "handoff") {
 				if (!params.source_job_id || !params.dependent_job_ids || Object.keys(params).some((key) => !["action", "job_id", "source_job_id", "dependent_job_ids"].includes(key))) throw new Error("handoff accepts only job_id, source_job_id and dependent_job_ids");
 				const result = await post.handoffGate({ job_id: params.job_id, source_job_id: params.source_job_id, dependent_job_ids: params.dependent_job_ids });
-				refreshWidget(ctx);
+				tc.refresh();
 				return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
 			}
 			if (params.action === "authorize_recovery") {
@@ -335,7 +336,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 				...(params.model ? { model: params.model } : {}),
 				...(params.deliver_revise === undefined ? {} : { deliverRevise: params.deliver_revise }),
 			});
-			refreshWidget(ctx);
+			tc.refresh();
 			if (isGateWait(result)) {
 				const payload = {
 					content: [{ type: "text" as const, text: formatGateWait(result) }],
@@ -392,12 +393,13 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
+			const tc = toolContext(ctx);
+			tc.setLive();
 			// No pipeline lookup here, deliberately (design Constraints §1): the
 			// preconditions are the dispatch record, kind:ship and origin/<branch>,
 			// and `DiffReview` owns all three. A missing pipeline record removes the
 			// automation, never the reachability.
-			const post = commandPost(piToolContext(ctx).registry);
+			const post = commandPost(tc.registry);
 			if (params.action === "status") {
 				const status = diffReviewStatusOf(
 					resolveHome(),
@@ -414,7 +416,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 				...(params.model ? { model: params.model } : {}),
 				...(params.deliver_revise === undefined ? {} : { deliverRevise: params.deliver_revise }),
 			});
-			refreshWidget(ctx);
+			tc.refresh();
 			if (isDiffReviewWait(result)) {
 				const payload = {
 					content: [{ type: "text" as const, text: formatReviewWait(result) }],

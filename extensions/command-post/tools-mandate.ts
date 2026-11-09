@@ -31,11 +31,11 @@ import { loadRoutingConfig } from "../../src/routing.ts";
 import { EscalationError } from "../../src/escalation.ts";
 import { batchRiskHigh } from "../../src/risk-batch.ts";
 import { currentRuntime, escalateToolText } from "./helpers.ts";
-import { type ExtensionDeps, piToolContext } from "./shared.ts";
+import type { ExtensionDeps } from "./shared.ts";
 import { SCHEDULE_RUN_ID } from "../../src/viewer/schedule-run-core.ts";
 
 export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, setLive, refreshWidget, projectOf } = deps;
+	const { commandPost, toolContext, projectOf } = deps;
 	const seenNext = new Map<string, { text: string; at: string }>();
 	// The parent may have lost the earlier answer (compaction) or never had it (rotated session): forget what was shown.
 	pi.on("session_start", () => seenNext.clear());
@@ -131,8 +131,8 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const tc = piToolContext(ctx);
+			const tc = toolContext(ctx);
+			tc.setLive();
 			const post = commandPost(tc.registry);
 			const jobs = liveUsageJobs(post.fleet, post.runs);
 			try {
@@ -140,14 +140,14 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					const extra = Object.entries(params).filter(([key, value]) => value !== undefined && !["action", "source_id", "original_job_id", "replacement_job_id", "confirmation_escalation_id"].includes(key));
 					if (!params.source_id || !params.original_job_id || !params.replacement_job_id || extra.length) throw new MandateError("replace_work needs source_id, original_job_id and replacement_job_id; only confirmation_escalation_id may accompany them");
 					const result = await replaceAdmittedWork({ store: post.mandates, ledger: post.ledger(), fleet: post.fleet, artifacts: post.artifacts, sourceId: params.source_id, originalJobId: params.original_job_id, replacementJobId: params.replacement_job_id, usage: () => liveUsageJobs(post.fleet, post.runs), confirmationId: params.confirmation_escalation_id });
-					refreshWidget(ctx);
+					tc.refresh();
 					return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: { ...result } };
 				}
 				if (params.action === "continue") {
 					const extra = Object.entries(params).filter(([key, value]) => value !== undefined && !["action", "source_id", "confirmation_escalation_id", "replacement_id"].includes(key));
 					if (!params.source_id || extra.length) throw new MandateError("cp_mandate continue needs source_id and accepts only confirmation_escalation_id and replacement_id; no authority or budget overrides");
 					const result = await post.mandates.continue(params.source_id, jobs, { confirmation_escalation_id: params.confirmation_escalation_id, replacement_id: params.replacement_id });
-					refreshWidget(ctx);
+					tc.refresh();
 					return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: { ...result } };
 				}
 				if (params.action === "defaults_show") {
@@ -169,7 +169,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				}
 				if (params.action === "supersede_stale") {
 					const closed = post.mandates.supersedeEscalations(jobs);
-					refreshWidget(ctx);
+					tc.refresh();
 					const text = closed.length === 0 ? "no stale escalations" : closed.map((item) => `${item.id} superseded: ${item.superseded_reason}`).join("\n");
 					// SAFETY: Extension tool details are JSON records consumed by the bridge.
 					return { content: [{ type: "text", text }], details: { superseded: closed } as unknown as Record<string, unknown> };
@@ -318,7 +318,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			full: Type.Optional(Type.Boolean({ description: "Return the whole answer even when it is identical to the last one (after losing context)" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const cmdPost = commandPost(piToolContext(ctx).registry);
+			const cmdPost = commandPost(toolContext(ctx).registry);
 			const result = await cpNext(
 				{
 					packageRoot: cmdPost.packageRoot,
@@ -392,14 +392,15 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			checkpoint_job_id: Type.Optional(Type.String({ description: "If answering should also decide this checkpoint" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const post = commandPost(piToolContext(ctx).registry);
+			const tc = toolContext(ctx);
+			tc.setLive();
+			const post = commandPost(tc.registry);
 			if (params.action === "withdraw") {
 				const id = params.escalation_id?.trim();
 				const reason = params.reason?.trim();
 				if (!id || !reason) throw new EscalationError("cp_escalate withdraw needs escalation_id and a nonempty reason");
 				const withdrawn = await post.escalations.withdraw(id);
-				refreshWidget(ctx);
+				tc.refresh();
 				// The persisted schema has no withdrawal reason: it travels in this result only.
 				return {
 					content: [{ type: "text", text: `${withdrawn.id} withdrawn: ${reason} \u2014 not an answer; no linked checkpoint was decided` }],
@@ -410,7 +411,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				const id = params.escalation_id?.trim();
 				if (!id) throw new EscalationError("cp_escalate replace needs escalation_id");
 				const replacement = await post.escalations.replaceHold(id);
-				refreshWidget(ctx);
+				tc.refresh();
 				return {
 					content: [{ type: "text", text: `${replacement.id} replaces ${id}; ${id} stays ${post.escalations.get(id)?.status ?? "closed"} and unanswerable. The authority hold is unchanged until cp_decide ${replacement.id} with an affirmative operator answer naming ${replacement.id}.` }],
 					details: { escalation: replacement, replaces: id },
@@ -419,7 +420,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			if (params.action === "batch_risk_high") {
 				if (!params.job_ids) throw new EscalationError("cp_escalate batch_risk_high needs job_ids");
 				const { escalation, withdrawn } = await batchRiskHigh({ escalations: post.escalations, mandates: post.mandates, ledger: post.ledger(), jobs: liveUsageJobs(post.fleet, post.runs) }, { jobIds: params.job_ids, ...(params.mandate_id ? { mandateId: params.mandate_id } : {}) });
-				refreshWidget(ctx);
+				tc.refresh();
 				return {
 					content: [{ type: "text", text: `${escalation.id} batch risk:high: ${escalation.job_ids.length} jobs (${escalation.job_ids.join(", ")}); withdrew ${withdrawn.length} per-job rows \u2014 cp_decide it with an operator quote` }],
 					details: { escalation, withdrawn },
@@ -459,7 +460,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				...(params.checkpoint_job_id ? { checkpoint_job_id: params.checkpoint_job_id } : {}),
 				...(trimmed ? { original_text: { question, options } } : {}),
 			});
-			refreshWidget(ctx);
+			tc.refresh();
 			return {
 				content: [{ type: "text", text: `${escalateToolText(raised, projectOf(), homeMandateProjects(currentRuntime().home))}${trimmed ? `\ntrimmed fields: ${trimDetails.join(", ")}; full text is preserved on the escalation record` : ""}` }],
 				// SAFETY: Escalation records are JSON objects consumed by the bridge.
@@ -504,8 +505,8 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			note: Type.Optional(Type.String({ description: "optional note stored beside the decision" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const tc = piToolContext(ctx);
+			const tc = toolContext(ctx);
+			tc.setLive();
 			const post = commandPost(tc.registry);
 			const items = await post.awaitingSnapshot();
 			try {
@@ -539,7 +540,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 						getEscalation: (id) => post.escalations.get(id),
 					},
 				);
-				refreshWidget(ctx);
+				tc.refresh();
 				return {
 					content: [{ type: "text", text: result.text }],
 					// SAFETY: Decision results are JSON objects consumed by the bridge.

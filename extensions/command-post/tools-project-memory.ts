@@ -18,14 +18,14 @@ import { probePiSync } from "../../src/pi-compat-probe.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { requireRoutedPreference } from "../../src/routed-models.ts";
 import { loadRoutingConfig } from "../../src/routing.ts";
-import { type ExtensionDeps, piToolContext } from "./shared.ts";
+import type { ExtensionDeps } from "./shared.ts";
 
 /** `probe` reads who merges a newly added GitHub project, `ciRun` runs add's CI read;
  * both injectable so tests need no network. */
 export function registerProjectMemoryTools(
 	pi: ExtensionAPI, deps: ExtensionDeps, probe: MergeFlowProbe = ghMergeFlowProbe(), ciRun: CommandRunner = execRunner,
 ): void {
-	const { commandPost, setLive } = deps;
+	const { commandPost, toolContext } = deps;
 
 	// Project registration (cp-sdm). Until this existed, `cp_dispatch` refused
 	// every job in a repository the registry had never heard of, and the only way
@@ -92,8 +92,9 @@ export function registerProjectMemoryTools(
 			notes: Type.Optional(Type.String({ description: "One line for the operator's own benefit" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const post = commandPost(piToolContext(ctx).registry);
+			const tc = toolContext(ctx);
+			tc.setLive();
+			const post = commandPost(tc.registry);
 			const registry = post.registry;
 			if (params.action === "list") {
 				const projects = registry.list();
@@ -242,8 +243,9 @@ export function registerProjectMemoryTools(
 			now: Type.Optional(Type.String({ description: "retire: where the knowledge lives instead (AGENTS.md §X, docs/foo.md)" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const post = commandPost(piToolContext(ctx).registry);
+			const tc = toolContext(ctx);
+			tc.setLive();
+			const post = commandPost(tc.registry);
 			if (params.action === "status") {
 				const status = post.memory();
 				const plan = post.curationPlan();

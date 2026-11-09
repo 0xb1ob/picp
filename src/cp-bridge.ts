@@ -11,14 +11,12 @@ import {
 	isoTimestamp,
 	LAYOUT,
 	type Mode,
-	PARENT_BRIDGE_FLAGS,
 	type RunEvent,
 	type ThinkingLevel,
-	WORKER_FORBIDDEN_FLAGS,
 } from "./contracts.ts";
-import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentDriverSetting, parentModelSetting, parentThinkingSetting } from "./parent-context.ts";
+import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentModelSetting } from "./parent-context.ts";
 import { CpBridgeError } from "./cp-bridge-error.ts";
-import { nativeParentSpawnOptions } from "./drivers/claude.ts";
+import { assertParentDriver, parentSpawnArgs } from "./parent-spawn.ts";
 import { journalBridgeEvent, runAutoControl, trackAssistant } from "./parent-auto-control.ts";
 import { PARENT_COMPACT_TIMEOUT_MS } from "./parent-compact-hold.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
@@ -31,7 +29,6 @@ import { ParentDelivery } from "./parent-delivery.ts";
 import { cleanSegmentEnd, freshTurn, type TurnBuf, wakeSpans } from "./bridge-segments.ts";
 import { idleNextKey, idleWakeGate } from "./idle-wake.ts";
 import { type ParentSendDelegation, messageText as textOf, parentSendFile, ParentSendOutbox, receiptOf, sendIdOfMessage } from "./parent-outbox.ts";
-import { PACKAGE_ROOT } from "./home.ts";
 import { agentDirFor } from "./viewer/skill-catalog.ts";
 import { parentGatewayKey } from "./gateway-key.ts";
 import { SINGLE_MODE_REMOVED } from "./mode.ts";
@@ -156,37 +153,7 @@ export function operatorSkillPaths(home: string | undefined, agentDir: string = 
 	return OPERATOR_SKILLS.flatMap((name) => roots.map((root) => join(root, name)).find((dir) => existsSync(join(dir, "SKILL.md"))) ?? []);
 }
 
-/** The parent's skills, each `<home>/skills/<name>` when present, else the copy shipped in the package root (a managed home holds state, not the package). */
-export const PARENT_SKILLS = ["cp-memory", "cp-self-review", "cp-pr-review", "cp-org-pr-review"] as const;
-export function parentSkillPaths(home: string, packageRoot: string = PACKAGE_ROOT): string[] {
-	return PARENT_SKILLS.map((name) => (existsSync(join(home, "skills", name, "SKILL.md")) ? join(home, "skills", name) : join(packageRoot, "skills", name)));
-}
-
-export function buildParentArgv(options: {
-	sessionFile: string;
-	model: string;
-	extension: string;
-	thinking?: ThinkingLevel;
-	/** `--skill` paths; additive under `--no-skills`. */
-	skills?: readonly string[];
-	extraArgs?: readonly string[];
-}): string[] {
-	for (const flag of options.extraArgs ?? []) {
-		if ((WORKER_FORBIDDEN_FLAGS as readonly string[]).includes(flag)) {
-			throw new CpBridgeError(`forbidden parent flag ${flag}`);
-		}
-	}
-	const args = ["--mode", "rpc", ...PARENT_BRIDGE_FLAGS, "--session", options.sessionFile, "--model", options.model];
-	if (options.thinking) args.push("--thinking", options.thinking);
-	args.push("-e", options.extension);
-	for (const skill of options.skills ?? []) args.push("--skill", skill);
-	args.push(...(options.extraArgs ?? []));
-	for (const flag of PARENT_BRIDGE_FLAGS) {
-		if (!args.includes(flag)) throw new CpBridgeError(`parent argv missing ${flag}`);
-	}
-	return args;
-}
-
+export { buildParentArgv, PARENT_SKILLS, parentSkillPaths } from "./parent-spawn.ts";
 export { requireAvailableParentModel, resolveParentModel } from "./parent-model.ts";
 
 export function bridgePaths(
@@ -309,6 +276,7 @@ export class CpBridge {
 		try { if (existsSync(controlFile)) saved = JSON.parse(readFileSync(controlFile, "utf8")); }
 		catch (error) { throw new CpBridgeError(`parent control unreadable: ${controlFile}: ${(error as Error).message}`); }
 		const model = (options.modelExplicit ? undefined : parentModelSetting(home)) ?? saved.model ?? options.model;
+		assertParentDriver(home, model); // a refused driver or model leaves this bridge without options, delivery or session
 		this.#options = { ...options, model };
 		this.#model = model;
 		this.#home = home;
@@ -535,18 +503,11 @@ export class CpBridge {
 	async #spawn(sessionFile: string): Promise<void> {
 		const options = this.#options;
 		if (!options || !this.#home || !this.#mode) throw new CpBridgeError("start options missing");
-		const native = parentDriverSetting(this.#home) === "claude" ? nativeParentSpawnOptions({ home: this.#home, sessionFile, model: options.model }) : undefined;
-		const argv = native?.argv ?? buildParentArgv({
-			sessionFile,
-			model: options.model,
-			extension: options.commandPostExtension ?? join(PACKAGE_ROOT, "extensions/command-post/index.ts"),
-			skills: parentSkillPaths(this.#home),
-			thinking: options.thinking ?? parentThinkingSetting(this.#home),
-		});
+		const { piBin, argv } = parentSpawnArgs(this.#home, sessionFile, options);
 		const proc = WorkerProcess.spawn({
 			cwd: options.cwd ?? this.#home,
 			model: options.model,
-			piBin: native?.piBin ?? options.piBin,
+			piBin,
 			argv,
 			env: parentEnv(this.#home, this.#mode),
 			replaceEnv: true,

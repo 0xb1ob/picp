@@ -12,7 +12,7 @@
  * ./helpers.ts and are re-exported here.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PACKAGE_ROOT, resolveHome } from "../../src/home.ts";
 import { currentRuntime } from "./helpers.ts";
 import { registerJobs } from "./jobs.ts";
@@ -20,7 +20,7 @@ import { registerAwaitingCommand } from "./awaiting-command.ts";
 import { registerCommands } from "./commands.ts";
 import { registerSessionHooks } from "./session-hooks.ts";
 import { createSessionPost, type SessionPost } from "./session-post.ts";
-import { createSessionState, type ExtensionDeps, type SessionState } from "./shared.ts";
+import { createSessionState, type ExtensionDeps, piToolContext, type SessionState, type ToolContextOverride } from "./shared.ts";
 import { registerDispatchTools } from "./tools-dispatch.ts";
 import { registerIntegrateTools } from "./tools-integrate.ts";
 import { registerMandateTools } from "./tools-mandate.ts";
@@ -42,12 +42,17 @@ export { PACKAGE_ROOT, resolveHome };
 export * from "./helpers.ts";
 
 /** The tool and command modules' view of the session: accessors over `s`, so nothing is copied at registration. */
-export function extensionDeps(s: SessionState, session: SessionPost, projectOf: ExtensionDeps["projectOf"]): ExtensionDeps {
+export function extensionDeps(s: SessionState, session: SessionPost, projectOf: ExtensionDeps["projectOf"], override?: ToolContextOverride): ExtensionDeps {
+	const setLive = (ctx: ExtensionContext) => {
+		s.live = ctx;
+	};
 	return {
 		commandPost: session.commandPost,
-		setLive: (ctx) => {
-			s.live = ctx;
+		toolContext: (ctx) => {
+			const base = piToolContext(ctx, { setLive: () => setLive(ctx), refresh: () => session.refreshWidget(ctx) });
+			return override ? override(ctx, base) : base;
 		},
+		setLive,
 		emit: session.emit,
 		refreshWidget: session.refreshWidget,
 		projectOf,
@@ -72,6 +77,11 @@ export function extensionDeps(s: SessionState, session: SessionPost, projectOf: 
 }
 
 export default function (pi: ExtensionAPI): void {
+	registerCommandPost(pi);
+}
+
+/** Registers the parent extension on `pi`; a native parent passes its tool context and keeps the session handles. */
+export function registerCommandPost(pi: ExtensionAPI, toolContext?: ToolContextOverride): { s: SessionState; session: SessionPost } {
 	const s = createSessionState();
 	// The wake-up surfaces and the command post call each other; each reads the
 	// other lazily, never during construction.
@@ -84,7 +94,7 @@ export default function (pi: ExtensionAPI): void {
 	registerSessionHooks(pi, s, session, wakeups);
 
 	// Tool and command modules, in their original registration order.
-	const deps = extensionDeps(s, session, wakeups.projectOf);
+	const deps = extensionDeps(s, session, wakeups.projectOf, toolContext);
 	registerCommands(pi, deps);
 	registerAwaitingCommand(pi, deps);
 	registerProjectMemoryTools(pi, deps);
@@ -104,10 +114,12 @@ export default function (pi: ExtensionAPI): void {
 	// this closure's; the policy lives in ./jobs.ts so it is testable without pi.
 	registerJobs(pi, {
 		commandPost: (registry) => commandPost(registry),
+		toolContext: deps.toolContext,
 		emit,
 		runtime: () => currentRuntime(),
 		onJobCreated: (id) => {
 			if (!s.createdThisTurn.includes(id)) s.createdThisTurn.push(id);
 		},
 	});
+	return { s, session };
 }
