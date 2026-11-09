@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import "../harness/fake-parent-tracker.ts";
 import { AnsweredOutbox } from "../../src/answered.ts";
 import { LAYOUT, layoutForHome } from "../../src/contracts.ts";
@@ -16,7 +16,7 @@ import { readParentLock } from "../../src/parent-lock.ts";
 import { parentSpawnArgs } from "../../src/parent-spawn.ts";
 import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { type WorkerEvent, WorkerProcess } from "../../src/worker-process.ts";
-import { type ClaudeStep, FAKE_NATIVE_MODEL, toolResults } from "../harness/claude-mock-provider.ts";
+import { type ClaudeStep, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, toolResults } from "../harness/claude-mock-provider.ts";
 import { waitFor } from "../harness/index.ts";
 import { alive, claudeChildren, isModelCall, type NativeFleet, nativeFleet, recordLines, userTexts } from "../harness/native-parent.ts";
 
@@ -29,6 +29,15 @@ const gate = () => {
 const modelCalls = (f: NativeFleet) => f.provider.requests.filter(isModelCall);
 const row = (f: NativeFleet, id?: string) => f.bridge.status().sends.find((send) => send.id === id);
 const logged = (file: string, body: string) => recordLines(file).filter((line) => line.type === "operator_text" && line.text?.includes(body)).length;
+/** The entry on the bridge's own spawn seam (`parentSpawnArgs`, `parentEnv`) for the RPCs no bridge op sends. */
+function spawnEntry(t: TestContext, f: NativeFleet, model: string, events: WorkerEvent[] = []): WorkerProcess {
+	const sessions = join(f.home, layoutForHome("multi", f.home).sessions);
+	mkdirSync(sessions, { recursive: true });
+	const proc = WorkerProcess.spawn({ cwd: f.home, model, ...parentSpawnArgs(f.home, join(sessions, "cp-parent.jsonl"), { model }),
+		env: parentEnv(f.home, "multi"), replaceEnv: true, requestTimeoutMs: 30_000, autoCancelDialogs: true, onEvent: (event) => events.push(event) });
+	t.after(async () => { await proc.shutdown(); });
+	return proc;
+}
 const firstChild = (pid: number) => waitFor(() => claudeChildren(pid)[0], (child) => child !== undefined, { timeoutMs: 30_000, what: "the turn's claude child" });
 
 // Scenario: Given a native parent, When the bridge runs /cp-version, /doctor, /cp-quota status, /cp-drain and its
@@ -167,12 +176,8 @@ test("native parent S2b: abort interrupts the query and leaves no stale tool-cal
 		{ kind: "tool_use", calls: [{ name: "mcp__cp__cp_next", input: {} }] },
 		{ kind: "text", text: "after the abort" },
 	]);
-	const sessions = join(f.home, layoutForHome("multi", f.home).sessions);
-	mkdirSync(sessions, { recursive: true });
 	const events: WorkerEvent[] = [];
-	const proc = WorkerProcess.spawn({ cwd: f.home, model: FAKE_NATIVE_MODEL, ...parentSpawnArgs(f.home, join(sessions, "cp-parent.jsonl"), { model: FAKE_NATIVE_MODEL }),
-		env: parentEnv(f.home, "multi"), replaceEnv: true, requestTimeoutMs: 30_000, autoCancelDialogs: true, onEvent: (event) => events.push(event) });
-	t.after(async () => { await proc.shutdown(); });
+	const proc = spawnEntry(t, f, FAKE_NATIVE_MODEL, events);
 	await proc.getState(30_000);
 	await proc.prompt("hold the turn");
 	await waitFor(() => modelCalls(f).length, (n) => n === 1, { timeoutMs: 60_000, what: "the held model call" });
@@ -189,6 +194,24 @@ test("native parent S2b: abort interrupts the query and leaves no stale tool-cal
 	const calls = (modelCalls(f)[2]?.body.messages as Array<{ role: string; content: unknown }>).flatMap((message) => message.role === "assistant" && Array.isArray(message.content) ? (message.content as Array<{ type: string; id?: string }>).filter((block) => block.type === "tool_use") : []);
 	const end = events.find((event) => event.type === "tool_execution_end" && event.toolName === "cp_next");
 	assert.equal(end?.toolCallId, calls.at(-1)?.id, "cp_next reports the model's own tool_use id");
+});
+
+// Scenario (#826 review): Given a native entry launched on --model M, When set_model switches it to M2 and the entry is
+// SIGKILLed, Then a relaunch on the same --model M answers get_state with M2 (the session record keeps the switch),
+// And a launch on another --model M3 is the newer choice, so get_state reports M3.
+test("native parent S2b: a set_model switch survives a kill and relaunch", { timeout: 120_000 }, async (t) => {
+	const f = await nativeFleet(t, () => []);
+	const modelOf = async (proc: WorkerProcess) => ((await proc.getState(30_000)) as { model?: { id?: string } }).model?.id;
+	const first = spawnEntry(t, f, FAKE_NATIVE_MODEL);
+	assert.equal(await modelOf(first), FAKE_CLAUDE_MODEL);
+	assert.equal((await first.request("set_model", { provider: "anthropic", modelId: "claude-picp-switched" })).success, true);
+	process.kill(first.pid!, "SIGKILL");
+	await first.closed;
+	const second = spawnEntry(t, f, FAKE_NATIVE_MODEL);
+	assert.equal(await modelOf(second), "claude-picp-switched", "the relaunch on the same --model keeps the switch");
+	await second.shutdown();
+	const third = spawnEntry(t, f, "anthropic/claude-picp-third");
+	assert.equal(await modelOf(third), "claude-picp-third", "a launch on a new --model wins over the recorded switch");
 });
 
 // Scenario: Given a drained record an earlier parent left, a pending durable wake-up, a queued operator answer and a

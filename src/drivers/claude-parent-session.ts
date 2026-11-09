@@ -14,6 +14,7 @@ type RecordLine =
 	| { type: "session"; session_id: string; at: string }
 	| { type: "operator_text"; id: string; text: string; at: string }
 	| { type: "thinking"; level: string; at: string }
+	| { type: "model"; id: string; launch: string; at: string }
 	| ({ type: "usage"; at: string } & ContextUsage);
 
 /** `get_session_stats` `contextUsage`: the last `getContextUsage()` reading, null tokens before any. */
@@ -72,6 +73,19 @@ export class ParentRecord {
 
 	setThinking(level: string): void {
 		this.#append({ type: "thinking", level, at: new Date().toISOString() });
+	}
+
+	/**
+	 * The model `set_model` last applied while the parent ran on `--model launch`: a relaunch on that same `--model`
+	 * keeps the switch, as pi's session does; a launch on another model is the operator's newer choice and wins.
+	 */
+	model(launch: string): string | undefined {
+		const last = this.lines().filter((line) => line.type === "model").at(-1);
+		return last?.type === "model" && last.launch === launch ? last.id : undefined;
+	}
+
+	setModel(id: string, launch: string): void {
+		this.#append({ type: "model", id, launch, at: new Date().toISOString() });
 	}
 
 	/** The last context reading, so `get_session_stats` after a relaunch answers before the first turn. */

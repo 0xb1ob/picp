@@ -69,6 +69,9 @@ type Assistant = Record<string, unknown> & { role: "assistant"; stopReason: stri
 
 let record = new ParentRecord(sessionFile);
 let sessionId = record.sessionId();
+/** The `--model` this process was launched with; a recorded `set_model` on top of it survives a relaunch. */
+const launchModel = modelId;
+modelId = record.model(launchModel) ?? modelId;
 /** pi's thinking level, applied to the next query as the native effort (`nativeEffortOptions`). */
 let thinking = record.thinking();
 let busy = false;
@@ -608,6 +611,7 @@ async function rotate(): Promise<boolean> {
 	usage = { tokens: null };
 	messageCount = 0;
 	if (thinking !== undefined) record.setThinking(thinking);
+	if (modelId !== launchModel) record.setModel(modelId, launchModel);
 	backlog.length = 0;
 	promptSections.clear();
 	toolCallIds.clear();
@@ -622,6 +626,7 @@ function applySetting(type: "set_model" | "set_thinking_level", request: Record<
 	try {
 		if (type === "set_model") {
 			modelId = nativeModelId(`${String(request.provider)}/${String(request.modelId)}`);
+			record.setModel(modelId, launchModel);
 			return { success: true, data: { provider: "anthropic", id: modelId } };
 		}
 		const level = String(request.level);
