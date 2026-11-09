@@ -131,6 +131,9 @@ export function nativeSlotRefusal(holders: Iterable<string>, jobId: string, max:
 	return { category: "occupied", why: `native concurrency is ${max} and ${others.join(", ")} ${one ? "is" : "are"} ${state}; tear ${one ? "it" : "one"} down first` };
 }
 
+/** Whether `model` is an explicit `anthropic/claude-…` ref the native driver can run. */
+export const isNativeModel = (model: string): boolean => NATIVE_MODEL.test(model);
+
 /** The CLI's model id from an explicit `anthropic/claude-…` ref; any other ref is refused, never silently omitted. */
 export function nativeModelId(model: string): string {
 	const id = NATIVE_MODEL.exec(model)?.[1];

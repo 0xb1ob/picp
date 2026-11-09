@@ -1,0 +1,1 @@
+- Native routing: an explicit `anthropic/claude-…` model override (cp_dispatch `model`, pipeline `implementer_model`) now runs on the native claude driver when the role's own rubric row prefers `driver: "claude"`; any other override still runs pi.

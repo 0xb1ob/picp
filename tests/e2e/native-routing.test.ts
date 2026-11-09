@@ -10,8 +10,9 @@ import { delimiter, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CommandPost } from "../../src/command-post.ts";
-import { DEFAULT_ORIGIN, type DiffVerdict, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { DEFAULT_ORIGIN, type DiffVerdict, EMPTY_USAGE, isoTimestamp, LAYOUT, MINIMAL_PLAN_SUMMARY, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { isDiffReviewWait } from "../../src/diff-review.ts";
+import { ReviewRuns } from "../../src/review-runs.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { VERDICT_TOOL } from "../../src/drivers/claude-verdict.ts";
@@ -21,7 +22,9 @@ import {
 	type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, subscriberEnv, toolResults,
 } from "../harness/claude-mock-provider.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
-import { createAgentDir, createScratchHome, createScratchRepo, MockProvider, readFleet, readRunEvents, REPO_ROOT, treehouseAvailable, waitFor } from "../harness/index.ts";
+import {
+	createAgentDir, createScratchHome, createScratchRepo, MOCK_PROVIDER_ID, MockProvider, readFleet, readRunEvents, REPO_ROOT, type ScriptStep, treehouseAvailable, waitFor,
+} from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -460,6 +463,67 @@ test("S3 carry: real opus and sonnet turns clear no-reset blocks by family; seve
 	await turn(opus);
 	assert.deepEqual([windows().seven_day_opus, windows().seven_day_overage_included], [undefined, undefined], "an opus turn left a block");
 	assert.equal(h.claude.overrun(), 0);
+});
+
+// Scenario: Given a claude implementer row and a pipeline implementer_model anthropic/claude-sonnet-5-5
+//   When advance dispatches the implementer
+//   Then it runs native on sonnet
+//   And an openai override still runs pi
+test("J4 override: a pipeline's anthropic implementer_model runs native on a claude row; an openai one runs pi", { skip, timeout: 300_000 }, async (t) => {
+	const h = await routedHome(t, [{ kind: "text", text: "Implementing." }]);
+	const sonnet = "anthropic/claude-sonnet-5-5";
+	const planner = h.b.provider.addScript("j4-plan", [{ kind: "text", text: "Planned." }], { onExhausted: "repeat" });
+	const gate: ScriptStep[] = [];
+	const reviewer = h.b.provider.addScript("j4-gate", gate);
+	h.b.provider.addScript("j4-openai", [{ kind: "text", text: "Implementing." }], { onExhausted: "repeat" });
+	const openai = `openai/${h.b.provider.modelId("j4-openai")}`;
+	// The openai ref is served by the mock provider under an `openai` provider entry.
+	const models = h.b.provider.modelsJson();
+	const mock = models.providers[MOCK_PROVIDER_ID] as { models: Array<{ id: string }> };
+	const served = { ...mock, models: mock.models.filter((model) => model.id === h.b.provider.modelId("j4-openai")) };
+	writeFileSync(join(h.b.agent.path, "models.json"), JSON.stringify({ providers: { ...models.providers, openai: served } }));
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*", FAKE_NATIVE_MODEL], rubric: [
+		{ id: "j4-plan", role: "planner", model: planner },
+		{ id: "j4-gate", role: "gate-reviewer", model: reviewer },
+		{ id: "j4-ship", role: "implementer", model: FAKE_NATIVE_MODEL, fallbacks: [h.piModel], driver: "claude" },
+	] }));
+	routeNativeModel(h.b.home, [sonnet, openai]);
+	writeFileSync(join(h.b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_ship: true }));
+	// A native implementer refuses to start without a commit identity.
+	writeFileSync(join(h.scratch, "gitconfig"), "[user]\n\tname = j4 e2e\n\temail = j4@test.invalid\n");
+	const env = { ...process.env, ...h.b.agent.env, ...h.env, CP_NATIVE_MAX_TURNS: "1", GIT_CONFIG_GLOBAL: join(h.scratch, "gitconfig") };
+	const post = h.b.ownPost(new CommandPost({
+		home: h.b.home, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentEnv: env,
+		authorizer: { ask: async () => ({ approved: true, by: "j4 operator" }) },
+	}));
+	const ship = async (implementerModel: string) => {
+		const started = await post.startPipeline({ title: `j4 ${implementerModel}`, project: "demo", task: "Add a line to README.md.", delivery: "local", fetch: false, implementerModel });
+		const id = started.research_id;
+		mkdirSync(dirname(post.artifacts.file(id)), { recursive: true });
+		writeFileSync(post.artifacts.file(id), "# Goal\nAdd a line to README.md.\n\n# File list\n- README.md\n\n# Test plan\nnpm test\n\n# Unknowns/Blockers\nnone\n");
+		const envelope = { job_id: id, kind: "research", status: "done", summary: "plan complete", artifact_path: post.artifacts.file(id), plan_summary: MINIMAL_PLAN_SUMMARY,
+			self_assessment: { scope: "S", confidence: "high", destructive_scope: false, blocking_unknowns: false } };
+		mkdirSync(dirname(join(h.b.home, paths.envelopeFile(id))), { recursive: true });
+		writeFileSync(join(h.b.home, paths.envelopeFile(id)), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: id, received_at: isoTimestamp(), attempt: 1, envelope }));
+		gate.push(tool("report_verdict", { job_id: id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["concrete"] }));
+		let result = await post.advancePipeline(id);
+		for (let guard = 0; result.pending && guard < 10; guard += 1) {
+			const key = ReviewRuns.key(result.pending.surface === "review" ? result.ship_id : id, result.pending.surface, result.pending.attempt);
+			post.reviewRuns.handBack(key);
+			await post.reviewRuns.settled(key);
+			result = await post.advancePipeline(id);
+		}
+		assert.equal(result.next, "wait", result.message);
+		return h.fleet(started.ship_id)!;
+	};
+	const native = await ship(sonnet);
+	assert.deepEqual([native.worker.driver, native.worker.model, native.routing?.requested_driver, native.routing?.driver], ["claude", sonnet, "claude", "claude"]);
+	assert.equal(native.routing?.driver_reason, `rule: j4-ship prefers claude; override ${sonnet}; effort medium`);
+	const first = await waitFor(() => h.claude.requests.find((request) => request.path.split("?")[0] === "/v1/messages" && Array.isArray(request.body.tools)),
+		(request) => request !== undefined, { timeoutMs: 60_000, what: "the native implementer's first model call" });
+	assert.equal(first?.body.model, "claude-sonnet-5-5", "the CLI ran the override's model");
+	const pi = await ship(openai);
+	assert.deepEqual([pi.worker.driver, pi.worker.model, pi.routing?.requested_driver, pi.routing?.driver], [undefined, openai, undefined, undefined]);
 });
 
 async function waitFailed(fleet: (id: string) => ReturnType<typeof readFleet>["jobs"][number] | undefined, id: string) {

@@ -4,10 +4,10 @@
  */
 import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision, type RoutingDriver } from "./contracts.ts";
 import {
-	assertNativeEffort, liveNativeJobs, nativeBaseEnv, nativeMaxConcurrent, nativeModelId, NativeDriverError, nativeSelectionRefusal, type NativeRefusal,
+	assertNativeEffort, isNativeModel, liveNativeJobs, nativeBaseEnv, nativeMaxConcurrent, nativeModelId, NativeDriverError, nativeSelectionRefusal, type NativeRefusal,
 	nativeSlotRefusal, nativeThinkingEnv,
 } from "./drivers/claude.ts";
-import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest } from "./routing.ts";
+import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest, RoutingError } from "./routing.ts";
 import { nativeAvailability } from "./native-availability.ts";
 export { observeNative } from "./native-availability-observer.ts";
 import type { NativeDriver } from "./worker-driver.ts";
@@ -62,10 +62,12 @@ export async function resolveDriverRoute(
 		throw new NativeDriverError(`refused: ${ctx.jobId} started on pi and a started job keeps its driver; dispatch a new job to run native`);
 	}
 	const picked = pickModel(route, config);
-	const rule = picked.source === "rubric" ? config.rubric.find((row) => row.id === picked.rule) : undefined;
-	const wants = ctx.explicit !== undefined || locked === "claude" || (locked === undefined && !route.override && rule?.driver === "claude");
+	const fresh = ctx.explicit === undefined && locked === undefined;
+	const rule = !route.override ? rowOf(picked, config) : fresh && isNativeModel(route.override) ? overrideRow(route, config) : undefined;
+	const wants = ctx.explicit !== undefined || locked === "claude" || (fresh && rule?.driver === "claude");
 	if (!wants) return resolveWithCapacity(route, config, probe, capacity);
-	const why = ctx.explicit ? "explicit: cp_dispatch driver claude" : locked ? "lock: the job started on claude" : `rule: ${picked.rule} prefers claude`;
+	const why = ctx.explicit ? "explicit: cp_dispatch driver claude" : locked ? "lock: the job started on claude"
+		: `rule: ${rule!.id} prefers claude${route.override ? `; override ${route.override}` : ""}`;
 	// A config error, never a silent fallback: the native primary is the row's (or caller's) own explicit model.
 	nativeModelId(picked.model);
 	assertNativeEffort(picked.thinking);
@@ -92,6 +94,19 @@ export async function resolveDriverRoute(
 	}
 	if (ctx.reserve) slots.set(ctx.home, (slots.get(ctx.home) ?? new Set<string>()).add(ctx.jobId));
 	return { ...native, requested_driver: "claude", driver: "claude", driver_reason: bounded(`${why}; effort ${picked.thinking ?? "CLI default"}${note ? `; ${note}` : ""}`) };
+}
+
+const rowOf = (picked: ReturnType<typeof pickModel>, config: RoutingConfig) =>
+	picked.source === "rubric" ? config.rubric.find((row) => row.id === picked.rule) : undefined;
+
+/** J4: the row the role would get without the override; only its `driver` is read. No row (or a refused one) is pi. */
+function overrideRow(route: RouteRequest, config: RoutingConfig): RoutingConfig["rubric"][number] | undefined {
+	try {
+		return rowOf(pickModel({ ...route, override: undefined }, config), config);
+	} catch (error) {
+		if (error instanceof RoutingError) return undefined;
+		throw error;
+	}
 }
 
 /** `pickModel` skips the allowlist for a row with fallbacks (the pi walk filters there): check the native primary. */

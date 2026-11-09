@@ -430,7 +430,8 @@ changes until a row carries `driver: "claude"` **and** the switch is ON; the shi
 | Request | Driver | On a failed condition |
 |---|---|---|
 | explicit `driver: "claude"` | claude | refused by name, today's semantics; no lease |
-| explicit `model` override, no `driver` | pi | (the row is not consulted) |
+| explicit `anthropic/claude-…` `model` override (cp_dispatch `model`, pipeline `implementer_model`), no `driver`, and the role's row (picked as if no override) is `driver: "claude"` | claude on the override model; `driver_reason` `rule: <row> prefers claude; override <model>` | pi on the override, `driver_reason` names the condition |
+| any other explicit `model` override, no `driver` | pi | (the row is not consulted) |
 | matching row `driver: "claude"` | claude | pi, `driver_reason` names the condition |
 | row without `driver` (legacy) or `pi` | pi | — |
 | a job whose fleet record already started (D1) | the recorded driver | a native job refuses rather than move to pi |
