@@ -1,0 +1,1 @@
+- Native Claude research now takes `delivery: board`: the worker Writes board.json and site/index.html with a board addendum, and a revived or recovered board job keeps board.json as its artifact path.

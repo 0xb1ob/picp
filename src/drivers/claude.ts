@@ -26,7 +26,7 @@ const NATIVE_SYSTEM_PROMPT_FILE = "native-system-prompt.md";
 const LIVE_PHASES: readonly string[] = ["launching", "waiting", "held"];
 // One shared load: concurrent admissions awaiting their own import() could see a half-evaluated module.
 let spike: Promise<typeof import("./claude-spike.ts")> | undefined;
-const RESEARCH_DELIVERIES: readonly Delivery[] = ["local", "answer"];
+const RESEARCH_DELIVERIES: readonly Delivery[] = ["local", "answer", "board"];
 const SHIP_DELIVERIES: readonly Delivery[] = ["pr", "local"];
 const SWITCH_WHERE: Record<NativeClass, string> = {
 	claude_research: "dashboard Settings → Native workers",
@@ -70,14 +70,14 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 		return { category: "switch", why: `the native switch is unreadable (${(error as Error).message})` };
 	}
 	const nativeClass = nativeClassOf(input.kind, input.role, input.delivery);
-	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local or answer), ship (role implementer, delivery pr or local) and gate-reviewer jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
+	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local, answer or board), ship (role implementer, delivery pr or local) and gate-reviewer jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
 	if (nativeClass === undefined) return ineligible;
 	if (input.profile === "ops") return { category: "ineligible", why: "the ops profile needs ssh/scp, which the native Bash policy refuses" };
 	if ((input.skills ?? 0) > 0) return { category: "ineligible", why: "per-job skills load only on pi (`--skill`)" };
 	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
 	// A reviewer is one-shot and never sent to: the pipeline rule guards the planner's queued sends, not its gate (N4h).
 	if (nativeClass !== "claude_review" && existsSync(join(input.home, paths.pipelineFile(input.jobId)))) {
-		return { category: "pipeline", why: "pipeline-owned research stays on pi; only local and answer research run native" };
+		return { category: "pipeline", why: "pipeline-owned research stays on pi; only local, answer and board research run native" };
 	}
 	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs), input.jobId, config.max_concurrent);
@@ -150,6 +150,14 @@ export const NATIVE_ADDENDUM = [
 	"path (CP_ARTIFACT_PATH), never with a shell heredoc, then call report_result.",
 ].join("\n");
 
+/** Delivery `board`: intake publishes the artifact dir's board.json and site/, so both are Written there. */
+export const NATIVE_BOARD_ADDENDUM = [
+	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Bash, Write) plus report_result;",
+	"ignore any other tool names above. This job is delivery board: with the Write tool, never a shell heredoc, write",
+	"board.json, site/index.html and a short report.md in the artifact directory (the directory of CP_ARTIFACT_PATH),",
+	"then call report_result with artifact_path = CP_ARTIFACT_PATH (the board.json path).",
+].join("\n");
+
 /** The ship counterpart (N4f): the forge tools replace pi's push and gh; the PR base is the job's base branch. */
 export const NATIVE_SHIP_ADDENDUM = [
 	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Edit, Write, Bash), the picp forge",
@@ -172,10 +180,10 @@ export const NATIVE_REVIEW_ADDENDUM = [
 	"other tool names above. Read only the review packet in your working directory, then call report_verdict once.",
 ].join("\n");
 
-/** The addendum for a job's kind, delivery and role: research, a PR ship job, a local ship job, or a reviewer. */
+/** The addendum for a job's kind, delivery and role: research, a board, a PR or local ship job, or a reviewer. */
 export function nativeAddendum(kind: string | undefined, delivery: string | undefined, role?: string): string {
 	if (role === "gate-reviewer") return NATIVE_REVIEW_ADDENDUM;
-	if (kind !== "ship") return NATIVE_ADDENDUM;
+	if (kind !== "ship") return delivery === "board" ? NATIVE_BOARD_ADDENDUM : NATIVE_ADDENDUM;
 	return delivery === "local" ? NATIVE_LOCAL_SHIP_ADDENDUM : NATIVE_SHIP_ADDENDUM;
 }
 

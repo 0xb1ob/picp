@@ -185,6 +185,54 @@ test("N4b: a native research dispatch sends the planner profile and the native a
 	assert.equal(h.claude.overrun(), 0);
 });
 
+// Scenario: Given a research delivery:board job on a claude row
+//   When it is dispatched, and later killed and cp_revive'd
+//   Then both runs write board.json and site/index.html, the report is accepted, and the board is published once
+test("J2 board: a native board job writes its board, survives a kill through cp_revive, and publishes once", { skip, timeout: 420_000 }, async (t) => {
+	const ids: string[] = [];
+	const dir = () => join(h.b.home, paths.artifactDir(ids[0]!));
+	const board = (run: number) => JSON.stringify({ title: `Board run ${run}`, description: "Native board.", job_ids: [ids[0]], created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") });
+	const write = (file: string, content: () => string): ClaudeStep => ({ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(dir(), file), content: content() }) }] });
+	const calls = () => h.claude.requests.filter((request) => request.path.split("?")[0] === "/v1/messages").length;
+	const h = await nativeHome(t, [
+		write("board.json", () => board(1)),
+		write("site/index.html", () => "<p>run 1</p>\n"),
+		// The dispatched turn never gets this answer: closing the parent kills the worker inside it.
+		{ kind: "tool_use", calls: [{ name: "Read", input: { file_path: "/nonexistent" } }], beforeAnswer: () => new Promise<void>(() => {}) },
+		{ kind: "tool_use", calls: ["board.json", "site/index.html"].map((file) => ({ name: "Read", input: () => ({ file_path: join(dir(), file) }) })) },
+		write("board.json", () => board(2)),
+		write("site/index.html", () => "<p>run 2</p>\n"),
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => ({ ...report(ids[0]!, h.b.home), artifact_path: join(dir(), "board.json") }) }] },
+		{ kind: "text", text: "Reported." },
+	]);
+	h.toggle(true);
+	const job = await h.b.ledger.create({ title: `native board ${Math.random()}`, project: "demo", delivery: "board", kind: "research" });
+	ids.push(job.id);
+	const dispatched = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Publish a board of the repo.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
+	], h.env)) as Tool[];
+	assert.notEqual(dispatched[0]?.isError, true, text(dispatched[0]));
+	await waitFor(calls, (n) => n >= 3, { timeoutMs: 120_000, what: "the first run's writes" });
+	assert.equal(readFileSync(join(dir(), "site/index.html"), "utf8"), "<p>run 1</p>\n");
+	assert.match(readFileSync(join(dir(), "board.json"), "utf8"), /Board run 1/);
+	const system = readFileSync(join(h.b.home, paths.runDir(job.id), "native-system-prompt.md"), "utf8");
+	assert.match(system, /This job is delivery board/, "the board addendum");
+	await h.b.closeParents();
+	const revived = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_revive", args: { job_id: job.id, confirm: true } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(job.id)) } }] },
+	], h.env)) as Tool[];
+	assert.match(text(revived.find((end) => end.toolName === "cp_revive")), /resumed its native Claude session/);
+	const events = readRunEvents(h.b.home, job.id);
+	assert.equal(events.filter((event) => event.type === "envelope_received").length, 1, JSON.stringify(events.filter((event) => event.type === "envelope_rejected")));
+	const record = readFleet(h.b.home).jobs.find((entry) => entry.job_id === job.id);
+	assert.equal(record?.receipts?.filter((receipt) => receipt.kind === "board").length, 1, JSON.stringify(record?.receipts));
+	const published = join(h.b.home, LAYOUT.state, "boards", job.id);
+	assert.equal(readFileSync(join(published, "site/index.html"), "utf8"), "<p>run 2</p>\n");
+	assert.match(readFileSync(join(published, "board.json"), "utf8"), /Board run 2/);
+	assert.equal(h.claude.overrun(), 0);
+});
+
 // N4f Acceptance 2: a `small-ship` row with driver claude ships an implementer natively when claude_ship is on (commit,
 // git_push, pr_create on a non-main base, head_sha report); with the switch off the same row runs pi, reason named.
 test("N4f: a claude small-ship row ships natively with claude_ship on; off, the same dispatch runs pi by name", { skip, timeout: 420_000 }, async (t) => {
