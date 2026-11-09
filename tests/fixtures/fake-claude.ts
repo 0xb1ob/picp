@@ -2,7 +2,8 @@
  * A stand-in `claude` CLI for the Agent SDK (stream-json over stdio, the control protocol included) that sends each
  * model call to tests/harness/claude-mock-provider.ts, so native e2e cases run where Claude Code is not installed.
  * Covers what the native parent drives: turns, cp_* tools over the SDK's MCP relay with PreToolUse hooks, `--resume`,
- * `/compact <instructions>` (as claude 2.1.318 runs it) and `getContextUsage`. Each spawn's argv is logged.
+ * `/compact <instructions>` (as claude 2.1.318 runs it), `getContextUsage`, `interrupt`, `--replay-user-messages` and
+ * a mid-turn message joining after the next tool batch (else its own queued turn). Each spawn's argv is logged.
  */
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -11,8 +12,9 @@ import { createInterface } from "node:readline";
 import { CLAUDE_VERSION_FLOOR } from "../../src/drivers/claude-cli.ts";
 
 type Block = Record<string, unknown>;
-type Message = { role: "user" | "assistant"; content: string | Block[] };
+type Message = { role: "user" | "assistant" | "system"; content: string | Block[] };
 type Pending = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void };
+type Queued = { message: Message; priority?: string; uuid?: string };
 
 const MAX_TOKENS = 200_000;
 const args = process.argv.slice(2);
@@ -39,6 +41,7 @@ const env = { ...process.env, ...settings.env };
 const model = flag("--model") ?? "claude-picp-fake";
 /** claude 2.1.318 sends `--effort` as the request's `output_config.effort`. */
 const effort = flag("--effort");
+const replay = args.includes("--replay-user-messages");
 const resumed = flag("--resume");
 const sessionId = resumed ?? randomUUID();
 const sessionPath = join(store, "sessions", `${sessionId}.json`);
@@ -78,6 +81,14 @@ let systemPrompt = "";
 type ToolDef = { name: string; description?: string; input_schema: unknown };
 let tools: ToolDef[] | undefined;
 let interrupted = false;
+let turnAbort: AbortController | undefined;
+/** Input not yet taken: a turn takes one, and the pass after each tool batch takes those not sent at "later". */
+const inbox: Queued[] = [];
+/** The input enters the conversation; with `--replay-user-messages` it is echoed under its own uuid, as claude does. */
+function take(item: Queued): Message["content"] {
+	if (replay) send({ type: "user", message: item.message, parent_tool_use_id: null, session_id: sessionId, uuid: item.uuid ?? randomUUID(), isReplay: true });
+	return item.message.content;
+}
 
 async function mcp(server: string, method: string, params?: unknown): Promise<Record<string, unknown>> {
 	const answer = await request({ subtype: "mcp_message", server_name: server, message: { jsonrpc: "2.0", id: ++ids, method, ...(params === undefined ? {} : { params }) } });
@@ -104,11 +115,15 @@ async function callModel(messages: Message[]): Promise<{ status: number; body: R
 	if (!base) throw new Error("fake claude: no ANTHROPIC_BASE_URL in the environment or --settings");
 	const response = await fetch(`${base}/v1/messages`, {
 		method: "POST",
+		...(turnAbort ? { signal: turnAbort.signal } : {}),
 		headers: { "content-type": "application/json", authorization: `Bearer ${env.CLAUDE_CODE_OAUTH_TOKEN ?? ""}` },
 		body: JSON.stringify({ model, max_tokens: 4096, system: [{ type: "text", text: systemPrompt }], messages, tools: await listTools(), stream: false, ...(effort ? { output_config: { effort } } : {}) }),
 	});
 	return { status: response.status, body: await response.json() as Record<string, unknown> };
 }
+
+const textOf = (content: Message["content"]): string => typeof content === "string" ? content
+	: content.filter((block) => block.type === "text").map((block) => String(block.text)).join("\n");
 
 const failed = (status: number, body: Record<string, unknown>): string =>
 	`API Error: ${status} ${(body.error as { message?: string } | undefined)?.message ?? JSON.stringify(body)}`;
@@ -124,9 +139,19 @@ async function runTool(use: Block): Promise<Block> {
 			return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: out.hookSpecificOutput.permissionDecisionReason ?? "denied" };
 		}
 	}
+	// Test knob (settings env): hold the first allowed call to this tool before it runs, until an interrupt ends the turn.
+	if (env.FAKE_CLAUDE_HOLD_AFTER_ALLOW === name && !existsSync(join(store, "held"))) {
+		writeFileSync(join(store, "held"), toolUseId);
+		const signal = turnAbort?.signal;
+		if (signal && !signal.aborted) await new Promise((done) => signal.addEventListener("abort", done, { once: true }));
+		return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: "Interrupted before the tool ran" };
+	}
 	const server = servers.find((each) => name.startsWith(`mcp__${each}__`));
 	if (!server) return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: `No such tool available: ${name}` };
-	const called = await mcp(server, "tools/call", { name: name.slice(`mcp__${server}__`.length), arguments: use.input ?? {} }) as { content?: Block[]; isError?: boolean };
+	// Test knob: FAKE_CLAUDE_NO_TOOL_META=1 sends no tool_use id with tools/call, as a CLI without the meta would.
+	const meta = env.FAKE_CLAUDE_NO_TOOL_META === "1" ? {} : { _meta: { "claudecode/toolUseId": toolUseId } };
+	const params = { name: name.slice(`mcp__${server}__`.length), arguments: use.input ?? {}, ...meta };
+	const called = await mcp(server, "tools/call", params) as { content?: Block[]; isError?: boolean };
 	return { type: "tool_result", tool_use_id: toolUseId, is_error: called.isError === true, content: called.content ?? [] };
 }
 
@@ -136,24 +161,37 @@ const init = (): void => send({
 	apiKeySource: "none", claude_code_version: CLAUDE_VERSION_FLOOR, output_style: "default", uuid: randomUUID(),
 });
 
-async function turn(content: string | Block[]): Promise<void> {
+async function turn(item: Queued): Promise<void> {
 	await listTools();
 	init();
-	history.push({ role: "user", content });
 	interrupted = false;
+	turnAbort = new AbortController();
+	history.push({ role: "user", content: take(item) });
+	// Saved as it grows, like claude's transcript: a turn killed midway still resumes.
+	save();
 	let text = "";
 	let rounds = 0;
 	while (!interrupted) {
 		rounds++;
-		const { status, body } = await callModel(history);
+		let reply: Awaited<ReturnType<typeof callModel>>;
+		try {
+			reply = await callModel(history);
+		} catch (error) {
+			if (interrupted) break;
+			throw error;
+		}
+		const { status, body } = reply;
 		if (status !== 200) {
 			send({ type: "assistant", message: { id: `msg_${randomUUID()}`, type: "message", role: "assistant", model, content: [{ type: "text", text: failed(status, body) }], stop_reason: "stop_sequence", usage: {} }, parent_tool_use_id: null, session_id: sessionId, uuid: randomUUID(), error: status === 401 ? "authentication_failed" : "unknown" });
 			history.pop();
+			turnAbort = undefined;
+			save();
 			return result({ is_error: true, result: failed(status, body), num_turns: rounds });
 		}
 		send({ type: "assistant", message: body, parent_tool_use_id: null, session_id: sessionId, uuid: randomUUID() });
 		const blocks = (body.content as Block[] | undefined) ?? [];
 		history.push({ role: "assistant", content: blocks });
+		save();
 		const usage = (body.usage ?? {}) as Record<string, number | undefined>;
 		contextTokens = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.output_tokens ?? 0);
 		text = blocks.filter((block) => block.type === "text").map((block) => String(block.text)).join("\n");
@@ -161,9 +199,24 @@ async function turn(content: string | Block[]): Promise<void> {
 		if (uses.length === 0) break;
 		const results: Block[] = [];
 		for (const use of uses) results.push(await runTool(use));
-		history.push({ role: "user", content: results });
 		send({ type: "user", message: { role: "user", content: results }, parent_tool_use_id: null, session_id: sessionId, uuid: randomUUID() });
+		history.push({ role: "user", content: results });
+		// The pass between tool batches: input sent mid-turn (not at "later") joins the next model call as claude 2.1.318
+		// sends it (observed): a system-role message after the tool results, not a user turn.
+		const joining = inbox.filter((each) => each.priority !== "later" && !textOf(each.message.content).startsWith("/compact"));
+		for (const each of joining) {
+			inbox.splice(inbox.indexOf(each), 1);
+			const text = `The user sent a new message while you were working:\n${textOf(take(each))}\n\nThis is how Claude Code surfaces messages the user sends mid-turn.`;
+			history.push({ role: "system", content: [{ type: "text", text }] });
+		}
+		save();
 	}
+	if (interrupted) {
+		const note = [{ type: "text", text: "[Request interrupted by user]" }];
+		history.push({ role: "user", content: note });
+		send({ type: "user", message: { role: "user", content: note }, parent_tool_use_id: null, session_id: sessionId, uuid: randomUUID() });
+	}
+	turnAbort = undefined;
 	save();
 	result(interrupted ? { subtype: "error_during_execution", is_error: true, errors: ["interrupted"], num_turns: rounds } : { result: text, stop_reason: "end_turn", num_turns: rounds });
 }
@@ -202,14 +255,18 @@ function control(line: { request_id: string; request: Record<string, unknown> })
 	if (body.subtype === "get_context_usage") {
 		return reply({ totalTokens: contextTokens, maxTokens: MAX_TOKENS, rawMaxTokens: MAX_TOKENS, percentage: (contextTokens / MAX_TOKENS) * 100, categories: [], model, memoryFiles: [], mcpTools: [], agents: [] });
 	}
-	if (body.subtype === "interrupt") interrupted = true;
+	if (body.subtype === "interrupt" && turnAbort) {
+		interrupted = true;
+		turnAbort.abort();
+		return reply({ still_queued: [] });
+	}
 	reply({});
 }
 
 let chain = Promise.resolve();
 createInterface({ input: process.stdin }).on("line", (raw) => {
 	if (!raw.trim()) return;
-	const line = JSON.parse(raw) as { type: string; request_id?: string; request?: Record<string, unknown>; response?: Record<string, unknown>; message?: Message };
+	const line = JSON.parse(raw) as { type: string; request_id?: string; request?: Record<string, unknown>; response?: Record<string, unknown>; message?: Message; priority?: unknown; uuid?: unknown };
 	if (line.type === "control_request") return control(line as { request_id: string; request: Record<string, unknown> });
 	if (line.type === "control_response") {
 		const response = line.response as { subtype: string; request_id: string; response?: Record<string, unknown>; error?: string };
@@ -218,8 +275,14 @@ createInterface({ input: process.stdin }).on("line", (raw) => {
 		return response.subtype === "success" ? waiter?.resolve(response.response ?? {}) : waiter?.reject(new Error(response.error ?? "control request failed"));
 	}
 	if (line.type !== "user" || !line.message) return;
-	const content = line.message.content;
-	const text = typeof content === "string" ? content : content.filter((block) => block.type === "text").map((block) => String(block.text)).join("\n");
-	const step = text.startsWith("/compact") ? () => compact(text.slice("/compact".length).trim()) : () => turn(content);
+	const item: Queued = { message: line.message, ...(typeof line.priority === "string" ? { priority: line.priority } : {}), ...(typeof line.uuid === "string" ? { uuid: line.uuid } : {}) };
+	inbox.push(item);
+	const text = textOf(line.message.content);
+	const step = (): Promise<void> => {
+		// Taken already by a tool-batch pass of the turn it arrived during.
+		if (!inbox.includes(item)) return Promise.resolve();
+		inbox.splice(inbox.indexOf(item), 1);
+		return text.startsWith("/compact") ? compact(text.slice("/compact".length).trim()) : turn(item);
+	};
 	chain = chain.then(step).catch((error: unknown) => result({ subtype: "error_during_execution", is_error: true, errors: [(error as Error).message] }));
 }).on("close", () => void chain.then(() => process.exit(0)));

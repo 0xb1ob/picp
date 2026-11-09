@@ -3,35 +3,22 @@
  * `data/parent.json` `driver: "claude"` starts src/drivers/claude-parent.ts; the default still starts pi.
  */
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import "../harness/fake-parent-tracker.ts";
 import { stopParentHosts, teardownHome } from "../harness/parent-hosts.ts";
-import { type ClaudeStep, FAKE_NATIVE_MODEL, type RecordedClaudeRequest, startClaudeMockProvider, subscriberEnv, toolResults } from "../harness/claude-mock-provider.ts";
-import { CommandPost } from "../../src/command-post.ts";
-import { isoTimestamp, layoutForHome } from "../../src/contracts.ts";
-import { type BridgeRelay, buildParentArgv, CpBridge, parentSkillPaths } from "../../src/cp-bridge.ts";
-import { whichAll } from "../../src/doctor.ts";
+import { type ClaudeStep, FAKE_NATIVE_MODEL, startClaudeMockProvider, subscriberEnv, toolResults } from "../harness/claude-mock-provider.ts";
+import { alive, isModelCall, NATIVE, nativeFleet, recordLines, scratchHome, userTexts, withEnv } from "../harness/native-parent.ts";
+import { layoutForHome } from "../../src/contracts.ts";
+import { buildParentArgv, CpBridge, parentSkillPaths } from "../../src/cp-bridge.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { readParentLock } from "../../src/parent-lock.ts";
-import { COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, type ScratchHome, startPiChild, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, MockProvider, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
 
 const FAKE_PARENT = join(REPO_ROOT, "tests/fixtures/fake-parent.mjs");
 const ENTRY = join(PACKAGE_ROOT, "src/drivers/claude-parent.ts");
 const LINUX = process.platform === "linux" ? false : "reads the parent's argv from /proc";
-const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
-const NATIVE = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
-
-function scratchHome(parent?: Record<string, unknown>): ScratchHome {
-	const home = createScratchHome();
-	const data = join(home.path, layoutForHome("multi", home.path).data);
-	mkdirSync(data, { recursive: true });
-	if (parent) writeFileSync(join(data, "parent.json"), JSON.stringify(parent));
-	return home;
-}
 
 /** A scratch home and a bridge on it; the bridge stops before the home is removed. */
 function fixture(t: TestContext, parent?: Record<string, unknown>): { home: string; bridge: CpBridge } {
@@ -43,13 +30,6 @@ function fixture(t: TestContext, parent?: Record<string, unknown>): { home: stri
 
 const cmdline = (pid: number): string[] => readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").slice(0, -1);
 const promptFile = (home: string) => join(home, layoutForHome("multi", home).sessions, "native-parent-system-prompt.md");
-
-/** Sets `values` on process.env for the test (the bridge's child inherits them); restored after. */
-function withEnv(t: TestContext, values: Record<string, string>): void {
-	const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
-	Object.assign(process.env, values);
-	t.after(() => { for (const [key, value] of Object.entries(previous)) if (value === undefined) delete process.env[key]; else process.env[key] = value; });
-}
 
 // Scenario: Given data/parent.json says driver "claude" and the model is an anthropic/claude-* ref,
 // When CpBridge.start runs, Then process.execPath runs claude-parent.ts with --session/--model/--system-prompt-file
@@ -143,49 +123,6 @@ test("native parent: cp_parent start accepts an anthropic/claude model on driver
 	assert.match(results[2]!, /\{\\"model\\":\\"anthropic\/claude-picp-fake\\"\}/, "the entry's set_model takes it (S2a)");
 });
 
-const isModelCall = (request: RecordedClaudeRequest) => request.path.split("?")[0] === "/v1/messages" && Array.isArray(request.body.tools) && (request.body.tools as unknown[]).length > 0;
-const userTexts = (request: RecordedClaudeRequest | undefined): string[] => ((request?.body.messages as Array<{ role: string; content: unknown }> | undefined) ?? [])
-	.filter((message) => message.role === "user")
-	.flatMap((message) => typeof message.content === "string" ? [message.content] : (message.content as Array<{ type?: string; text?: string }>).filter((block) => block.type === "text").map((block) => String(block.text)));
-const recordLines = (file: string) => readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type: string; session_id?: string; text?: string });
-const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-
-/** A driver-claude home with a registered project, a no-op script job under a mandate, and the fake model behind a
- * fake HOME's Claude settings; the bridge stops before anything is removed. */
-async function nativeFleet(t: TestContext, script: (jobId: () => string) => ClaudeStep[]) {
-	let jobId = "";
-	const provider = await startClaudeMockProvider(script(() => jobId));
-	const scratch = scratchHome({ driver: "claude" });
-	const home = scratch.path;
-	const repo = createScratchRepo({ name: "demo", files: { "scripts/noop.sh": "printf 'noop ok\\n'\nexit 0\n" } });
-	const post = new CommandPost({ home, packageRoot: REPO_ROOT });
-	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
-	execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
-	const pool = enableTreehouse(post.registry.pathOf("demo"));
-	createScratchLedger({ home, knownProjects: ["demo"] });
-	jobId = (await post.ledger().create({ title: "cp-poc-noop", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/noop.sh" })).id;
-	post.mandates.issue({ projects: ["demo"], objective: "native parent", job_ids: [jobId], expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 1, tokens: 100_000 }, job_cap: 2 });
-	const fakeHome = mkdtempSync(join(tmpdir(), "cp-native-parent-home-"));
-	mkdirSync(join(fakeHome, ".claude"), { recursive: true, mode: 0o700 });
-	writeFileSync(join(fakeHome, ".claude", "settings.json"), JSON.stringify({ env: subscriberEnv(provider.url) }));
-	// A gh whose main branch has no CI runs: the mandated project's CI watch reads it instead of waking a failure turn.
-	const bin = join(fakeHome, "bin");
-	mkdirSync(bin);
-	writeFileSync(join(bin, "gh"), `#!/bin/sh\ncase "$*" in\n\t*actions/runs*) echo '{"total_count":0,"workflow_runs":[]}'; exit 0 ;;\n\t"api user --jq .login") echo cp-e2e-stub; exit 0 ;;\nesac\nexit 1\n`, { mode: 0o755 });
-	withEnv(t, { HOME: fakeHome, PATH: `${bin}:${process.env.PATH ?? ""}` });
-	const bridge = new CpBridge();
-	const relays: BridgeRelay[] = [];
-	bridge.onRelay((relay) => relays.push(relay));
-	t.after(async () => {
-		try { await bridge.stop(); } finally {
-			await provider.close();
-			for (const cleanup of [() => pool.cleanup(), () => repo.cleanup(), () => scratch.cleanup(), () => rmSync(fakeHome, { recursive: true, force: true })]) cleanup();
-		}
-	});
-	const start = () => bridge.start({ home, mode: "multi", model: FAKE_NATIVE_MODEL, requestTimeoutMs: 30_000, settleTimeoutMs: 120_000 });
-	return { home, post, jobId, provider, bridge, relays, start };
-}
-
 // Scenario (POC P1–P6, gap 6): Given driver claude and a no-op script job, When a send dispatches it, Then it settles,
 // cp_dispatch runs over the cp MCP server and the envelope wakes a turn whose cp_escalate details reach the bridge,
 // And a relaunch after SIGTERM resumes the recorded session, where the operator send and the fleet wake-up stay apart;
@@ -217,8 +154,8 @@ test("native parent: a send dispatches over MCP, the envelope wakes a turn, and 
 	assert.ok(recordLines(started.sessionFile).some((line) => line.type === "operator_text" && line.text?.includes(`[cp-send ${sent.send_id} `)));
 	const offered = (f.provider.requests.find(isModelCall)?.body.tools as Array<{ name: string }>).map((each) => each.name);
 	assert.equal(offered.filter((name) => name.startsWith("mcp__cp__cp_")).length, 22, offered.join(", "));
-	// The CLI's own inert placeholder is the one other entry: no shell, read or edit tool reaches the parent.
-	assert.deepEqual(offered.filter((name) => !name.startsWith("mcp__cp__cp_")), ["DeferredToolPlaceholder"]);
+	// The real CLI's inert placeholder may be the one other entry: no shell, read or edit tool reaches the parent.
+	assert.deepEqual(offered.filter((name) => !name.startsWith("mcp__cp__cp_") && name !== "DeferredToolPlaceholder"), []);
 	assert.match(JSON.stringify(f.provider.requests.find(isModelCall)?.body.system), /Native parent: your tools are the cp_\* tools/);
 	// P3: cp_dispatch ran through the extension: the job is in the fleet and its tool result names it.
 	assert.equal(f.post.fleet.get(f.jobId)?.delivery, "local");

@@ -4,7 +4,8 @@
  * speaks the pi RPC lines and events the bridge reads (tests/fixtures/fake-parent.mjs is the protocol reference).
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -32,6 +33,8 @@ console.info = console.error;
 const MCP_PREFIX = "mcp__cp__";
 const MAX_TURNS = 100;
 const SHUTDOWN_WAIT_MS = 5_000;
+/** The diagnostics the bridge drives through `prompt` (src/parent-diagnostics.ts): run here, never a model turn. */
+const COMMANDS = ["doctor", "cp-drain", "cp-quota", "cp-version"] as const;
 /** Digests pi delivers as context messages; here they are system-prompt sections, re-read on each turn. */
 const PROMPT_SECTIONS = ["cp-parent-guidance", "cp-memory", "cp-standing-orders", "cp-recent-work", "cp-user-context"] as const;
 const NATIVE_PARENT_ADDENDUM = [
@@ -66,6 +69,9 @@ type Assistant = Record<string, unknown> & { role: "assistant"; stopReason: stri
 
 let record = new ParentRecord(sessionFile);
 let sessionId = record.sessionId();
+/** The `--model` this process was launched with; a recorded `set_model` on top of it survives a relaunch. */
+const launchModel = modelId;
+modelId = record.model(launchModel);
 /** pi's thinking level, applied to the next query as the native effort (`nativeEffortOptions`). */
 let thinking = record.thinking();
 let busy = false;
@@ -81,12 +87,14 @@ const promptSections = new Map<string, string>();
 const toolCallIds = new Map<string, string[]>();
 let current: AbortController | undefined;
 let running: Promise<void> | undefined;
+/** The turn's live query while it still takes input: a steer joins it, an abort interrupts it. */
+let live: { push: (message: Message) => boolean; interrupt: () => Promise<void> } | undefined;
 
 const ports: HostPorts = {
 	write,
 	sendMessage: deliver,
 	isIdle: () => !busy,
-	abort: () => current?.abort(),
+	abort: () => void abortTurn(),
 	sessionId: () => sessionId ?? sessionFile,
 	contextTokens: () => usage.tokens,
 	entries: () => record.entries(),
@@ -206,41 +214,78 @@ async function reviewContext(messages: Message[]): Promise<Message[]> {
 
 const errorAssistant = (errorMessage: string): Assistant => ({ role: "assistant", content: [], stopReason: "error", errorMessage, timestamp: Date.now() });
 
-/** The claude query for one turn; its events become pi's `message_end`/`turn_end` lines as they arrive. */
+/**
+ * The claude query for one turn; its events become pi's `message_end`/`turn_end` lines as they arrive. A steer joins
+ * it at priority "next" (after the running tool batch, else as the CLI's own queued turn) and lands on its replay.
+ */
 async function ask(blocks: string[], emit: (message: Assistant) => void, turnEnd: (toolResults: unknown[]) => Promise<void>): Promise<void> {
 	const claude = resolveClaude(process.env);
 	const abort = new AbortController();
 	current = abort;
+	let open = true;
+	let interrupted = false;
 	let settle: () => void = () => {};
-	const settled = new Promise<void>((done) => (settle = done));
+	const settled = new Promise<void>((done) => (settle = () => { open = false; done(); }));
 	abort.signal.addEventListener("abort", () => settle(), { once: true });
+	const steers = new Map<string, Message>();
+	const inbox: SDKUserMessage[] = [];
+	let wake: () => void = () => {};
 	async function* input(): AsyncGenerator<SDKUserMessage> {
-		yield { type: "user", message: { role: "user", content: blocks.map((text) => ({ type: "text" as const, text })) }, parent_tool_use_id: null };
-		await settled;
+		yield { type: "user", message: { role: "user", content: blocks.map((text) => ({ type: "text" as const, text })) }, parent_tool_use_id: null, uuid: randomUUID() };
+		while (open) {
+			while (inbox.length > 0) yield inbox.shift()!;
+			await Promise.race([settled, new Promise<void>((done) => (wake = done))]);
+		}
 	}
+	let q: Query | undefined;
+	live = {
+		push: (message) => {
+			if (!open || interrupted) return false;
+			const uuid = randomUUID();
+			steers.set(uuid, message);
+			inbox.push({ type: "user", message: { role: "user", content: [{ type: "text", text: blockOf(message) }] }, parent_tool_use_id: null, uuid, priority: "next" });
+			wake();
+			return true;
+		},
+		interrupt: async () => {
+			interrupted = true;
+			await q?.interrupt();
+		},
+	};
 	let result: SDKResultMessage | undefined;
 	try {
-		const q = query({ prompt: input(), options: sdkOptions(claude.path, abort) });
+		q = query({ prompt: input(), options: sdkOptions(claude.path, abort) });
 		for await (const message of q) {
 			if (message.type === "system" && message.subtype === "init" && message.session_id !== sessionId) {
 				sessionId = message.session_id;
 				record.setSessionId(message.session_id);
 			} else if (message.type === "assistant" && message.parent_tool_use_id === null) {
 				emit(piAssistant(message));
+			} else if (message.type === "user" && "isReplay" in message && message.isReplay) {
+				const steer = steers.get(message.uuid);
+				if (steer && steers.delete(message.uuid)) await land(steer);
 			} else if (message.type === "user" && message.parent_tool_use_id === null && Array.isArray(message.message.content)) {
 				const results = (message.message.content as unknown as Array<Record<string, unknown>>).filter((block) => block.type === "tool_result");
 				if (results.length > 0) await turnEnd(results.map((block) => ({ toolCallId: block.tool_use_id, isError: block.is_error === true })));
 			} else if (message.type === "result") {
 				result = message;
 				await readUsage(q);
-				settle();
+				// A steer the CLI still holds runs as its queued turn in this query (a follow-up turn); an interrupt ends it.
+				if (steers.size === 0 || interrupted) settle();
+				else await turnEnd([]);
 			}
 		}
+	} catch (error) {
+		if (!interrupted && !abort.signal.aborted) throw error;
 	} finally {
 		settle();
+		live = undefined;
+		toolCallIds.clear();
 		if (current === abort) current = undefined;
 	}
-	if (abort.signal.aborted) emit({ ...errorAssistant("aborted"), stopReason: "aborted" });
+	// Steers the CLI never took never landed: they go first in line for the next run.
+	queue.unshift(...steers.values());
+	if (abort.signal.aborted || interrupted) emit({ ...errorAssistant("aborted"), stopReason: "aborted" });
 	else if (!result) emit(errorAssistant("the claude query ended without a result"));
 	else if (result.is_error || result.subtype !== "success") emit(errorAssistant(resultError(result)));
 }
@@ -353,8 +398,11 @@ function zodShape(schema: unknown): Record<string, z.ZodType> {
 /** One cp_* tool over MCP: pi's argument validation, the extension's execute, and pi's tool_execution_* lines. */
 function mcpTool(definition: ToolDefinition): SdkMcpToolDefinition<Record<string, z.ZodType>> {
 	const guidelines = definition.promptGuidelines?.length ? `\n${definition.promptGuidelines.map((line) => `- ${line}`).join("\n")}` : "";
-	return tool(definition.name, `${definition.description}${guidelines}`, zodShape(definition.parameters), async (args) => {
-		const toolCallId = toolCallIds.get(definition.name)?.shift() ?? `cp-${definition.name}-${Date.now()}`;
+	return tool(definition.name, `${definition.description}${guidelines}`, zodShape(definition.parameters), async (args, extra) => {
+		// The CLI names the call's tool_use id; the hook's per-name queue is only the fallback for one that does not.
+		const meta = (extra as { _meta?: Record<string, unknown> } | undefined)?._meta?.["claudecode/toolUseId"];
+		const queued = toolCallIds.get(definition.name)?.shift();
+		const toolCallId = typeof meta === "string" ? meta : queued ?? `cp-${definition.name}-${Date.now()}`;
 		write({ type: "tool_execution_start", toolCallId, toolName: definition.name, args });
 		await host.fire("tool_execution_start", { toolCallId, toolName: definition.name, args });
 		let result: { content?: unknown; details?: unknown; isError?: boolean };
@@ -379,9 +427,35 @@ function mcpTool(definition: ToolDefinition): SdkMcpToolDefinition<Record<string
 const mcpTools = (): SdkMcpToolDefinition<Record<string, z.ZodType>>[] => host.tools.map(mcpTool);
 let served: ReturnType<typeof mcpTools> | undefined;
 
+const claudeRoot = (): string => join(dirname(sessionFile), "native-parent-claude");
+const childFile = (): string => join(claudeRoot(), "child.json");
+/** `/proc/<pid>/stat` start time: a recorded pid is only ever the same process when this matches. */
+function procStart(pid: number): string | undefined {
+	try {
+		return readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "").split(" ")[19];
+	} catch {
+		return undefined;
+	}
+}
+
+/** A CLI left running by an entry that died mid-turn (it outlives stdin end until its turn ends): killed at boot. */
+function reapOrphan(): void {
+	let recorded: { pid?: number; start?: string };
+	try {
+		recorded = JSON.parse(readFileSync(childFile(), "utf8")) as typeof recorded;
+	} catch {
+		return;
+	}
+	if (typeof recorded.pid === "number" && recorded.start !== undefined && procStart(recorded.pid) === recorded.start) {
+		process.stderr.write(`[native claude parent] killed claude pid ${recorded.pid}, orphaned by the previous parent process\n`);
+		process.kill(recorded.pid, "SIGKILL");
+	}
+	rmSync(childFile(), { force: true });
+}
+
 /** The CLI's own dirs live beside the record, so a relaunch resumes the same transcript store. */
 function sdkOptions(claudePath: string, abort: AbortController): Options {
-	const root = join(dirname(sessionFile), "native-parent-claude");
+	const root = claudeRoot();
 	const dirs = { home: join(root, "home"), configDir: join(root, "config"), tmp: join(root, "tmp") };
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const settings = operatorClaudeSettings();
@@ -392,8 +466,19 @@ function sdkOptions(claudePath: string, abort: AbortController): Options {
 		spawnClaudeCodeProcess: (options: SpawnOptions) => {
 			const child = spawn(options.command, options.args, { cwd: options.cwd, env: options.env, signal: options.signal, stdio: ["pipe", "pipe", "pipe"] });
 			child.stderr.resume();
+			const pid = child.pid;
+			if (pid !== undefined) {
+				writeFileSync(childFile(), JSON.stringify({ pid, start: procStart(pid) }), { mode: 0o600 });
+				child.once("exit", () => {
+					try {
+						if ((JSON.parse(readFileSync(childFile(), "utf8")) as { pid?: number }).pid === pid) rmSync(childFile(), { force: true });
+					} catch { /* already gone */ }
+				});
+			}
 			return child;
 		},
+		// Each input message echoed as the CLI takes it: a mid-turn steer lands exactly when it joins the conversation.
+		extraArgs: { "replay-user-messages": null },
 		env: buildChildEnv(dirs, process.env),
 		settingSources: [],
 		...(existsSync(settings) ? { settings } : {}),
@@ -415,6 +500,25 @@ function sdkOptions(claudePath: string, abort: AbortController): Options {
 		systemPrompt: systemPrompt(),
 		...(sessionId ? { resume: sessionId } : {}),
 	};
+}
+
+/** A registered diagnostic, run in this process as pi runs an extension command: its notify lines are its output. */
+async function runCommand(name: string, args: string): Promise<void> {
+	const handler = (host.commands.get(name) as { handler?: (args: string, ctx: unknown) => unknown } | undefined)?.handler;
+	try {
+		await handler?.(args, host.ctx);
+	} catch (error) {
+		write({ type: "extension_error", extensionPath: `command:${name}`, event: "command", error: (error as Error).message });
+	}
+}
+
+/** pi's `abort` as Query.interrupt(): the CLI ends the turn and keeps its transcript; a hard abort if it hangs. */
+async function abortTurn(): Promise<void> {
+	toolCallIds.clear();
+	const turn = live;
+	if (!turn) return;
+	const answered = await Promise.race([turn.interrupt().then(() => true), sleep(SHUTDOWN_WAIT_MS, false, { ref: false })]).catch(() => false);
+	if (!answered) current?.abort();
 }
 
 const cancelled = (results: unknown[]): boolean => results.some((each) => (each as { cancel?: unknown } | undefined)?.cancel === true);
@@ -507,6 +611,7 @@ async function rotate(): Promise<boolean> {
 	usage = { tokens: null };
 	messageCount = 0;
 	if (thinking !== undefined) record.setThinking(thinking);
+	if (modelId !== launchModel) record.setModel(modelId, launchModel);
 	backlog.length = 0;
 	promptSections.clear();
 	toolCallIds.clear();
@@ -521,6 +626,7 @@ function applySetting(type: "set_model" | "set_thinking_level", request: Record<
 	try {
 		if (type === "set_model") {
 			modelId = nativeModelId(`${String(request.provider)}/${String(request.modelId)}`);
+			record.setModel(modelId, launchModel);
 			return { success: true, data: { provider: "anthropic", id: modelId } };
 		}
 		const level = String(request.level);
@@ -545,8 +651,11 @@ function command(line: string): void {
 	if (type === "get_state") {
 		return reply({ success: true, data: { sessionFile, sessionId: sessionId ?? null, isStreaming: busy, model: { provider: "anthropic", id: modelId }, messageCount, pendingMessageCount: queue.length } });
 	}
-	// The diagnostics (/doctor, /cp-drain, /cp-quota, /cp-version) are Stage 2: none is registered, so none is sent here.
-	if (type === "get_commands") return reply({ success: true, data: { commands: [] } });
+	if (type === "get_commands") {
+		const commands = COMMANDS.filter((name) => host.commands.has(name)).map((name) => ({ name, description: (host.commands.get(name) as { description?: string }).description ?? "", source: "extension" }));
+		return reply({ success: true, data: { commands } });
+	}
+	if (type === "abort") return void abortTurn().then(() => reply({ success: true }));
 	if (type === "get_session_stats") return reply({ success: true, data: { sessionFile, sessionId: sessionId ?? null, contextUsage: usage } });
 	if (type === "get_entries") {
 		try {
@@ -558,8 +667,15 @@ function command(line: string): void {
 	}
 	if (type === "prompt" || type === "follow_up" || type === "steer") {
 		if (typeof request.message !== "string") return reply({ success: false, error: `${type} needs a message` });
+		const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(request.message);
+		const name = (COMMANDS as readonly string[]).find((each) => each === slash?.[1] && host.commands.has(each));
+		// Answered once the handler (and its notify lines) finished, beside a busy turn, as pi answers a command.
+		if (type === "prompt" && name) return void runCommand(name, slash?.[2] ?? "").then(() => reply({ success: true, data: { disposition: "handled" } }));
+		const message: Message = { role: "user", content: [{ type: "text", text: request.message }], timestamp: Date.now() };
+		const steer = type === "steer" || request.streamingBehavior === "steer";
+		if (busy && steer && live?.push(message)) return reply({ success: true, data: { disposition: "queued" } });
 		const disposition = type === "steer" || busy ? "queued" : "started";
-		queue.push({ role: "user", content: [{ type: "text", text: request.message }], timestamp: Date.now() });
+		queue.push(message);
 		reply({ success: true, data: { disposition } });
 		return pump();
 	}
@@ -584,5 +700,6 @@ async function shutdown(): Promise<void> {
 }
 
 process.on("SIGTERM", () => void shutdown());
+reapOrphan();
 await host.fire("session_start", { reason: "startup" });
 createInterface({ input: process.stdin }).on("line", command).on("close", () => void shutdown());
