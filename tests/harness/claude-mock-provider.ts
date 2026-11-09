@@ -2,12 +2,21 @@
  * Loopback fake of the Anthropic Messages API for the real `claude` CLI (native worker spike), synthetic credentials
  * only. A scripted step answers each request that offers tools; others get a short text. Auth headers are recorded.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { LAYOUT } from "../../src/contracts.ts";
 import { routeNamed } from "./routing-names.ts";
+
+/** Writes `bin/claude`, the CI stand-in for the CLI (tests/fixtures/claude-stub.ts); put `bin` first on PATH. */
+export function installClaudeStub(bin: string): string {
+	mkdirSync(bin, { recursive: true });
+	const file = join(bin, "claude");
+	const stub = resolve(import.meta.dirname, "..", "fixtures", "claude-stub.ts");
+	writeFileSync(file, `#!/bin/sh\nexec "${process.execPath}" "${stub}" "$@"\n`, { mode: 0o755 });
+	return file;
+}
 
 export const FAKE_CLAUDE_AUTH_TOKEN = "picp-synthetic-claude-token";
 export const FAKE_CLAUDE_MODEL = "claude-picp-fake";
