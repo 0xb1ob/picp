@@ -49,6 +49,12 @@ label > .settings-meta, legend > .settings-meta { margin-left: 6px; padding: 1px
 .settings-audit ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
 .devices-trust strong { color: var(--text); font-weight: 600; }
 .settings-body > p.settings-readonly, .settings-body > p.settings-warn { padding: 8px 18px; }
+.settings-rule-name { color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.settings-rule-invalid { border-left-color: var(--danger, var(--text)); }
+.settings-rule-error, .settings-cli-note { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.settings-body > p.settings-cli-block { overflow-wrap: anywhere; }
+.settings-restart { display: grid; gap: 8px; padding: 8px 18px 14px; border-top: 1px solid var(--divider); overflow-wrap: anywhere; }
+.settings-restart p { margin: 0; }
 .settings-body > p.settings-apply { margin: 0; padding: 8px 18px; border-top: 1px solid var(--divider); color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .settings-screen > .more-push { max-width: 1000px; box-sizing: border-box; }
 .devices code { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }

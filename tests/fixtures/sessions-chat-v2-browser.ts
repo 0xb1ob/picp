@@ -12,6 +12,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { LAYOUT, SETTING_FIELDS } from "../../src/contracts.ts";
 import { readSettings } from "../../src/settings.ts";
+import { DRIVER_CHOICES } from "../../src/settings-control.ts";
 import type { ControlStatusResponse, JobResponse, JobTranscriptResponse, PrChip, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { APP_CSP, appPage } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
@@ -20,7 +21,7 @@ import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
 	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status",
-	"full-match-diff", "full-match-commands", "project-sidebar", "reports-cards"];
+	"full-match-diff", "full-match-commands", "project-sidebar", "reports-cards", "settings-cli"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -309,6 +310,17 @@ try {
 	// (the live session is the only fake).
 	if (args.stage === "p3-quota") routes["/api/settings"] = { generated_at: GENERATED, enabled: true, running: true, supported: true, writable: true, reason: null,
 		snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS, audit: [], available_models: [], models_error: null, models_loading: false };
+	// CLI switches: the shipped rubric with small-ship on an openai model, so a Native Claude draft names a row to fix.
+	if (args.stage === "settings-cli") {
+		const routing = JSON.parse(readFileSync(new URL("../../defaults/routing.default.json", import.meta.url), "utf8")) as { rubric: Array<Record<string, unknown>> };
+		for (const row of routing.rubric) if (row.id === "small-ship") row.model = "openai/gpt-6.1-sol";
+		mkdirSync(join(scratch, LAYOUT.data), { recursive: true });
+		writeFileSync(join(scratch, LAYOUT.routingFile), JSON.stringify(routing));
+		writeFileSync(join(scratch, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 150000, model: "anthropic/claude-opus-5-5", thinking: "minimal" }));
+		routes["/api/settings"] = { generated_at: GENERATED, enabled: true, running: true, supported: true, writable: true, reason: null, snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS,
+			audit: [], available_models: ["anthropic/claude-haiku-5", "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5", "openai/gpt-5", "openai/gpt-6.1-sol"], models_error: null,
+			models_loading: false, drivers: DRIVER_CHOICES };
+	}
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
 	if (args.stage === "m3-composer") routes[`/api/job/${JOB}`] = { ...job, ask_reference: { kind: "job", project: "picp", job_id: JOB }, evidence_lookup: { supported: true, why: "fixture" } };
 	if (PS) sessions.projects = ["atlas", LONG_PROJECT, "picp"];
@@ -357,7 +369,7 @@ try {
 		}
 		if (path in routes) return send(200, "application/json", JSON.stringify(routes[path]));
 		// M3: every other screen reads the real viewer's APIs on this scratch home (empty state, same palette check).
-		if ((args.stage === "m3-transcript" || args.stage === "nav-simplify" || args.stage === "p3-quota" || args.stage === "m3-shell") && path.startsWith("/api/") && !ABSENT.has(path)) {
+		if ((args.stage === "m3-transcript" || args.stage === "nav-simplify" || args.stage === "p3-quota" || args.stage === "m3-shell" || args.stage === "settings-cli") && path.startsWith("/api/") && !ABSENT.has(path)) {
 			return dispatch(req, res, { home: scratch, stateDir: join(scratch, LAYOUT.state), host: "127.0.0.1", port: (server.address() as AddressInfo).port, app });
 		}
 		if (!ABSENT.has(path) && path !== "/favicon.ico" && !path.startsWith("/manifest") && !path.endsWith(".png")) unexpected.push(path);
@@ -471,7 +483,8 @@ try {
 	const transcript = "#sessions?view=you&transcript=1";
 	const loaded = ".session-entries .session-pending";
 	const stage = args.stage!;
-	for (const [device, width, height] of RC ? [] : [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
+	const SC = stage === "settings-cli";
+	for (const [device, width, height] of RC || SC ? [] : [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
 		for (const theme of ["dark", "light"] as const) {
 			// Scroll only the transcript to the rollup: the card's head sits above the bottom-pinned view.
 			const toRollup: Step = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-rollup").getBoundingClientRect().top - t.getBoundingClientRect().top - 48; })()`, "true"];
@@ -487,7 +500,7 @@ try {
 		await capture("pr1-overview-light-control-1440x1000", "#overview", 1440, 1000, "light", ".shell");
 		const leak = shots.at(-1) as { background: string };
 		if (leak.background !== "#0d0d0d") throw new Error(`Overview left the dark palette (${leak.background})`);
-	} else if (stage !== "chips" && stage !== "rollup" && !RC) {
+	} else if (stage !== "chips" && stage !== "rollup" && !RC && !SC) {
 		const wakeRun = ".session-steps:has(.session-bridge)";
 		const notice = `document.querySelector("${wakeRun} .session-notice-line").click()`, pill = `document.querySelector("${wakeRun} > .session-tools").click()`;
 		// Scroll only the transcript: scrollIntoView would also pan the phone's visual viewport.
@@ -676,6 +689,19 @@ try {
 			["settings-native-phone-dark-390x844", "#settings", 390, 844, ".settings-screen", `.settings-section[aria-label="Native workers"]`, "refuses resumes and revives"],
 		] as const) await capture(`native-routing-${name}`, hash, width, height, "dark", ready, undefined, fits(selector, text));
 		if (posts.length) throw new Error(`p3-quota sent ${posts.join(", ")}: the Job page only reads`);
+	}
+	if (SC) {
+		// Each capture drafts one CLI to Native Claude through the real select and shows its section; nothing is saved.
+		const draft = (select: string, section: string, ready: string): Step[] => [
+			[`(() => { const s = document.querySelector(${JSON.stringify(select)}); s.value = "claude"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`, ready],
+			[`document.querySelector(${JSON.stringify(section)}).scrollIntoView({ block: "start" })`, "true"], ["document.activeElement?.blur()", "true"]];
+		const workers = draft("#setting-workers-driver", `.settings-section[aria-label="Model routing"]`, `!!document.querySelector(".settings-cli-block")`);
+		const parent = draft("#setting-models-parent_driver", `.settings-section[aria-label="Parent and operator models"]`, `!!document.querySelector(".settings-section .settings-field .settings-warn[role=alert]")`);
+		for (const [device, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
+			await capture(`settings-cli-workers-${device}-dark-${width}x${height}`, "#settings", width, height, "dark", ".settings-rule", undefined, workers);
+			await capture(`settings-cli-parent-${device}-dark-${width}x${height}`, "#settings", width, height, "dark", ".settings-rule", undefined, parent);
+		}
+		if (posts.length) throw new Error(`settings-cli sent ${posts.join(", ")}: drafting a CLI writes nothing`);
 	}
 	if (stage === "m3-shell") {
 		// Combine: [shell rail, chat column, conversation] widths; Context open at 1440 leaves 1440 - 261 - 340.

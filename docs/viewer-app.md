@@ -549,7 +549,7 @@ a desktop header row `Rule · Model · Fallbacks, in order · Thinking`: the mon
 and a thinking select whose
 blank is the profile default; with no `routing.json`, one line "No data/routing.json: every worker route is refused
 until it exists." and no controls), **Parent and operator models** (`data/parent.json` / `data/operator.json` `model`, each with
-its source, then a Parent thinking / Operator thinking select of pi's levels for the same file's `thinking`, badged
+its source, after the Parent CLI select below, then a Parent thinking / Operator thinking select of pi's levels for the same file's `thinking`, badged
 `from file` or `from code`; empty unsets it), **Grant defaults** (the `grants.*` fields from the catalog) and **Auto-compaction**
 (`sessions.parent_compact_at_tokens` / `sessions.operator_compact_at_tokens`, each with an "In force: N tokens, from
 <source>" line, or "Off" with the diagnostic; a number below its minimum or not whole shows the reason and blocks Save,
@@ -573,6 +573,23 @@ within each; parent and operator start with "(unset)" (empty is unset), rubric m
 selected as "<id> (not in pi's list)" with the inline "Not in pi's model list" warning, and still saves; the last option, "Custom…",
 reveals a text input for any id. While the list loads or is unavailable each dropdown holds only the current value and "Custom…", and the
 page says "Loading the model list…" or "Model list unavailable". Screenshots: `docs/tui-verification/settings-model-dropdown.md`.
+
+CLI switches (cp-settings-cli-model-effort; docs/contracts.md §Settings catalog, CLI keys). *Model routing* opens with a
+**Workers CLI** select (pi or Native Claude; "(rows disagree)" with the split named when rows differ). Each rubric row
+shows a human label over its id: Planner, Small ship, Big ship, Risky (any job), Risky ship, Reviews, Big research,
+Native research. Any other id shows alone. With Native Claude drafted, each row's model select lists only the
+models matching the session's `drivers.claude_model`. A current value outside it stays selected as "<id> (not a
+Claude model)". The thinking select lists `drivers.efforts.claude`; fallbacks keep pi's whole list. Each row that
+cannot run native gets an inline alert, and one section alert names them all ("Native Claude needs a new model or
+effort on …"). Save stays off until each is valid; one Save posts `workers.driver` with the edited rows. The section
+counts the CLI as one unsaved change, and picking the saved CLI again drops it. *Restore defaults* there restores
+`["models.rubric", "workers.driver"]`. *Parent and operator models* opens with **Parent CLI** (`models.parent_driver`);
+on Native Claude the parent model and thinking selects narrow the same way, with the same inline error and blocked Save.
+A save answered `restart: "parent"` shows "Parent CLI saved: the parent keeps its current CLI until it restarts" and the
+drain-gated `ParentRestart` buttons (two taps, `POST /api/parent/restart`); nothing restarts on save. *Native workers*
+says that the Workers CLI sets its switch too. An older session without `drivers` gets pi's levels and no filtering.
+Layout: the new rows reuse the existing 390 px single column and the 900 px rubric grid; a row error and the CLI note
+span the whole row, with `overflow-wrap: anywhere`.
 
 ## Live Data
 

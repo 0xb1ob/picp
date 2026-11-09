@@ -5,8 +5,9 @@
  * (src/settings-write.ts). The viewer only forwards; this runs in the operator's own session.
  */
 import { resolve } from "node:path";
-import { type Mode, SETTING_FIELDS } from "./contracts.ts";
+import { type Mode, SETTING_FIELDS, THINKING_LEVELS } from "./contracts.ts";
 import type { ControlPorts } from "./dashboard-control.ts";
+import { NATIVE_EFFORTS, NATIVE_MODEL } from "./drivers/claude.ts";
 import { readSettings } from "./settings.ts";
 import { applySettings, readSettingsAudit, redact, type SettingsApplyResult, type SettingsWriteRequest } from "./settings-write.ts";
 
@@ -15,6 +16,9 @@ const REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const PEER_MAX = 64;
 
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** The CLI pickers' choices, from the drivers' own code: pi's levels, Claude's efforts and its model rule. */
+export const DRIVER_CHOICES = Object.freeze({ efforts: { pi: [...THINKING_LEVELS], claude: ["off", ...NATIVE_EFFORTS] }, claude_model: NATIVE_MODEL.source });
 
 type Checked = { ok: true; request: SettingsWriteRequest; expected_revision: string | null; dry_run: boolean; request_id: string; peer: string | null } | { ok: false; error: string };
 
@@ -55,7 +59,7 @@ export function settingsPorts(input: { target: () => { home: string; mode: Mode 
 			get: () => {
 				const home = resolve(input.target().home);
 				try {
-					return { snapshot: readSettings(home, env()), catalog: SETTING_FIELDS, audit: readSettingsAudit(home) };
+					return { snapshot: readSettings(home, env()), catalog: SETTING_FIELDS, audit: readSettingsAudit(home), drivers: DRIVER_CHOICES };
 				} catch (error) {
 					throw new Error(redact(error instanceof Error ? error.message : String(error), home));
 				}

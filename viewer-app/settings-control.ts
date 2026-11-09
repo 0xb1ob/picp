@@ -1,6 +1,6 @@
 import type { SettingField, SettingKey, SettingValue } from "../src/contracts.ts";
 import type { SettingsResponse, SettingsWriteResponse } from "../src/viewer/api-types.ts";
-import { failure } from "./control.ts";
+import { type ControlStatus, failure } from "./control.ts";
 
 /** Settings page (cp-settings-minimal): GET the snapshot, POST apply/restore through the owner-file settings API (PR 171). */
 export const SETTINGS_URL = "/api/settings";
@@ -9,6 +9,27 @@ export const SETTINGS_RESTORE_URL = "/api/settings/restore";
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export type SettingsStatus = SettingsResponse | {error: string};
 export type RestoreSelector = {keys: SettingKey[]} | {section: string};
+export type Cli = "pi" | "claude";
+/** A CLI's picker choices: claude keeps the models its rule matches and its efforts; null `models` is no list yet. */
+export interface CliChoices { cli: Cli | null; models: string[] | null | undefined; efforts: string[]; native: RegExp | null }
+
+/** The choices for `cli` from the session's `drivers`; an older session gets `fallback` levels, unfiltered. */
+export function cliChoices(status: SettingsResponse, cli: Cli | null, fallback: readonly string[]): CliChoices {
+ const drivers = status.drivers;
+ if (!drivers) return {cli, models: status.available_models, efforts: [...fallback], native: null};
+ const native = new RegExp(drivers.claude_model);
+ if (cli !== "claude") return {cli, models: status.available_models, efforts: drivers.efforts.pi, native};
+ return {cli, models: status.available_models?.filter(model => native.test(model)) ?? status.available_models, efforts: drivers.efforts.claude, native};
+}
+
+/** Why a model/effort pair cannot run on native Claude (the driver's own rule), or null; pi takes any pair. */
+export function cliError(choices: CliChoices, model: string | null | undefined, thinking: string | null | undefined): string | null {
+ if (choices.cli !== "claude" || !choices.native) return null;
+ if (model && !choices.native.test(model)) return `Native Claude runs only an anthropic/claude-… model, not ${model}: pick one`;
+ if (thinking && !choices.efforts.includes(thinking)) return `Effort ${thinking} has no Claude equivalent: pick ${choices.efforts.join(", ")}`;
+ return null;
+}
+
 /** A write's outcome: the owner transaction's answer with its HTTP status, or why it never reached one. */
 export type SettingsWriteResult = {status: number; body: SettingsWriteResponse} | {status: number; error: string};
 export type Drafts = Partial<Record<SettingKey, SettingValue>>;
@@ -18,6 +39,10 @@ export interface SettingsView {
  busy: boolean;
  /** The last write's outcome line, `errors` per key/row on a 400, and `stale` after a 412 (the drafts stay). */
  notice: {kind: "ok" | "error" | "stale"; text: string; errors: string[]} | null;
+ /** The operator session's control status, for the parent restart offer. */
+ control: ControlStatus | null;
+ /** True once a saved Parent CLI change waits for a parent restart. */
+ restart: boolean;
  save(changes: Drafts): Promise<boolean>;
  restore(selector: RestoreSelector): Promise<boolean>;
 }

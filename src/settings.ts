@@ -29,10 +29,13 @@ import {
 	type SettingSource,
 	type SettingValue,
 	ReviewerModelSchema,
+	type Role,
 	ThinkingLevelSchema,
 	type RoutingConfig,
+	type RoutingRule,
 	validate,
 } from "./contracts.ts";
+import { isNativeModel } from "./drivers/claude.ts";
 import { resolveReviewTimeoutMs } from "./gate.ts";
 import { DEFAULT_TOKEN_CEILING, loadMandateDefaults, loadTokenCeiling } from "./mandate-defaults.ts";
 import { operatorCompactThreshold } from "./operator-compact.ts";
@@ -42,7 +45,7 @@ import { loadCapacityConfig } from "./quota.ts";
 import { loadRoutingConfig } from "./routing.ts";
 import { readUpdateConfig } from "./service/update.ts";
 import { loadViewerConfig } from "./viewer/host-config.ts";
-import { loadNativeConfig, nativeConfigFile } from "./worker-driver.ts";
+import { loadNativeConfig, type NativeClass, type NativeConfig, nativeConfigFile } from "./worker-driver.ts";
 
 const ERROR_MAX = 500;
 const ENV_KEYS = ["CP_JOB_WALL_CLOCK_SECONDS", "CP_JOB_TOOL_CALL_CAP"] as const;
@@ -182,6 +185,40 @@ function thinkingView(read: OwnerRead<unknown>): View {
 	return raw === undefined ? { value: null, source: "code", status: "ok" } : { value: null, source: "code", status: "fallback", diagnostic: "invalid thinking level; ignored" };
 }
 
+/** `models.parent_driver` as `parentDriverSetting` reads it: absent, null or unparsable is pi. */
+function driverView(read: OwnerRead<unknown>): View {
+	const raw = parsed(read.text);
+	const driver = at(raw, "driver");
+	if (driver === undefined || driver.json === null) return { value: "pi", source: "code", status: "ok" };
+	if (driver.json !== "pi" && driver.json !== "claude") return { value: null, source: "none", status: "refused", diagnostic: 'driver must be "pi" or "claude"; the parent refuses to start' };
+	const model = at(raw, "model");
+	if (driver.json === "claude" && model !== undefined && !(typeof model.json === "string" && isNativeModel(model.json))) {
+		return { value: null, source: "none", status: "refused", diagnostic: "driver claude runs only an anthropic/claude-… model; the parent refuses to start" };
+	}
+	return { value: driver.json, source: "file", status: "ok" };
+}
+
+/** The native switch each rubric role falls under (`nativeClassOf` in src/drivers/claude.ts). */
+const ROLE_NATIVE_SWITCH: Readonly<Record<Role, NativeClass>> = Object.freeze({ planner: "claude_research", implementer: "claude_ship", "gate-reviewer": "claude_review" });
+
+/** `workers.driver`: the one driver every rubric row names (absent is pi), else null naming the split. */
+function workersDriverView(rubric: View | undefined, native: OwnerRead<unknown> | undefined): View {
+	const field = SETTING_FIELDS.find((row) => row.key === "workers.driver") as SettingField;
+	if (!rubric || rubric.status !== "ok") return failed(field, rubric?.diagnostic);
+	const rows = (Array.isArray(rubric.value) ? rubric.value : []) as RoutingRule[];
+	const on = (driver: string) => rows.filter((row) => (row.driver ?? "pi") === driver).map((row) => row.id);
+	const source = rows.some((row) => row.driver !== undefined) ? "file" : "code";
+	const claude = on("claude");
+	if (claude.length && claude.length < rows.length) {
+		return { value: null, source, status: "ok", diagnostic: `rows disagree: claude on ${claude.join(", ")}; pi on ${on("pi").join(", ")}. Choose one CLI to set every row` };
+	}
+	if (!claude.length) return { value: "pi", source, status: "ok" };
+	const config = native?.state === "valid" || native?.state === "absent" ? (native.result as NativeConfig) : undefined;
+	if (!config) return { value: "claude", source, status: "ok", diagnostic: "data/native.json is unreadable or invalid: every claude row falls back to pi" };
+	const off = [...new Set(rows.map((row) => ROLE_NATIVE_SWITCH[row.role]))].filter((name) => !config[name]);
+	return off.length ? { value: "claude", source, status: "ok", diagnostic: `data/native.json has ${off.join(", ")} off: those rows fall back to pi` } : { value: "claude", source, status: "ok" };
+}
+
 type Owner = { file: (home: string) => string; read: (home: string, env: NodeJS.ProcessEnv, file: string) => Settled };
 
 const dataFile = (name: string) => (home: string) => join(home, LAYOUT.data, name);
@@ -237,6 +274,7 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 			const out = settle("parent", read, (limit: number) => ({ "sessions.parent_compact_at_tokens": limit }));
 			out.views["models.parent"] = modelView("models.parent", read, env);
 			out.views["models.parent_thinking"] = thinkingView(read);
+			out.views["models.parent_driver"] = driverView(read);
 			return out;
 		},
 	},
@@ -325,12 +363,15 @@ const redact = (text: string, home: string) => text.split(home).join("<home>").s
 export function readSettings(home: string, env: NodeJS.ProcessEnv = process.env): SettingsSnapshot {
 	const owners: SettingsOwnerStatus[] = [];
 	const views: Partial<Record<SettingKey, View>> = {};
+	let native: OwnerRead<unknown> | undefined;
 	for (const owner of SETTING_FILE_OWNERS) {
 		const file = OWNERS[owner].file(home);
 		const { read, views: settled } = OWNERS[owner].read(home, env, file);
+		if (owner === "native") native = read;
 		owners.push({ owner, path: relative(home, file), state: read.state, sha256: read.sha256, ...(read.error === undefined || read.state === "absent" ? {} : { error: redact(read.error, home) }) });
 		Object.assign(views, settled);
 	}
+	views["workers.driver"] = workersDriverView(views["models.rubric"], native);
 	const toolCap = resolveJobHardBounds(undefined, env).tool_call_cap;
 	views["sessions.tool_call_cap"] = { value: toolCap, status: "ok", ...envView("CP_JOB_TOOL_CALL_CAP", env) };
 	const fields = SETTING_FIELDS.map((field): SettingFieldView => {

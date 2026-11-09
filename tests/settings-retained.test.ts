@@ -30,7 +30,7 @@ import {
 } from "../src/contracts.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "../src/mandate-defaults.ts";
 import { operatorCompactThreshold, operatorModelSetting, operatorThinkingSetting } from "../src/operator-compact.ts";
-import { parentModelSetting, parentSettings, parentThinkingSetting } from "../src/parent-context.ts";
+import { parentDriverSetting, parentModelSetting, parentSettings, parentThinkingSetting } from "../src/parent-context.ts";
 import { loadCapacityConfig } from "../src/quota.ts";
 import { DEFAULT_ROUTING_CONFIG } from "../src/routing.ts";
 import { readUpdateConfig } from "../src/service/update.ts";
@@ -69,10 +69,10 @@ const write = (home: string, owner: SettingFileOwner, body: unknown) =>
 const fieldOf = (key: SettingKey) => SETTING_FIELDS.find((field) => field.key === key) as SettingField;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("(a) catalog: 36 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
-	assert.equal(SETTING_KEYS.length, 36);
+test("(a) catalog: 38 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
+	assert.equal(SETTING_KEYS.length, 38);
 	assert.deepEqual(SETTING_FIELDS.map((field) => field.key), [...SETTING_KEYS]);
-	assert.equal(new Set(SETTING_KEYS).size, 36);
+	assert.equal(new Set(SETTING_KEYS).size, 38);
 	assert.ok(Object.isFrozen(SETTING_FIELDS));
 	for (const field of SETTING_FIELDS) {
 		assert.ok(field.key.startsWith(`${field.section}.`), `${field.key} sits in section ${field.section}`);
@@ -124,6 +124,8 @@ function probes(field: SettingField): unknown[] {
 		}
 		case "url":
 			return [null, "https://dash.example.test/", "http://127.0.0.1:8766/p/", "https://u:p@x.test/", "https://@x.test/", "https://x.test/?q=1", "https://x.test/#f", "ftp://x.test/", "/boards", "", 5, true];
+		case "driver":
+			return ["pi", "claude", "native", "", null, 5, true];
 	}
 }
 
@@ -146,7 +148,9 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 	const loaders: Partial<Record<SettingFileOwner, (field: SettingField, value: unknown) => boolean>> = {
 		"worker-bounds": (_field, value) => (write(home, "worker-bounds", { wall_clock_seconds: value }), accepts(() => homeWallClockSeconds(home), value)),
 		parent: (field, value) =>
-			field.file_key === "thinking"
+			field.file_key === "driver"
+				? (write(home, "parent", { compact_at_tokens: 200000, driver: value }), accepts(() => parentDriverSetting(home), value))
+				: field.file_key === "thinking"
 				? (write(home, "parent", { compact_at_tokens: 200000, thinking: value }), parentThinkingSetting(home) === (value ?? undefined))
 				: field.file_key === "model"
 				? (write(home, "parent", { compact_at_tokens: 200000, model: value }), parentModelSetting(home) === (value ?? undefined))
@@ -180,7 +184,10 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 		const owned = schemas[field.owner];
 		const loader = loaders[field.owner];
 		for (const value of probes(field)) {
-			const expected = owned
+			// workers.driver has no key of its own: it is every rubric row's `driver`.
+			const expected = field.key === "workers.driver"
+				? validate(RoutingConfigSchema, { ...DEFAULT_ROUTING_CONFIG, rubric: [{ id: "r1", role: "planner", model: "a/b", driver: value }] }).ok
+				: owned
 				? validate(owned.schema, { ...owned.base, [field.file_key as string]: value }).ok
 				: (loader as (field: SettingField, value: unknown) => boolean)(field, value);
 			assert.equal(validateSettingValue(field.key, value).ok, expected, `${field.key} = ${JSON.stringify(value)}: catalog and owner disagree`);

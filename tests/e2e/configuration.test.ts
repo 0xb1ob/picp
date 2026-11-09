@@ -725,6 +725,8 @@ function probes(field: SettingField): unknown[] {
 			return [null, "a/b", "anthropic/claude-opus-5-5", "ab", "a/", "/b", "a b/c", "", `a/${"x".repeat(126)}`, `a/${"x".repeat(127)}`, 5, true];
 		case "thinking_level":
 			return [null, "off", "max", "high", "huge", "", 5, true];
+		case "driver":
+			return ["claude", "native", "", null, 5];
 		default:
 			return [];
 	}
@@ -789,7 +791,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 	const catalog = empty.catalog;
 	assert.deepEqual(catalog.map((field) => field.key), [...SETTING_KEYS]);
 	assert.deepEqual(catalog, JSON.parse(JSON.stringify(SETTING_FIELDS)));
-	assert.equal(new Set(catalog.map((field) => field.key)).size, 36);
+	assert.equal(new Set(catalog.map((field) => field.key)).size, 38);
 	for (const field of catalog) assert.ok(field.key.startsWith(`${field.section}.`), field.key);
 	assert.deepEqual(catalog.filter((field) => !field.editable).map((field) => field.key), ["sessions.tool_call_cap", "models.allow"]);
 	assert.deepEqual(empty.audit, []);
@@ -852,6 +854,8 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 		if (key === "grants.token_ceiling") return { value: 0, source: "code", status: "fallback" };
 		if (key === "sessions.operator_compact_at_tokens") return { value: catalog.find((field) => field.key === key)?.default, source: "code", status: "fallback" };
 		if (["models.parent", "models.operator", "models.parent_thinking", "models.operator_thinking"].includes(key)) return { value: null, source: "code", status: "ok" };
+		// parentDriverSetting reads an unparsable parent.json, or one without `driver`, as pi.
+		if (key === "models.parent_driver") return { value: "pi", source: "code", status: "ok" };
 		const disabled = ["parent", "capacity", "update"].includes(catalog.find((field) => field.key === key)?.owner as string);
 		return { value: null, source: "none", status: disabled ? "disabled" : "refused" };
 	};
@@ -884,7 +888,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 		["capacity.five_hour", 70], ["capacity.seven_day", 85, "code"], ["capacity.balance_margin", null], ["maintenance.update_enabled", true],
 		["maintenance.update_interval_min", 30], ["viewer.strict_host", true], ["models.allow", ["anthropic/*"]],
 		["models.rubric", [{ id: "small", role: "implementer", model: "anthropic/claude-haiku" }]], ["models.parent", "anthropic/claude-opus-5-5"], ["models.operator", "openai/gpt-5"],
-		["models.parent_thinking", "high"], ["models.operator_thinking", "low"],
+		["models.parent_thinking", "high"], ["models.operator_thinking", "low"], ["models.parent_driver", "pi", "code"], ["workers.driver", "pi", "code"],
 	] as Array<[SettingKey, unknown, string?]>) expectView(filed, key, value, source);
 	await b.close();
 

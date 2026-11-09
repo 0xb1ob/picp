@@ -9720,7 +9720,7 @@ reports `config.budget.<profile>`.
 ## Settings catalog
 
 `src/contracts/settings.ts` is the single list of the home's per-machine settings:
-`SETTING_KEYS` and `SETTING_FIELDS` (31 fields, frozen). Each field names its section,
+`SETTING_KEYS` and `SETTING_FIELDS` (38 fields, frozen). Each field names its section,
 its owner file (or env var), its type and range, its code default, when it applies,
 what the consumer does with an invalid value (`on_invalid`), whether a later writer may
 edit it, and a label and help line. `validateSettingValue(key, value)` checks one value
@@ -9762,6 +9762,17 @@ reports only what this process sees. An unset `model` keeps today's behaviour ex
 `max`; absent or null means unset). They have no env pin: the source is `file` for a valid key, else `code` with value
 null; an invalid key is `fallback` ("invalid thinking level; ignored"). Null in a write deletes the key.
 
+**CLI keys (cp-settings-cli-model-effort).** Both have type `driver` (`pi` or `claude`, default `pi`; null is not a value).
+`models.parent_driver` is `data/parent.json` `driver`, read as `parentDriverSetting` reads it: absent, null or an
+unparsable file is `pi` from `code`. An unknown value, or `claude` beside a `model` that is not an Anthropic Claude
+model (provider `anthropic`, id `claude-…`), is `refused` with the reason. It applies at the next parent start.
+`workers.driver` has no key of its own: it is the one `driver` every `data/routing.json` rubric row names (absent is
+`pi`). Its source is `file` when any row names one. When rows disagree the value is null, with a diagnostic naming
+both sides. A `claude` value also names any `data/native.json` switch its rows' roles need that is off. An invalid
+routing file refuses it, as it refuses `models.rubric`. `settings_get` also returns `drivers`: pi's thinking levels,
+the Claude effort levels (`off` plus `NATIVE_EFFORTS`) and the native model rule (`NATIVE_MODEL`). The pickers filter
+by these, so the lists come from the drivers' own code.
+
 **Live apply (cp-settings-model-apply, slice 1).** A `models.parent` or `models.parent_thinking` write switches the
 running parent in place at its next idle point: never a restart, a drain or a `restartSafety` read, and the parent and
 host pids stay. The host compares `data/parent.json` with the values it last saw (at start or at the last apply) on a
@@ -9796,10 +9807,10 @@ write lands in the knob's own owner file, and the owner files stay authoritative
 
 **Socket ops.** The cp-bridge spreads `settingsPorts` (`src/settings-control.ts`) into
 dashboard control (§Dashboard control). `settings_get {}` returns `{snapshot, catalog:
-SETTING_FIELDS, audit}` (the last ≤20 audit lines). `settings_apply {mode: "set" | "restore",
+SETTING_FIELDS, audit, drivers}` (the last ≤20 audit lines; `drivers` as in §Settings catalog, CLI keys). `settings_apply {mode: "set" | "restore",
 changes? | keys? | section? | all?, expected_revision, dry_run, request_id, peer}` checks the args
 strictly (400) and returns `{status, state, error?, errors?, revision?, snapshot?, changes?,
-audit_warning?}`, where `state` is `planned`, `unchanged`, `applied`, `stale`, `refused` or
+audit_warning?, restart?}`, where `state` is `planned`, `unchanged`, `applied`, `stale`, `refused` or
 `failed`. The actor is always `dashboard`, whatever the frame says.
 
 **HTTP routes** (`src/viewer/settings-api.ts`, only under `--require-tailnet`):
@@ -9826,12 +9837,25 @@ and all restores skip non-editable fields. A restore never creates an absent own
 `models.parent`, `models.operator`, `models.parent_thinking` and `models.operator_thinking` delete the key. `models.rubric` (`shipped_rubric`) puts
 back the shipped `defaults/routing.default.json` model, fallbacks and thinking on every row
 whose `id` the template has; a hand-added row and every other row field stay. An unreadable
-template is 409 and restores nothing.
+template is 409 and restores nothing. `models.parent_driver` deletes the key (pi). `workers.driver` restores `pi`, as
+below.
 
 **Rubric writes.** A `models.rubric` set sends the snapshot's rows with only `model`,
 `fallbacks` and `thinking` edited; a changed id, role, project, scope, risk or note, or an
 added, removed or reordered row is 400. The rest of `routing.json` (`profiles`,
 `deny_by_role`, …) is kept as stored.
+
+**CLI writes.** A `workers.driver` write touches two owners in one transaction. `claude` sets `driver: "claude"` on
+every rubric row and `claude_research`, `claude_ship` and `claude_review: true` in `data/native.json` (created if
+absent). `pi` deletes every row's `driver` and those three keys. `max_concurrent` and every other key stay. In the same
+write a `models.rubric` edit applies first, so one Save can switch the CLI and pick the new models. Any routing write is
+then refused 400, with one error per row, when a `claude` row's `model` is not an Anthropic Claude model or its
+`thinking` has no Claude effort (`minimal`). It is also refused when a row's changed `model` fails `models.allow` or
+matches its role's `deny_by_role`. Fallbacks are never checked or dropped. `claude` with no rubric rows is 409. A `set`
+naming both `workers.driver` and `workers.native_claude_research` is 400. A parent write touching `models.parent_driver`,
+`models.parent` or `models.parent_thinking` is refused 400 when the result pairs `driver: "claude"` with a model
+(the file's, else `CP_PARENT_MODEL`) that is not an Anthropic Claude model, or with `minimal`. A planned or applied
+`models.parent_driver` change answers `restart: "parent"`: the running parent keeps its CLI until it restarts.
 
 **Absent-file bases.** A `set` on an absent owner builds on what that owner means when absent:
 the scaffold for `mandate-defaults.json`, `DEFAULT_BUDGET_CONFIG` for `budgets.json`,
