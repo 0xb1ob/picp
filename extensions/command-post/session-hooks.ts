@@ -23,6 +23,7 @@ import { pendingNotice } from "../../src/curation.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { computeInstallNudge } from "../../src/install-nudge.ts";
 import { formatIntake } from "../../src/intake.ts";
+import { beginOperation, daemonLogWriter, operation, startLoopStallMonitor, stopLoopStallMonitor } from "../../src/loop-stall.ts";
 import { CONTRACT_SECTION, contractInjectionOrNone, ModeError, packageContractLoaded } from "../../src/mode.ts";
 import { acquireParentLock, formatParentLock, readParentLock } from "../../src/parent-lock.ts";
 import { LOADED_COMMIT } from "../../src/viewer/loaded-commit.ts";
@@ -151,7 +152,17 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 	// Reconcile before the parent forms any belief about the fleet. A failure
 	// here is surfaced, never swallowed: an unreadable fleet means the parent
 	// does not know what is running.
-	pi.on("session_start", async (_event, ctx) => {
+	// F4: every tool call is a named operation, so a stall during one names the tool.
+	const toolOps = new Map<string, () => void>();
+	pi.on("tool_execution_start", (event) => {
+		toolOps.set(event.toolCallId, beginOperation(`tool:${event.toolName}`));
+	});
+	pi.on("tool_execution_end", (event) => {
+		toolOps.get(event.toolCallId)?.();
+		toolOps.delete(event.toolCallId);
+	});
+
+	pi.on("session_start", (_event, ctx) => operation("session_start", async () => {
 		s.live = ctx;
 		try {
 			s.sessionTools = snapshotSessionTools(pi.getAllTools());
@@ -207,6 +218,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 				return;
 			}
 			s.parentLock = acquired.lock;
+			startLoopStallMonitor(daemonLogWriter(home));
 			if (acquired.lock.reclaimed) {
 				// A reclaim is a fact worth reading: the previous parent died holding
 				// this home, so its workers are gone and its jobs are revivable.
@@ -386,10 +398,10 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		// TUI only — `onTerminalInput` is interactive-mode-only, and a shortcut in
 		// any other mode is a key nobody can press.
 		if (ctx.hasUI && !s.widgetTimer) {
-			s.widgetTimer = setInterval(() => refreshWidget(s.live), WIDGET_REFRESH_MS);
+			s.widgetTimer = setInterval(() => operation("widget_tick", () => refreshWidget(s.live)), WIDGET_REFRESH_MS);
 			s.widgetTimer.unref();
 		} else if (!ctx.hasUI && !s.orchestrationTimer) {
-			s.orchestrationTimer = setInterval(() => refreshWidget(s.live), WIDGET_REFRESH_MS);
+			s.orchestrationTimer = setInterval(() => operation("widget_tick", () => refreshWidget(s.live)), WIDGET_REFRESH_MS);
 			s.orchestrationTimer.unref();
 		}
 		// cp-e2d: CI/PR watch. Orchestration, not display: runs in every mode so a
@@ -397,7 +409,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		// `.unref()`ed so it never keeps this process alive.
 		if (!s.ciWatchTimer) {
 			s.ciWatchDisabledShown = false;
-			s.ciWatchTimer = setInterval(() => surfaceCi(), ciWatchIntervalMs());
+			s.ciWatchTimer = setInterval(() => operation("ci_watch_tick", surfaceCi), ciWatchIntervalMs());
 			s.ciWatchTimer.unref();
 			// One pass at start: a session that begins with a green PR already waiting
 			// should not have to wait a full interval to hear about it.
@@ -461,7 +473,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		} finally {
 			s.reconcileInProgress = false;
 		}
-	});
+	}));
 
 	// Spec 2026-09-04 D8: the parent's contract, when pi did not load it. Read
 	// once per session; a missing file is one warning, never a crash (`s.contractMissingShown`).
@@ -547,6 +559,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		await s.post?.shutdown();
 		// Last, and only if it is still ours: the workers are down before the home
 		// is released, so the next parent never starts while children are dying.
+		stopLoopStallMonitor();
 		s.parentLock?.release();
 		s.parentLock = undefined;
 	});
