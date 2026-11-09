@@ -42,7 +42,7 @@ export function registerPushTick(pi: ExtensionAPI, deps: ExtensionDeps, holdsLoc
 		if (!holdsLock() || timer) return;
 		timer = setInterval(() => void operation("push_tick", tick), PUSH_TICK_MS);
 		timer.unref();
-		setTimeout(() => void tick(), 0).unref(); // catch-up pass, after startup returns
+		setTimeout(() => void operation("push_catchup", tick), 0).unref(); // catch-up pass, after startup returns
 	});
 	pi.on("session_shutdown", async () => {
 		if (timer) clearInterval(timer);

@@ -102,8 +102,8 @@ export const VERIFY_SETTLE_MS = 300_000;
 export const DOCTOR_PROBE_MS = 150_000;
 export const STATUS_PROBE_MS = 3_000;
 const POLL_MS = 5_000;
-// Host connect+hello budgets: 1 ms off POLL_MS/STATUS_PROBE_MS so time-scale.ts, which matches timers by value,
-// can keep these real in tests without making the drain poll or status probe real too.
+// Host connect+hello budgets: 1 ms off POLL_MS so time-scale.ts, which matches timers by value, can keep these
+// real in tests without making the drain poll real too.
 export const HOST_CONNECT_MS = 4_999;
 export const PROBE_CONNECT_MS = 2_999;
 const DETAIL_MAX = 300;

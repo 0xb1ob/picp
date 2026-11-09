@@ -1,6 +1,7 @@
 /**
  * Behavior 15 (P14e): cp-daemon's update oneshot as cp-daemon runs it — `node <app>/src/service/update.ts` in a
- * scratch checkout with a bare origin, its clock 50 times fast but for its cp-daemon waits and host connects (real).
+ * scratch checkout with a bare origin, its clock 50 times fast but for its cp-daemon waits, host connects and status
+ * probes (real).
  * The parent host and cp-daemon's control socket are one logging stand-in process answering from a plan file; npm is
  * a stub; git, the fleet, run status and drain.json are real.
  */
@@ -18,7 +19,7 @@ import { parentHostPaths } from "../../src/parent-host.ts";
 import { initialStatus } from "../../src/run-artifacts.ts";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
 import { whichAll } from "../../src/doctor.ts";
-import { HEALTH_WAIT_MS, HOST_CONNECT_MS, PROBE_CONNECT_MS, type UpdateState } from "../../src/service/update.ts";
+import { HEALTH_WAIT_MS, HOST_CONNECT_MS, PROBE_CONNECT_MS, STATUS_PROBE_MS, type UpdateState } from "../../src/service/update.ts";
 import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
 import { until } from "../harness/dashboard.ts";
 import { advanceBase, createScratchRepo } from "../harness/scratch-repo.ts";
@@ -109,10 +110,11 @@ async function bench(t: TestContext, config: unknown = { enabled: true, interval
 		const before = existsSync(join(stateDir, "update.json")) ? readFileSync(join(stateDir, "update.json"), "utf8") : undefined;
 		const zero = Math.round((clock - Date.now() * SCALE) / (1 - SCALE));
 		const script = join(repo.path, "src/service/update.ts");
+		// Scenario: a status read scaled to 60 ms lost to a loaded runner's round trip, so a busy parent was rolled back.
 		const child = spawn(process.execPath, ["--import", join(REPO_ROOT, "tests/harness/time-scale.ts"), script, ...(opts.dry ? ["--dry-run"] : [])], {
 			cwd: home,
 			env: { HOME: home, CP_HOME: home, PATH: bin, CP_DAEMON_JOB: "update", CP_VIEWER_HOST: "127.0.0.1", CP_VIEWER_PORT: String((viewer.address() as AddressInfo).port),
-				CP_TEST_TIME_SCALE: String(SCALE), CP_TEST_TIME_ZERO: String(zero), CP_TEST_TIME_REAL_MS: [HEALTH_WAIT_MS, HOST_CONNECT_MS, PROBE_CONNECT_MS].join(), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", ...opts.env },
+				CP_TEST_TIME_SCALE: String(SCALE), CP_TEST_TIME_ZERO: String(zero), CP_TEST_TIME_REAL_MS: [HEALTH_WAIT_MS, HOST_CONNECT_MS, PROBE_CONNECT_MS, STATUS_PROBE_MS].join(), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", ...opts.env },
 		});
 		let text = "";
 		child.stderr.on("data", (chunk) => (text += String(chunk)));

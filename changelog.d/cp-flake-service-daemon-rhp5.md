@@ -1,0 +1,1 @@
+- Deflake P14 service e2e tests: `P14-daemon-runtime` waits for the parent and viewer stand-ins' start, `P14-health` holds its down viewer's port so the kernel cannot reuse it, and the P14e bench keeps the 3 s status probe real-time like the host connect budgets.

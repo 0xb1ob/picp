@@ -44,7 +44,7 @@ export function registerServiceAlertTick(pi: ExtensionAPI, deps: ExtensionDeps, 
 		if (!holdsLock() || timer) return;
 		timer = setInterval(() => void operation("service_alert_tick", tick), SERVICE_ALERT_TICK_MS);
 		timer.unref();
-		setTimeout(() => void tick(), 0).unref();
+		setTimeout(() => void operation("service_alert_catchup", tick), 0).unref();
 	});
 	pi.on("session_shutdown", async () => {
 		if (timer) clearInterval(timer);

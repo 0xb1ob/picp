@@ -2,10 +2,11 @@
  * The native Claude research driver's dispatch side (N3b): which job may run on it, and the spawn that starts
  * src/drivers/claude-worker.ts in place of pi. Every refusal names its reason and happens before any process starts.
  */
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Delivery, FleetRecord, JobKind, Role } from "../contracts.ts";
+import { type Delivery, type FleetRecord, type JobKind, LAYOUT, type Role } from "../contracts.ts";
+import { PACKAGE_ROOT } from "../home.ts";
 import { loadNativeConfig, type NativeClass, nativeConfigFile, type NativeDriver } from "../worker-driver.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
 import { resolveClaudeAsync } from "./claude-cli.ts";
@@ -25,6 +26,8 @@ export class NativeDriverError extends Error {
 
 const WORKER_ENTRY = fileURLToPath(new URL("./claude-worker.ts", import.meta.url));
 const NATIVE_SYSTEM_PROMPT_FILE = "native-system-prompt.md";
+const PARENT_ENTRY = fileURLToPath(new URL("./claude-parent.ts", import.meta.url));
+const NATIVE_PARENT_SYSTEM_PROMPT_FILE = "native-parent-system-prompt.md";
 const LIVE_PHASES: readonly string[] = ["launching", "waiting", "held"];
 const RESEARCH_DELIVERIES: readonly Delivery[] = ["local", "answer", "board", "pipeline"];
 const SHIP_DELIVERIES: readonly Delivery[] = ["pr", "local"];
@@ -192,6 +195,22 @@ export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, system
 	chmodSync(file, 0o600);
 	// A reported run waits up to NATIVE_REPORTED_GRACE_MS for its result after stdin ends; a SIGTERM would cut it.
 	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file }, shutdownGraceMs: NATIVE_SHUTDOWN_GRACE_MS };
+}
+
+/**
+ * The native parent's spawn (driver `claude`): `process.execPath` runs claude-parent.ts with an argv it parses, never
+ * pi's `--mode rpc` flags. The contract (AGENTS.md) goes to a 0600 file in sessions/; the entry strips the model.
+ */
+export function nativeParentSpawnOptions(options: { home: string; sessionFile: string; model: string }): Pick<WorkerSpawnOptions, "piBin" | "argv"> {
+	if (!isNativeModel(options.model)) {
+		throw new NativeDriverError(`the claude parent driver runs an explicit anthropic/claude-… model, and ${options.model} is not one: fix data/parent.json or the start model`, "model");
+	}
+	const dir = join(options.home, LAYOUT.sessions);
+	const file = join(dir, NATIVE_PARENT_SYSTEM_PROMPT_FILE);
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(file, `${readFileSync(join(PACKAGE_ROOT, "AGENTS.md"), "utf8").trimEnd()}\n`, { mode: 0o600 });
+	chmodSync(file, 0o600);
+	return { piBin: process.execPath, argv: [PARENT_ENTRY, "--session", options.sessionFile, "--model", options.model, "--system-prompt-file", file] };
 }
 
 /** Refuses a routed level with no native effort; absent (the CLI default), `off` and low…max pass. */
