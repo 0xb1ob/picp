@@ -13,7 +13,8 @@ import { realpathSync as entryRealpath } from "node:fs";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const PROBE_VERSION_MS = 5_000;
-export const PROBE_EXTENSION_MS = 15_000;
+// A cold first load on a busy CI runner (install sandbox) has passed 15 s.
+export const PROBE_EXTENSION_MS = 30_000;
 export const PROBE_CLEANUP_MS = 5_000;
 /** /doctor's shorter extension-load budget: the probe measured 1.3-1.8 s (#404). */
 export const DOCTOR_PROBE_MS = 15_000;
