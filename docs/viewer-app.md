@@ -787,6 +787,12 @@ PR chip orders its slots review → CI → merge and names an unrecorded slot ("
 first and show the last three behind an "N earlier" toggle; the bridge chip is a plain dim line.
 `--stage full-match-transcript` fails unless the 1440 and 390 px captures show the joined clock, three option cards,
 "2 earlier" and time-first rows with nothing outside the viewport.
+Below the options, "Other answer…" opens `OtherAnswer.tsx`: a centered modal (`min(720px, 92vw)`, full width under
+600 px) over the inspector or the phone sheet, headed by the question, with an auto-growing textarea. Ctrl/⌘ Enter
+sends, Enter adds a line; Escape, the backdrop and Cancel confirm before dropping typed text. Send posts the Awaiting
+card's "Other answer" message, `<ask-id>: <text>`, tied to the card by `send`'s `ask_id`, through the same
+`useAnswering` hold as an option click; a failure re-enables the card and the modal reopens with the text. The stage's
+`other-answer` captures (1440 and 390 px) fail unless the modal is centered at 720 and 390 px.
 
 **Full match shell (Design full match S1).** Chat's rail chrome is shared by the desktop column and the phone's
 Conversations drawer (`ShellContext.rail`: `head`, `nav`, `status`): the brand with a search icon on top (design

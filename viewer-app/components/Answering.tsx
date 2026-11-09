@@ -3,8 +3,8 @@ import type { AwaitingDetail } from "../../src/viewer/api-types.ts";
 import { type ControlView, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { restartInFlight } from "../restart-control.ts";
 
-/** The asks a click answered, kept per chat so the context card sends one answer request at a time. */
-export interface Answering { asks: string[]; answer(ask: AwaitingDetail, label: string): void }
+/** The asks a click or a typed reply answered, kept per chat so the context card sends one answer request at a time. */
+export interface Answering { asks: string[]; answer(ask: AwaitingDetail, label: string): void; reply(ask: AwaitingDetail, text: string): void }
 const failedFor = (id: string, control?: ControlView) => control?.delivery?.ask_id === id ? control.delivery.state === "failed"
  : control?.pending?.some(p => p.ask_id === id && p.state === "failed") === true;
 /** Only a failure re-enables an answer; the ref refuses a second click that lands before the first one re-renders. */
@@ -17,10 +17,13 @@ export function useAnswering(control?: ControlView): Answering {
   for (const id of failed) inflight.current.delete(id);
   setAsks(list => list.filter(id => !failed.includes(id)));
  }, [key]);
- return {asks, answer: (a, label) => {
-  if (inflight.current.has(a.id)) return;
-  inflight.current.add(a.id); setAsks(list => [...list, a.id]); control?.send({kind: "answer", ask_id: a.id, label});
- }};
+ const hold = (id: string, send: () => void) => {
+  if (inflight.current.has(id)) return;
+  inflight.current.add(id); setAsks(list => [...list, id]); send();
+ };
+ // A reply is the Awaiting card's "Other answer" message: `<ask-id>: <text>`, tied to its card by `send`'s ask_id.
+ return {asks, answer: (a, label) => hold(a.id, () => control?.send({kind: "answer", ask_id: a.id, label})),
+  reply: (a, text) => hold(a.id, () => control?.send({kind: "message", text: `${a.id}: ${text.trim()}`}, a.id))};
 }
 /**
  * One ask's answer state: held while any answer to it is clicked, pending or recorded,

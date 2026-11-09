@@ -848,6 +848,7 @@ try {
 			const row = q(".session-steps-open .session-steps-rows .session-tool > summary"), cell = (i) => row?.children[i]?.getBoundingClientRect().left ?? 0;
 			const chip = q(".session-bubble a.pr-chip, .session-message a.pr-chip"), strip = q(".session-strip-job"), job = q(".workspace-context-job");
 			return { options: all(".workspace-context-option").length, clock: q(".workspace-context-job dd")?.textContent ?? null, job: q(".workspace-context-job code")?.textContent ?? null,
+				modal: (m => m ? Math.round(m.width) + (Math.abs(m.left + m.width / 2 - innerWidth / 2) < 1 ? " centered" : " off-center") : null)(q("dialog.ask-other[open]")?.getBoundingClientRect()),
 				head: job ? [...job.firstElementChild.children].map(c => c.className || c.tagName).join() + "|" + job.children[1].className : null,
 				context: [...document.querySelectorAll(".workspace-context-why[open] li")].length + (q(".workspace-context-why[open]") ? " open" : " closed"),
 				earlier: q(".session-steps-earlier")?.textContent ?? null, time_first: !!row && row.children[0].classList.contains("session-time") && cell(0) < cell(1),
@@ -868,11 +869,18 @@ try {
 		const toEarlier: Step = [into(".session-steps-open", 12), "true"], toChip: Step = [into(".session-message a.pr-chip", 200), "true"];
 		const head = "workspace-context-job-glyph,CODE,workspace-context-job-status|workspace-context-job-title";
 		const card = { options: 3, clock: "9m / 2h 0m", job: "t7ah", head, context: "3 open", outside: "" }, disclosed = { earlier: "2 earlier ▸", time_first: true, outside: "" };
+		// "Other answer…": the centered modal over the inspector or the phone sheet, a long reply typed in it.
+		const reply = "Hold the merge until Friday. ".repeat(14);
+		const open: Step = [`document.querySelector(".workspace-context-other").click()`, `!!document.querySelector("dialog.ask-other[open] textarea")`];
+		const typed: Step = [`(f => { f.value = ${JSON.stringify(reply)}; f.dispatchEvent(new Event("input", { bubbles: true })); })(document.querySelector("dialog.ask-other textarea"))`,
+			`!document.querySelector("dialog.ask-other .ask-other-send").disabled`];
 		// The committed five: desktop, steps, phone-ask, phone and pr-chip (dark, picp only).
 		const shotsT: [string, number, number, Step[], object][] = [
 			["desktop", 1440, 1000, [joined, ...toggled], card], ["steps", 1440, 1000, [steps, toEarlier], disclosed],
 			["phone-ask", 390, 844, [context, joined], card], ["phone", 390, 844, [steps, toEarlier], { ...disclosed, strip: "1 working · t7ah · 9m" }],
 			["pr-chip", 1440, 1000, [toChip], { chip: "#321 | ✓ Review | ○ CI | ○ Merge", outside: "" }],
+			["other-answer", 1440, 1000, [joined, open, typed], { modal: "720 centered", outside: "" }],
+			["phone-other-answer", 390, 844, [context, open, typed], { modal: "390 centered", outside: "" }],
 		];
 		for (const [name, width, height, run, want] of shotsT) {
 			await capture(`full-match-transcript-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
