@@ -18,7 +18,7 @@ import { probePiSync } from "../../src/pi-compat-probe.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { requireRoutedPreference } from "../../src/routed-models.ts";
 import { loadRoutingConfig } from "../../src/routing.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, piToolContext } from "./shared.ts";
 
 /** `probe` reads who merges a newly added GitHub project, `ciRun` runs add's CI read;
  * both injectable so tests need no network. */
@@ -93,7 +93,7 @@ export function registerProjectMemoryTools(
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const post = commandPost(ctx.modelRegistry);
+			const post = commandPost(piToolContext(ctx).registry);
 			const registry = post.registry;
 			if (params.action === "list") {
 				const projects = registry.list();
@@ -243,7 +243,7 @@ export function registerProjectMemoryTools(
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const post = commandPost(ctx.modelRegistry);
+			const post = commandPost(piToolContext(ctx).registry);
 			if (params.action === "status") {
 				const status = post.memory();
 				const plan = post.curationPlan();

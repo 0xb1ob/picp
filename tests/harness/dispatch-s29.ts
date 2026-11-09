@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { LAYOUT, SCHEMA_VERSION, THINKING_LEVELS, type ThinkingLevel } from "../../src/contracts.ts";
 import type { CommandPost } from "../../src/command-post.ts";
+import { atomicWriteJson } from "../../src/json-store.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID, MockProvider, routeNamed, startPiChild, type ScriptStep } from "./index.ts";
 
@@ -41,7 +42,7 @@ export async function dispatchS29(t: TestContext, options: { files?: Record<stri
 						model.thinkingLevelMap = Object.fromEntries(THINKING_LEVELS.map((level) => [level, options.supportedThinking?.includes(level) ? level : null]));
 					}
 				}
-				writeFileSync(join(agent.path, "models.json"), JSON.stringify(config));
+				atomicWriteJson(join(agent.path, "models.json"), config);
 			}
 			const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path, ...env }, extensions: [COMMAND_POST_EXTENSION] });
 			children.push(child);

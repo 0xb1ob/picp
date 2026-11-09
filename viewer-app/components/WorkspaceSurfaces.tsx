@@ -23,7 +23,7 @@ const OWNERS = "dialog[open]:not(.workspace-jobs):not(.workspace-context):not(.w
 const nowWide = () => typeof matchMedia === "function" ? matchMedia("(min-width: 900px)").matches : true;
 /** What the chat lends its context and Conversations surfaces; `chats` renders the Chats list with an Operator href. */
 export interface ChatContext {
- session: string | null; asks: AwaitingDetail[]; live: SessionsResponse["workers"]; chats: (operatorHref: string) => ComponentChild; onAnswer: () => void;
+ session: string | null; asks: AwaitingDetail[]; live: SessionsResponse["workers"]; chats: (operatorHref: string) => ComponentChild;
  /** The chat's control and its one shared answer state: the context card answers through them, never a second path. */
  control: ControlView | undefined; answering: Answering;
  /** False for a historical transcript file: only the current chat opens its inspector by default. */
@@ -117,7 +117,7 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
  if (!active) return {trigger: null, surfaces: null, conversations: null, composer: null, openJob: null, flight: null};
  const context = {asks: chat.asks, live: chat.live.filter(w => matchesProject(w.project, selection)), selection, onClose: dismiss, onJob: pickJob,
   control: chat.control, answering: chat.answering, jobs: flight, jobsError: jobs.error, current: chat.current,
-  onJobs: () => openDrawer(toggle.current), onAnswer: () => { if (panel === "sheet") closePanel(); chat.onAnswer(); }};
+  onJobs: () => openDrawer(toggle.current)};
  const asked = chat.asks.length;
  return {
   trigger: <>

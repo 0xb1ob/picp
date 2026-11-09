@@ -122,7 +122,7 @@ A project shows only the matching sections of a split reply (a `[a, b]` section 
 replacing them) include it; *Untagged* shows general sections, a mixed reply's preamble included, and every entry with
 no project (tool runs, notices and cards too). *Show original* still renders the untouched reply. It filters the loaded
 window only: *Recent entries only* still shows, *No loaded entries for <name>* means no match, *No recorded entries*
-no records. Pending sends, quick replies, warnings, pinned decisions and the composer keep the full data.
+no records. Pending sends, quick replies, warnings, the open asks and the composer keep the full data.
 **List filter** (M1 PR2): the same select and hash sit on Overview, Decisions, the Jobs list and Reports; options
 are the projects the unfiltered rows name. Rows filter on recorded fields only: a job's fleet or ledger `project:`
 (Jobs' *Unassigned* is *Untagged*), an ask's `project`, a question or decision's job ids (a decided record's own
@@ -449,13 +449,8 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   headless Chrome (`tests/fixtures/sessions-chat-v2-browser.ts --stage pr5` fails on a page scroll, a target under
   44 px, a field under 16 px or a composer overlap); a physical iPhone keyboard remains a device check. The whole app
   disables zoom (viewport `maximum-scale=1, user-scalable=no, viewport-fit=cover`, `touch-action: manipulation`).
-- **Pinned decisions** (cp-6kt6; every width): open asks sit above the composer as one
-  "N decisions waiting ▾" bar (`aria-expanded`) that opens into a sheet of the full cards
-  (45vh, 60dvh below 900 px, scrolling inside) and closes after an answer. The open/collapsed
-  choice is remembered per browser (`localStorage` `cp-sessions-pinned-open`; collapsed by
-  default); the bar opens by itself only when an ask id it has not shown before appears
-  (`cp-sessions-pinned-seen`), never because the count alone changed. A storage that refuses
-  the write warns and the choice holds for the view.
+- **No inline decisions panel** (cp-dashboard-no-inline-decisions-58on): the chat renders no
+  pinned decisions bar or sheet; open asks are answered from the Context card ("Asked you", below) or quick replies.
 - **Decision cards** (`components/TranscriptAsk.tsx`): every operator ask sits right
   after the `cp_parent ask` call that raised it (an open ask with no call in the
   file is placed by when it was raised; the 300-entry window never drops one). One
@@ -520,7 +515,7 @@ imported only by `control-api.ts` and the image upload route `operator-upload-ap
 receives. There is no login or device allowlist: the HTTPS origin is reachable only
 from the operator's tailnet devices. No `<form>` (CSP `form-action 'none'`), no
 inline styles; `components/control.css` wraps long text and the action buttons at
-390 px and lets the pinned decisions run the transcript pane's full width at 1440 px; the messages and the composer share one column, 720 px centred with 28 px sides from 900 px and 14 px sides on a phone (chat v2 and M3, below).
+390 px; the messages and the composer share one column, 720 px centred with 28 px sides from 900 px and 14 px sides on a phone (chat v2 and M3, below).
 
 P3a server controls also accept `save_policy`, `adopt`, `deactivate`, expected `revision`, a validated draft `policy`
 and optional `client_id` correlation. Activated Run now requires its current revision. The policy route returns saved,
@@ -672,7 +667,7 @@ an ordinary link. An unreadable job shows the pane's existing alert; a new sessi
 
 **Chat context and Conversations (M3 slice 3, cp-zm9f).** The same Full transcript gains `Context` beside `Jobs ⌘J`
 (an amber badge counts the open asks). `ConversationContext.tsx` shows "This conversation": Asked you (the transcript's
-open asks; Answer opens the pinned decisions block) and In flight (the live workers in the M1 selection, each with
+open asks, answered here or by the chat's quick replies) and In flight (the live workers in the M1 selection, each with
 project, model, context, cost and last activity, "not recorded" when absent, Open job into the slice 2 pane and its
 Session link), then All jobs (the drawer). It is a 340 px inspector beside the chat from 1280 px, over the chat's right
 edge from 900 px, and a modal bottom sheet below. The phone's session bar adds a Conversations button: a 317 px modal

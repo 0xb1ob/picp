@@ -7,6 +7,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { HumanPrompt } from "../../src/awaiting-ui.ts";
 import type { CommandPost } from "../../src/command-post.ts";
 import type { OperatorModelPickReference, ThinkingLevel } from "../../src/contracts.ts";
+import { operatorTextsFromEntries } from "../../src/decide.ts";
 import type { ParentLock } from "../../src/parent-lock.ts";
 import type { PlanTarget } from "../../src/plan-view.ts";
 import type { ScheduleRunner } from "../../src/schedule-runner.ts";
@@ -14,6 +15,37 @@ import type { ProjectOf } from "../../src/project-report.ts";
 import type { RecordedSessionTool } from "../../src/session-tools.ts";
 import { WedgedWatch } from "../../src/wedged.ts";
 import type { OpenPlanViewerDeps } from "./plan-viewer.ts";
+
+/**
+ * What a cp_* tool body reads of its caller: pi builds it from its ctx (`piToolContext`), a native parent from its entry.
+ * `sessionId` and `notify` serve cp_status_block's Shipped memory key and its warnings.
+ */
+export interface ParentToolContext {
+	registry?: unknown;
+	operatorTexts(): string[];
+	cwd: string;
+	headless: boolean;
+	sessionId(): string;
+	notify(message: string, level: "info" | "warning" | "error"): void;
+}
+
+/** The pi path's ParentToolContext; every pi member is read at call time, as the tool bodies read `ctx` before. */
+export function piToolContext(ctx: ExtensionContext): ParentToolContext {
+	return {
+		get registry() {
+			return ctx.modelRegistry;
+		},
+		operatorTexts: () => operatorTextsFromEntries(ctx.sessionManager.getEntries()),
+		get cwd() {
+			return ctx.cwd;
+		},
+		get headless() {
+			return !ctx.hasUI;
+		},
+		sessionId: () => ctx.sessionManager.getSessionId(),
+		notify: (message, level) => ctx.ui.notify(message, level),
+	};
+}
 
 export interface ExtensionDeps {
 	commandPost: (modelRegistry?: unknown) => CommandPost;
