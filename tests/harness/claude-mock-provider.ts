@@ -2,10 +2,11 @@
  * Loopback fake of the Anthropic Messages API for the real `claude` CLI (native worker spike), synthetic credentials
  * only. A scripted step answers each request that offers tools; others get a short text. Auth headers are recorded.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { LAYOUT } from "../../src/contracts.ts";
 import { routeNamed } from "./routing-names.ts";
 
@@ -13,6 +14,18 @@ export const FAKE_CLAUDE_AUTH_TOKEN = "picp-synthetic-claude-token";
 export const FAKE_CLAUDE_MODEL = "claude-picp-fake";
 /** The routed ref a native dispatch names: an explicit `anthropic/claude-…` id, as S1 requires. */
 export const FAKE_NATIVE_MODEL = `anthropic/${FAKE_CLAUDE_MODEL}`;
+
+/** tests/fixtures/fake-claude.ts: a stand-in `claude` CLI that talks to this provider, for hosts without Claude Code. */
+export const FAKE_CLAUDE_CLI = fileURLToPath(new URL("../fixtures/fake-claude.ts", import.meta.url));
+
+/** Writes `<binDir>/claude` running FAKE_CLAUDE_CLI under this node; put `binDir` first on PATH to use it. */
+export function installClaudeStub(binDir: string): string {
+	if ([process.execPath, FAKE_CLAUDE_CLI].some((path) => path.includes("'"))) throw new Error("the claude stub needs paths without a single quote");
+	mkdirSync(binDir, { recursive: true });
+	const file = join(binDir, "claude");
+	writeFileSync(file, `#!/bin/sh\nexec '${process.execPath}' '${FAKE_CLAUDE_CLI}' "$@"\n`, { mode: 0o755 });
+	return file;
+}
 
 /** Allows and routes `models` (default: the fake native model) in `home`, so a native dispatch may name them. */
 export function routeNativeModel(home: string, models: readonly string[] = [FAKE_NATIVE_MODEL]): void {
