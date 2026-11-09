@@ -122,7 +122,7 @@ import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integ
 import { HeldContinuation } from "./held-continuation.ts";
 import { readReviewMergeWindow } from "./review-merge-window.ts";
 import { IntegrationHolds } from "./integration-hold.ts";
-import { CI_FLAKES_FILE, CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
+import { CI_FLAKES_FILE, CiRerunStore, maybeRerunInfra, readFailingTests } from "./ci-infra-rerun.ts";
 import { HeldRelease } from "./held-release.ts";
 import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
 import { ArmedDispatches } from "./dependency-dispatch.ts";
@@ -649,6 +649,7 @@ export class CommandPost {
 					job.branch,
 					job.job_id,
 				),
+			failingTests: async (job, run, prUrl) => readFailingTests(this.#clonePath(job.job_id), run, prUrl),
 			onObserved: (jobId, observation) => this.observeCi(jobId, observation),
 		});
 		// cp-wlhu S5: read-only GETs against registered project repos; evidence, never authorization.

@@ -35,3 +35,11 @@ export function ciRunRef(runs: readonly CiRun[], head: string | undefined, prUrl
 export function formatRunRef(ref: CiRunRef): string {
 	return ref.run_id === undefined ? "" : ` (run ${ref.run_id}${ref.run_url ? ` ${ref.run_url}` : ""})`;
 }
+
+/** One bounded line naming a red fact's failing tests (src/ci-watch.ts reads them), or why none are named. */
+export function failingTestsLine(fact: { failing_tests?: readonly string[]; failing_tests_unread?: string }): string {
+	const tests = fact.failing_tests ?? [];
+	if (tests.length === 0) return `failing tests: none named — ${fact.failing_tests_unread ?? "the failed log lists no failing test (a non-test step failed, or the log is cut)"}`;
+	const shown = tests.slice(0, 10).join("; ");
+	return `failing tests (${tests.length}): ${shown.length > 400 ? `${shown.slice(0, 400)}…` : shown}${tests.length > 10 ? `; +${tests.length - 10} more` : ""}`;
+}
