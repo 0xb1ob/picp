@@ -27,8 +27,8 @@ import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { ParentRestart } from "../components/ParentRestart.tsx";
 import { type ControlView, controlReady } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
-import { QuickReplies, useAnswering } from "../components/QuickReplies.tsx";
-import { dayKey, dayStarts, isOwn, lastDay, replyAsk, rollups, type Row, rowHead, rows } from "../session-rows.ts";
+import { useAnswering } from "../components/Answering.tsx";
+import { dayKey, dayStarts, isOwn, lastDay, rollups, type Row, rowHead, rows } from "../session-rows.ts";
 import { InRollup, type OpenTranscript, RelayRollup, transcriptClick } from "../components/RelayRollup.tsx";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
@@ -317,12 +317,11 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const order=new Map(data.entries.map((e,i)=>[e.id,i]));
  const rowList=rows(shown,dayStarts(shown,null),order);
  // Tools on, every row stands alone: rollups fold relay turns only in the chat view of the operator transcript.
- const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), base=rows(list,days,order), rl=data.transcript === true && !showTools ? rollups(base,days,order,data.pr_chips ?? {},replyAt) : base, st=groupStarts(rl,days);
+ const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), base=rows(list,days,order), rl=data.transcript === true && !showTools ? rollups(base,days,order,data.pr_chips ?? {}) : base, st=groupStarts(rl,days);
  const node=(row:Row):ComponentChild=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : row.kind === "steps" ? <Steps key={row.key} row={row} open={showTools || openRuns.includes(row.key)} onToggle={showTools ? undefined : ()=>toggleRun(row.key)} onTranscript={toTranscript}/> : <RelayRollup key={row.key} row={row} render={node} onTranscript={toTranscript}/>;
  return rl.flatMap(row=>{
   const head=rowHead(row), label=days.get(head.id);
-  const out=label ? [dayPill(head.id,head.at,label),node(row)] : [node(row)];
-  return replies && row.kind === "entry" && row.entry.id === replyAt ? [...out,replies] : out;
+  return label ? [dayPill(head.id,head.at,label),node(row)] : [node(row)];
  });};
  const toolCalls=shown.filter(e=>e.kind === "tool").length;
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "steps" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
@@ -339,11 +338,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const history=data.transcript === true && !!data.operator_session && !!files[0] && data.operator_session !== files[0].id;
  const last=data.selected === "you" && data.transcript === true && !history ? data.entries.findLast(e=>isBubble(e) && e.text.trim() !== "") : undefined;
  const preview=last && `${isOwn(last) ? "You: " : ""}${last.text.replace(/[`*#>|]/g,"").replace(/\s+/g," ").trim().slice(0,200)}`;
- // Quick replies follow the newest shown operator-session message or card (else the rows), before the pending tail.
- const replyTo=data.selected === "you" && data.transcript === true && !history ? replyAsk(data.entries,open) : null;
  const answering=useAnswering(control);
- const replies=replyTo && <QuickReplies key={`replies-${replyTo.id}`} ask={replyTo} control={control} answering={answering}/>;
- const replyAt=replies ? shown.findLast(e=>!isOwn(e) && (isBubble(e) || e.kind === "ask"))?.id : undefined;
  const state=headerState(data,control?.status,history);
  const shell=useContext(ShellContext);
  // Combine: from 900 px the chat column carries the rail's chrome, so the shell drops its own rail.
@@ -389,7 +384,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
-    <div class="session-entries"><PrChips.Provider value={data.pr_chips ?? {}}><VisibleSections.Provider value={picked.sections}>{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{data.entries.length > 0 && !shown.length && selection && <p class="session-empty" role="status">{"project" in selection ? `No loaded entries for ${selection.project}` : "No untagged loaded entries"}</p>}{renderRows(shown,null)}{!replyAt && replies}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</VisibleSections.Provider></PrChips.Provider></div>
+    <div class="session-entries"><PrChips.Provider value={data.pr_chips ?? {}}><VisibleSections.Provider value={picked.sections}>{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{data.entries.length > 0 && !shown.length && selection && <p class="session-empty" role="status">{"project" in selection ? `No loaded entries for ${selection.project}` : "No untagged loaded entries"}</p>}{renderRows(shown,null)}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</VisibleSections.Provider></PrChips.Provider></div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && control && <OperatorComposer control={control} draft={draft} reference={reference} chat={workspace.composer}/>}

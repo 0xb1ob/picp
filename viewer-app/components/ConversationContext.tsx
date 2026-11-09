@@ -7,12 +7,12 @@ import type { ProjectSelection } from "../project-filter.ts";
 import { sessionHref } from "../routes.ts";
 import { contextText } from "./ContextChip.tsx";
 import { Icon } from "./icons.tsx";
-import { AnswerLine, type Answering, answerView } from "./QuickReplies.tsx";
+import { AnswerLine, type Answering, answerView } from "./Answering.tsx";
 
 type Worker = SessionsResponse["workers"][number];
 /**
  * `jobs`: `/api/jobs` by exact job id, null until read; `jobsError` names a failed read (facts stay unrecorded).
- * `current` false is a historical file: like its quick replies, the card's options refuse to answer there.
+ * `current` false is a historical file: the card's options refuse to answer there.
  */
 export interface ContextProps {
  asks: AwaitingDetail[]; live: Worker[]; selection: ProjectSelection; control: ControlView | undefined; answering: Answering;

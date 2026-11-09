@@ -92,19 +92,9 @@
 .session-menu .session-file-picker { padding: 0 8px 0 14px; }
 .session-menu .session-file-picker select { flex: 1 1 auto; }
 .session-menu .parent-restart { flex-direction: column; align-items: stretch; padding: 0 8px; max-width: 360px; }
-/* Quick replies: one ask's verbatim options as chips after the newest operator-session message; the consequence is the
-   title and the chip's screen-reader description. */
-.session-replies { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 4px 0 12px; }
-.session-replies-to, .session-replies-state { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+/* The context card's answer state line. */
+.session-replies-state { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .session-replies-failed { color: var(--secondary); }
-.session-replies-chips { display: flex; flex-wrap: wrap; gap: 10px 8px; min-width: 0; }
-.session-reply-wrap { position: relative; min-width: 0; max-width: 100%; }
-.session-reply { position: relative; min-height: 38px; max-width: 100%; padding: 6px 14px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 19px; font: inherit; font-size: 13px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
-/* A 38 px face (34 px at 900 px and up) in a 44 px hit area; rows sit 10 px apart so no two areas overlap. */
-.session-reply::after { content: ""; position: absolute; inset: -3px 0; }
-.session-reply-recommended { border-color: var(--text); }
-.session-reply:disabled { opacity: 0.5; cursor: default; }
-.session-replies-why { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .session-tools-toggle { display: flex; align-items: center; flex-shrink: 0; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .session-tools-toggle[aria-pressed=true] { background: var(--toggle); color: var(--text); }
 /* A collapsed run of tool calls: one faint borderless line "▸ N tool calls — first summary" (tool-run.css). */
@@ -364,6 +354,4 @@
  .session-rollup-head, .session-rollup-meta { padding-left: 28px; }
  .session-rollup-toggle { min-height: 32px; }
  .session-new-wrap { bottom: 24px; }
- .session-reply { min-height: 34px; border-radius: 17px; }
- .session-reply::after { inset: -5px 0; }
 }

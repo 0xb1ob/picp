@@ -1,6 +1,5 @@
 /**
- * Rollup units no e2e transcript can produce (P19b): an order gap in the source index and an anchor on a run's
- * middle turn. P19-rollup-* pin the served folds.
+ * Rollup units no e2e transcript can produce (P19b): an order gap in the source index. P19-rollup-* pin served folds.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -14,15 +13,13 @@ const relay = (id: string, text = id, over: Partial<SessionEntry> = {}) => entry
 const CHIPS: Record<string, PrChip> = {};
 
 /** Each output row: a rollup as `subject[turn rows|turn rows]` by head ids, any other row by its head id. */
-function fold(list: SessionEntry[], { days = new Map<string, string>(), order, keep }: { days?: Map<string, string>; order?: Map<string, number>; keep?: string } = {}) {
+function fold(list: SessionEntry[], { days = new Map<string, string>(), order }: { days?: Map<string, string>; order?: Map<string, number> } = {}) {
 	const o = order ?? new Map(list.map((e, i) => [e.id, i]));
-	return rollups(rows(list, days, o), days, o, CHIPS, keep).map(r => r.kind === "rollup" ? `${r.subject}[${r.turns.map(t => t.map(x => rowHead(x).id).join(",")).join("|")}]` : rowHead(r).id);
+	return rollups(rows(list, days, o), days, o, CHIPS).map(r => r.kind === "rollup" ? `${r.subject}[${r.turns.map(t => t.map(x => rowHead(x).id).join(",")).join("|")}]` : rowHead(r).id);
 }
 
-test("rollups: never across a source gap; a run ends before the quick-reply anchor's turn", () => {
+test("rollups: never across a source gap", () => {
 	const ids = (list: SessionEntry[]) => list.map(e => e.id);
 	const two = [wake("w1", "cp-b"), relay("r1"), wake("w2", "cp-b"), relay("r2")];
 	assert.deepEqual(fold(two, { order: new Map([["w1", 0], ["r1", 1], ["w2", 7], ["r2", 8]]) }), ids(two), "(e) an order gap");
-	const three = [wake("w1", "cp-b"), relay("r1"), wake("w2", "cp-b"), relay("r2"), wake("w3", "cp-b"), relay("r3")];
-	assert.deepEqual(fold(three, { keep: "r2" }), ["w1", "r1", "w2", "r2", "w3", "r3"], "(g) an anchor on the middle turn folds nothing");
 });

@@ -79,7 +79,7 @@ const sessions: SessionsResponse = {
 	generated_at: GENERATED, selected: "you", session_id: "op-session", entries, title: "Operator ↔ you", subtitle: "Full transcript", warnings: [], truncated: false,
 	parent: { id: "cp-parent", kind: "parent", live: true, last_activity: "2026-10-15T08:04:20Z" }, workers, transcript: true, operator_sessions: [{ id: "op.jsonl", at: GENERATED }], operator_session: "op.jsonl",
 };
-/** PR 4: one open ask carded in the transcript, so its literal options become quick replies; a second one hides them. */
+/** PR 4: one open ask carded in the transcript; its options answer on the Context card, never as chips in the chat. */
 const asked = (id: string, question: string) => ({ id, project: "picp", question, created_at: "2026-10-15T08:04:40Z", recommendation: "Merge after CI",
 	options: [{ label: "Merge after CI", consequence: "Lands once the pushed head is green", reply: "" }, { label: "Hold for review", consequence: "Waits for a second review pass", reply: "" },
 		{ label: "Close the PR without merging and file the remaining work as a new job", consequence: "Nothing lands; a long label wraps inside its chip", reply: "" }],
@@ -429,7 +429,6 @@ try {
 				step_names: [...document.querySelectorAll(".session-steps-open .session-steps-rows .session-tool summary > code")].map(c => c.textContent + " " + c.clientWidth + "/" + c.scrollWidth + "px"),
 				clipped: [...document.querySelectorAll(".session-steps-open .session-steps-rows .session-tool summary > code")].filter(c => c.scrollWidth > c.clientWidth).map(c => c.textContent),
 				summary_x: [...document.querySelectorAll(".session-steps-open .session-steps-rows")].map(card => [...new Set([...card.querySelectorAll(".session-tool > summary > span")].map(s => Math.round(s.getBoundingClientRect().left)))]),
-				replies: [...document.querySelectorAll(".session-replies .session-reply")].map(b => b.textContent + (b.disabled ? " (disabled)" : "")),
 				heading: document.querySelector(".session-heading")?.innerText ?? null, composer: document.querySelector(".operator-composer textarea")?.placeholder ?? null,
 				columns: [".shell-sidebar", ".session-sidebar", ".session-panel"].map(s => Math.round(document.querySelector(s)?.getBoundingClientRect().width ?? 0)),
 				chats: [...document.querySelectorAll(".session-sidebar .session-choice strong")].map(e => e.getAttribute("aria-label") ?? e.textContent),
@@ -520,27 +519,21 @@ try {
 		if (posts.length) throw new Error(`pr3 sent ${posts.join(", ")}: the Chats list must request nothing`);
 	}
 	if (stage === "pr4") {
-		const chips = `document.querySelectorAll(".session-replies .session-reply").length === 3`, at = (selector: string): [string, string] =>
+		// The ask is one bubble with no option chips under it: no chat button carries an option's label.
+		const bubble = `!!document.querySelector(".session-ask-pointer") && ![...document.querySelectorAll(".session-panel button")].some(b => ${JSON.stringify(["Merge after CI", "Hold for review"])}.includes(b.textContent))`;
+		const at = (selector: string): [string, string] =>
 			[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector("${selector}").getBoundingClientRect().top - t.getBoundingClientRect().top - 260; })()`, "true"];
 		for (const theme of ["dark", "light"] as const) {
-			await capture(`pr4-replies-desktop-${theme}-1440x1000`, transcript, 1440, 1000, theme, loaded, "bottom", [["true", chips], at(".session-replies")]);
-			await capture(`pr4-replies-phone-${theme}-390x844`, transcript, 390, 844, theme, loaded, "bottom", [["true", chips], at(".session-replies")]);
+			await capture(`pr4-ask-desktop-${theme}-1440x1000`, transcript, 1440, 1000, theme, loaded, "bottom", [["true", bubble]]);
+			await capture(`pr4-ask-phone-${theme}-390x844`, transcript, 390, 844, theme, loaded, "bottom", [["true", bubble]]);
 		}
 		// Step names at phone width: cp_integrate and fetch_content fit, every summary at one x (the run fails otherwise).
 		await capture("pr4-steps-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-open")`], at(".session-steps-open")]);
 		// The ⋮ menu carries the transcript file picker and Tools N above the shell's rows.
 		await capture("pr4-header-menu-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [[`document.querySelector(".page-header .shell-more > summary").click()`,
 			`!!document.querySelector(".shell-more[open] .session-menu .session-file-picker") && !!document.querySelector(".shell-more[open] .session-menu .session-tools-toggle")`]]);
-		// A chip is one exact answer POST; this read-only fixture refuses it, so the failure line shows and the chips re-enable.
-		await capture("pr4-reply-failed-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [["true", chips], [`document.querySelector(".session-reply").click()`, `!!document.querySelector(".session-replies-failed") && !document.querySelector(".session-reply").disabled`], at(".session-replies")]);
-		if (posts.join() !== "POST /api/operator/message") throw new Error(`pr4: a chip click sent ${posts.join(", ") || "nothing"}, not one answer`);
-		const [entriesBefore, asksBefore] = [sessions.entries, sessions.open_asks!];
-		const second = asked("ask-pr4b", "Also rotate the fixture token?");
-		sessions.entries = [...entriesBefore, askCard(second, "2026-10-15T08:04:50Z")]; sessions.open_asks = [...asksBefore, second];
-		await capture("pr4-two-asks-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [["true", `!document.querySelector(".session-replies")`]]);
-		sessions.entries = entriesBefore; sessions.open_asks = asksBefore;
 		sessions.operator_sessions = [{ id: "op-newer.jsonl", at: GENERATED }, { id: "op.jsonl", at: "2026-10-15T08:00:00Z" }];
-		await capture("pr4-history-desktop-light-1440x1000", transcript, 1440, 1000, "light", loaded, "bottom", [["true", `!document.querySelector(".session-replies") && /Historical transcript/.test(document.querySelector(".session-heading").innerText)`]]);
+		await capture("pr4-history-desktop-light-1440x1000", transcript, 1440, 1000, "light", loaded, "bottom", [["true", `/Historical transcript/.test(document.querySelector(".session-heading").innerText)`]]);
 		sessions.operator_sessions = [{ id: "op.jsonl", at: GENERATED }];
 		routes["/api/operator/control"] = { ...control, running: false, offline: true, busy: false, pending: false, token: null, inbox_token: "i".repeat(64) };
 		await capture("pr4-offline-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom");
