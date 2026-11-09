@@ -1,0 +1,1 @@
+- Red CI (F5): the known-flake rerun in `cp_integrate` refuses a failure whose test file the PR's own diff changed (`git diff --name-only origin/<base>...<head>`), so it goes to the implementer's repair; an unreadable diff refuses too. The `cp-ci` CI RED wake names the failing run's tests from its `--log-failed` `✖ failing tests:` block, or says why none are named.
