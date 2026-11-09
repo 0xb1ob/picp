@@ -24,14 +24,14 @@ import { formatMandateDefaults, loadMandateDefaults, MANDATE_HOME_ONLY_FIELDS, r
 import { liveUsageJobs, raiseTokenCap } from "../../src/mandate-usage.ts";
 import { cpNext, dedupeNext, formatNext, writeNextSnapshot } from "../../src/next.ts";
 import { homeMandateProjects } from "../../src/project-report.ts";
-import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
+import { decide, DecideError, requireOperatorQuote } from "../../src/decide.ts";
 import { preapprovalRecord } from "../../src/risk-preapproval.ts";
 import { requireRoutedPreference } from "../../src/routed-models.ts";
 import { loadRoutingConfig } from "../../src/routing.ts";
 import { EscalationError } from "../../src/escalation.ts";
 import { batchRiskHigh } from "../../src/risk-batch.ts";
 import { currentRuntime, escalateToolText } from "./helpers.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, piToolContext } from "./shared.ts";
 import { SCHEDULE_RUN_ID } from "../../src/viewer/schedule-run-core.ts";
 
 export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
@@ -132,7 +132,8 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const post = commandPost(ctx.modelRegistry);
+			const tc = piToolContext(ctx);
+			const post = commandPost(tc.registry);
 			const jobs = liveUsageJobs(post.fleet, post.runs);
 			try {
 				if (params.action === "replace_work") {
@@ -179,7 +180,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					const mandate = post.mandates.setReviewerModel(params.mandate_id, params.reviewer_model);
 					return { content: [{ type: "text", text: `${mandate.id} reviewer model: ${mandate.reviewer_model ?? "unset"}` }], details: mandate as unknown as Record<string, unknown> };
 				}
-				const operatorTexts = () => operatorTextsFromEntries(ctx.sessionManager.getEntries());
+				const operatorTexts = () => tc.operatorTexts();
 				if (params.action === "preapprove_risk") {
 					if (!params.mandate_id || !params.operator_quote) throw new MandateError("cp_mandate preapprove_risk needs mandate_id and operator_quote");
 					const record = preapprovalRecord(requireOperatorQuote(params.operator_quote, { operatorTexts: operatorTexts() }), resolveMandateJobIds(params.job_ids, deps.createdThisTurn), isoTimestamp());
@@ -317,7 +318,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			full: Type.Optional(Type.Boolean({ description: "Return the whole answer even when it is identical to the last one (after losing context)" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const cmdPost = commandPost(ctx.modelRegistry);
+			const cmdPost = commandPost(piToolContext(ctx).registry);
 			const result = await cpNext(
 				{
 					packageRoot: cmdPost.packageRoot,
@@ -392,7 +393,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const post = commandPost(ctx.modelRegistry);
+			const post = commandPost(piToolContext(ctx).registry);
 			if (params.action === "withdraw") {
 				const id = params.escalation_id?.trim();
 				const reason = params.reason?.trim();
@@ -504,7 +505,8 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const post = commandPost(ctx.modelRegistry);
+			const tc = piToolContext(ctx);
+			const post = commandPost(tc.registry);
 			const items = await post.awaitingSnapshot();
 			try {
 				const result = await decide(
@@ -533,7 +535,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 							return undefined;
 						},
 						usageJobs: () => liveUsageJobs(post.fleet, post.runs),
-						operatorTexts: operatorTextsFromEntries(ctx.sessionManager.getEntries()), answerEscalation: (id, answer, by, basis, provenance) => post.escalations.answer(id, { answer, by, basis, ...(provenance ? { provenance } : {}) }),
+						operatorTexts: tc.operatorTexts(), answerEscalation: (id, answer, by, basis, provenance) => post.escalations.answer(id, { answer, by, basis, ...(provenance ? { provenance } : {}) }),
 						getEscalation: (id) => post.escalations.get(id),
 					},
 				);

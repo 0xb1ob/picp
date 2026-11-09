@@ -18,7 +18,6 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import type { CommandPost } from "../../src/command-post.ts";
-import { operatorTextsFromEntries } from "../../src/decide.ts";
 import { addTaskAddendum } from "../../src/task-addenda.ts";
 import { DELIVERIES, JOB_KINDS, JOB_STATUSES, jobLabelErrors, type Job, type JobStatus, RISK_CRITERIA, RISKS, type Runtime } from "../../src/contracts.ts";
 import { type EscalationStore, raiseConflictingRef } from "../../src/escalation.ts";
@@ -29,6 +28,7 @@ import { resolveProjectArg } from "../../src/mode.ts";
 import { admitScheduledMember, readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../../src/schedule-expand.ts";
 import { openScheduleRunStore, type ScheduleRunStore } from "../../src/schedule-runs.ts";
 import { describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "../../src/verify-external-ref.ts";
+import { piToolContext } from "./shared.ts";
 
 export const JOB_ACTIONS = [
 	"create",
@@ -502,8 +502,9 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 		],
 		parameters: JobActionSchema,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const jobPorts = portsFor(ports.commandPost(ctx.modelRegistry), ports.runtime());
-			if (params.action === "amend") jobPorts.operatorTexts = operatorTextsFromEntries(ctx.sessionManager.getEntries());
+			const tc = piToolContext(ctx);
+			const jobPorts = portsFor(ports.commandPost(tc.registry), ports.runtime());
+			if (params.action === "amend") jobPorts.operatorTexts = tc.operatorTexts();
 			if (ports.onJobCreated) jobPorts.noteCreated = ports.onJobCreated;
 			const result = await runJobAction(params, jobPorts);
 			return { content: [{ type: "text", text: result.text }], details: result.details };

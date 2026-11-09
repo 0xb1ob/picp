@@ -9,12 +9,12 @@ import { formatMerge } from "../../src/merges.ts";
 import { formatIntegration } from "../../src/integrate.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { type FleetRecord, type MergeStrategy } from "../../src/contracts.ts";
-import { operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
+import { requireOperatorQuote } from "../../src/decide.ts";
 import { FORWARDED_RESULTS, type ForwardedResult, recordForwardedCi } from "../../src/ci-evidence.ts";
 import { parsePrUrl } from "../../src/ci-watch.ts";
 import { pendingStackActions, StackFollowups } from "../../src/stack-followups.ts";
 import { formatTeardown } from "../../src/teardown.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, piToolContext } from "./shared.ts";
 
 export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
 	const { commandPost, setLive, refreshWidget } = deps;
@@ -44,12 +44,13 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
+			const tc = piToolContext(ctx);
 			if (params.operator_quote !== undefined && !params.force) throw new Error("cp_teardown: operator_quote authorizes force; pass force: true with it, or neither");
 			// issue #2: verified before anything runs; Teardown decides whether force needs it (unreported_live_worker).
 			const verified = params.force && params.operator_quote !== undefined
-				? requireOperatorQuote(params.operator_quote, { operatorTexts: operatorTextsFromEntries(ctx.sessionManager.getEntries()) })
+				? requireOperatorQuote(params.operator_quote, { operatorTexts: tc.operatorTexts() })
 				: undefined;
-			const result = await commandPost(ctx.modelRegistry).tearDown(params.job_id, {
+			const result = await commandPost(tc.registry).tearDown(params.job_id, {
 				...(params.force ? { force: true, requireAuthorization: true } : {}),
 				...(verified ? { authorization: { by: verified.decidedBy, quote: verified.stored.operator_quote } } : {}),
 			});
@@ -86,7 +87,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 		// what was not observed, and nothing is ever half-written on that path.
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const result = await commandPost(ctx.modelRegistry).recordMerge({
+			const result = await commandPost(piToolContext(ctx).registry).recordMerge({
 				jobId: params.job_id,
 				...(params.pr ? { pr: params.pr } : {}),
 				...(params.strategy ? { strategy: params.strategy as MergeStrategy } : {}),
@@ -156,7 +157,8 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const post = commandPost(ctx.modelRegistry);
+			const tc = piToolContext(ctx);
+			const post = commandPost(tc.registry);
 			const holds = new IntegrationHolds(post.home);
 			if (params.action === "hold" || params.action === "release") {
 				const hold = params.action === "hold" ? holds.hold(params.job_id, params.reason ?? "") : (holds.release(params.job_id), null);
@@ -168,7 +170,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			}
 			if (params.action === "record_ci") {
 				if (!params.head_sha || !params.result || !params.operator_quote) throw new Error("cp_integrate record_ci needs head_sha, result and operator_quote");
-				const verified = requireOperatorQuote(params.operator_quote, { operatorTexts: operatorTextsFromEntries(ctx.sessionManager.getEntries()) });
+				const verified = requireOperatorQuote(params.operator_quote, { operatorTexts: tc.operatorTexts() });
 				const record = post.fleet.require(params.job_id);
 				const prUrl = record.awaiting_merge?.pr_url ?? record.receipts?.find((receipt) => receipt.kind === "pr" && receipt.url)?.url;
 				const pr = prUrl ? parsePrUrl(prUrl) : undefined;
@@ -267,8 +269,9 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const store = commandPost(ctx.modelRegistry).artifacts;
-			const cwd = ctx.cwd;
+			const tc = piToolContext(ctx);
+			const store = commandPost(tc.registry).artifacts;
+			const cwd = tc.cwd;
 			if (params.action === "path") {
 				const path = store.path(params.job_id);
 				return {
