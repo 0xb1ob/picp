@@ -110,7 +110,10 @@ export async function resolveDriverRoute(
 const rowOf = (picked: ReturnType<typeof pickModel>, config: RoutingConfig) =>
 	picked.source === "rubric" ? config.rubric.find((row) => row.id === picked.rule) : undefined;
 
-/** J4: the row the role would get without the override; only its `driver` is read. No row (or a refused one) is pi. */
+/**
+ * J4: the row the role would get without the override; only its `driver` is read. No row (or a refused one) is pi.
+ * The J5 walk reads a row's fallbacks only without an override: an explicit model is never substituted.
+ */
 function overrideRow(route: RouteRequest, config: RoutingConfig): RoutingConfig["rubric"][number] | undefined {
 	try {
 		return rowOf(pickModel({ ...route, override: undefined }, config), config);

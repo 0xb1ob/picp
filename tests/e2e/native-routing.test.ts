@@ -511,6 +511,30 @@ test("J5 fallback walk: a blocked explicit opus override never runs the row's so
 	assert.equal(h.claude.requests.length, 0, "a preview reached the native model");
 });
 
+// Scenario: Given a job locked to claude on a row opus with fallback sonnet, and its run spent seven_day_opus
+//   When the job's re-dispatch is previewed with no model (a real one meets preflight's branch_exists)
+//   Then the lock pins the driver, not the model: it routes native on sonnet and driver_reason names the opus window
+test("J5 fallback walk: a claude-locked job whose opus window is spent routes native on the row's sonnet fallback", { skip, timeout: 300_000 }, async (t) => {
+	const spent: ClaudeStep = { kind: "text", text: "Spent.", limit: { status: "rejected", claim: "seven_day_opus", resetsAt: Math.floor(Date.now() / 1000) + 3600 } };
+	const h = await routedHome(t, [spent], { subscriber: true });
+	const [opus, sonnet] = [`${FAKE_NATIVE_MODEL}-opus`, `${FAKE_NATIVE_MODEL}-sonnet`];
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ ...JSON.parse(h.routing({ driver: "claude", model: opus, fallbacks: [sonnet, h.piModel] })) as object,
+		allow: ["mock/*", opus, sonnet] }));
+	h.toggle(true);
+	const job = await h.job();
+	const env = { ...h.env, CP_NATIVE_MAX_TURNS: "1" };
+	await h.b.run([{ kind: "tool_calls", calls: [dispatch(job.id)] }], env);
+	assert.deepEqual([h.fleet(job.id)?.worker.driver, h.fleet(job.id)?.worker.model], ["claude", opus]);
+	await waitFailed(h.fleet, job.id);
+	assert.equal(readNativeAvailability(h.b.home)?.windows.seven_day_opus?.status, "rejected");
+	await h.b.closeParents();
+	const end = ((await h.b.run([{ kind: "tool_calls", calls: [dispatch(job.id, { dry_run: true })] }], env)) as Tool[]).find((e) => e.toolName === "cp_dispatch");
+	assert.notEqual(end?.isError, true, text(end));
+	const decision = (end?.result.details as { decision?: { model?: string; driver?: string; driver_reason?: string } } | undefined)?.decision;
+	assert.deepEqual([decision?.model, decision?.driver], [sonnet, "claude"], decision?.driver_reason);
+	assert.match(decision?.driver_reason ?? "", /^lock: the job started on claude; effort high; window: seven_day_opus rejected until \S+; native fallback /);
+});
+
 // Scenario: Given a claude implementer row and a pipeline implementer_model anthropic/claude-sonnet-5-5
 //   When advance dispatches the implementer
 //   Then it runs native on sonnet
