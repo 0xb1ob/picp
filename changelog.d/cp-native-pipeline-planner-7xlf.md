@@ -1,0 +1,1 @@
+- Native pipeline planner (J3): a `cp_pipeline` research planner now runs on the native Claude driver when its routing row says `driver: "claude"` and `claude_research` is on. A gate revise reaches the same session (`queued` while the planner is busy, `resuming` once it is idle), and the revised report is accepted. The selection no longer returns the `pipeline` fallback reason.

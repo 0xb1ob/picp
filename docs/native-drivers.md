@@ -307,8 +307,7 @@ request refuses as `refused: <job> cannot run on the native claude driver: <reas
 | Condition | Refusal names |
 |---|---|
 | switch file unreadable or off | the setting and where to turn it on |
-| owned by a pipeline (`state/pipelines/<research id>`) | pipeline research stays on pi (D2) |
-| not research (role `planner`, delivery `local` or `answer`) | the job's kind/role/delivery; ship implementers run native since [N4f](#native-ship-jobs-n4f); review, plan, parent and operator roles never do |
+| not research (role `planner`, delivery `local`, `answer`, `board` or `pipeline`; a pipeline's planner runs native, [D2](#routing-level-driver-s1)) | the job's kind/role/delivery; ship implementers run native since [N4f](#native-ship-jobs-n4f); review, plan, parent and operator roles never do |
 | the home's native slots are full (fleet records with `worker.driver`, no observed exit, the job's own excluded) | `max_concurrent` and the live jobs ([N4i](#native-concurrency-and-the-flip-n4i)) |
 | `claude` missing or below the pinned floor `CLAUDE_VERSION_FLOOR` | `claude update` / install remedy |
 
@@ -437,7 +436,7 @@ changes until a row carries `driver: "claude"` **and** the switch is ON; the shi
 | a job whose fleet record already started (D1) | the recorded driver | a native job refuses rather than move to pi |
 
 **Fallback reasons** (`driver_reason` is `<code>: <why>`): `denied` (the native primary is outside `allow` or hit by
-`deny_by_role`), `switch`, `pipeline`, `ineligible`, `occupied`, `cli_missing`, `cli_version`, and from S2 `window`,
+`deny_by_role`), `switch`, `ineligible`, `occupied`, `cli_missing`, `cli_version`, and from S2 `window`,
 `auth`, `lockdown` (below). The pi lane is the row's `[model, ...fallbacks]` through `resolveWithCapacity`, unchanged.
 
 **Model and effort.** The native model is the row's own `model` (or an explicit override's), an explicit
@@ -445,8 +444,11 @@ changes until a row carries `driver: "claude"` **and** the switch is ON; the shi
 disables thinking, `low`/`medium`/`high`/`xhigh`/`max` set `effort`, `minimal` refuses, absent leaves the CLI default and
 the reason records `effort CLI default`. The worker gets it as `CP_NATIVE_THINKING`; revive passes the same level.
 
-**Eligibility (D2).** Only local and answer research (role `planner`) routes native; a pipeline's research child is
-recognised by its pipeline record, not its role, and stays on pi.
+**Eligibility (D2).** Research (role `planner`) with delivery `local`, `answer`, `board` or `pipeline` routes native,
+so a pipeline's planner runs on its row's driver like any other. A gate revise is an ordinary native follow-up:
+`queued` while the planner's turn runs, `resuming` the same session once it is idle, and the reopened slot takes the
+revised report. `cp_pipeline advance` then routes the implementer by its own row. No selection returns the
+`pipeline` code any more; it stays in `NativeRefusal` so recorded `driver_reason`s still read.
 
 **Lock (D1).** The driver is fixed at the first admitted spawn and persisted as `worker.driver` plus `routing.driver`
 and `routing.driver_reason`. A re-dispatch, revive, follow-up, continuation or recovery never reselects it; a fresh
