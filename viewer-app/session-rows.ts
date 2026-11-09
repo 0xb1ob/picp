@@ -1,4 +1,4 @@
-import type { AwaitingDetail, PrChip, SessionEntry } from "../src/viewer/api-types.ts";
+import type { PrChip, SessionEntry } from "../src/viewer/api-types.ts";
 import { linkify } from "../src/viewer/linkify.ts";
 
 /** The browser-local calendar day of an ISO time; null when missing or unparseable, so it never opens a day. */
@@ -64,10 +64,10 @@ const isHead = (row: Row) => row.kind === "steps" ? !!row.notice?.bridge : row.k
 const follows = (a: SessionEntry, b: SessionEntry, order: Map<string,number>) => order.get(b.id) === (order.get(a.id) ?? NaN) + 1;
 /**
  * The turn's subject: the one PR chip its relays name, else its job's one PR chip, else `job:<id>`. None for a turn
- * holding `keep` or a day start past its head: such a turn is never folded.
+ * holding a day start past its head: such a turn is never folded.
  */
-function subjectOf(rows: Row[], entries: SessionEntry[], days: Map<string,string>, chips: Record<string,PrChip>, keep?: string): string | null {
- if (entries.some((e,i) => e.id === keep || (i > 0 && days.has(e.id)))) return null;
+function subjectOf(rows: Row[], entries: SessionEntry[], days: Map<string,string>, chips: Record<string,PrChip>): string | null {
+ if (entries.some((e,i) => i > 0 && days.has(e.id))) return null;
  const named = new Set(rows.flatMap(row => row.kind === "entry" && row.entry.kind === "say"
   ? [...linkify(row.entry.text, row.entry.links).flatMap(s => s.href ? [s.href] : []), ...Object.values(row.entry.links ?? {})].map(clean) : []).filter(url => chips[url]?.kind === "pr"));
  if (named.size === 1) return `pr:${[...named][0]}`;
@@ -76,9 +76,9 @@ function subjectOf(rows: Row[], entries: SessionEntry[], days: Map<string,string
 }
 /**
  * Fold ≥2 consecutive turns with one subject into a rollup row, adjacent in `order`, with no day start
- * after its first row and never past `keep` (the quick-reply anchor). Every other row passes through in order.
+ * after its first row. Every other row passes through in order.
  */
-export function rollups(list: Row[], days: Map<string,string>, order: Map<string,number>, chips: Record<string,PrChip>, keep?: string): Row[] {
+export function rollups(list: Row[], days: Map<string,string>, order: Map<string,number>, chips: Record<string,PrChip>): Row[] {
  const out: Row[] = [];
  let run: Turn[] = [];
  const flush = () => { out.push(...(run.length > 1 ? [{kind:"rollup",key:`rollup-${run[0]!.entries[0]!.id}`,subject:run[0]!.subject!,turns:run.map(t => t.rows)} as Row] : run.flatMap(t => t.rows))); run = []; };
@@ -86,20 +86,11 @@ export function rollups(list: Row[], days: Map<string,string>, order: Map<string
   if (!isHead(list[i]!)) { flush(); out.push(list[i++]!); continue; }
   const rows = [list[i++]!];
   for (let next = list[i]; next?.kind === "entry" && next.entry.kind === "say" && !isOwn(next.entry) && follows(entriesOf(rows.at(-1)!).at(-1)!, next.entry, order); next = list[++i]) rows.push(next);
-  const entries = rows.flatMap(entriesOf), turn = {rows, entries, subject: subjectOf(rows, entries, days, chips, keep)};
+  const entries = rows.flatMap(entriesOf), turn = {rows, entries, subject: subjectOf(rows, entries, days, chips)};
   const last = run.at(-1)?.entries.at(-1);
   if (!(last && turn.subject === run[0]!.subject && !days.has(entries[0]!.id) && follows(last, entries[0]!, order))) flush();
   if (turn.subject) run.push(turn); else out.push(...rows);
  }
  flush();
  return out;
-}
-/**
- * The one open ask quick replies may answer: still open, carded in this transcript, and the only such ask.
- * None otherwise: chips are never guessed.
- */
-export function replyAsk(entries: SessionEntry[], open: AwaitingDetail[]): AwaitingDetail | null {
- const carded = new Set(entries.flatMap(e => e.kind === "ask" && e.ask?.state === "open" ? [e.ask.id] : []));
- const eligible = open.filter(ask => carded.has(ask.id));
- return eligible.length === 1 ? eligible[0]! : null;
 }

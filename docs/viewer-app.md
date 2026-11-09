@@ -122,7 +122,7 @@ A project shows only the matching sections of a split reply (a `[a, b]` section 
 replacing them) include it; *Untagged* shows general sections, a mixed reply's preamble included, and every entry with
 no project (tool runs, notices and cards too). *Show original* still renders the untouched reply. It filters the loaded
 window only: *Recent entries only* still shows, *No loaded entries for <name>* means no match, *No recorded entries*
-no records. Pending sends, quick replies, warnings, the open asks and the composer keep the full data.
+no records. Pending sends, warnings, the open asks and the composer keep the full data.
 **List filter** (M1 PR2): the same select and hash sit on Overview, Decisions, the Jobs list and Reports; options
 are the projects the unfiltered rows name. Rows filter on recorded fields only: a job's fleet or ledger `project:`
 (Jobs' *Unassigned* is *Untagged*), an ask's `project`, a question or decision's job ids (a decided record's own
@@ -443,14 +443,15 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   CP parent, Workers, each worker with its run phase), the tool-call toggle, Search, the session file
   picker and the file name, the Viewer version and Restart session. Escape or a tap outside closes it, Escape returns
   focus to ⋯. The composer is one row — attach, the 46 px auto-growing 16 px field, ⋯ steer/abort while busy, round
-  send, all 44 px; its own `#` picker and Options are desktop-only. Quick-reply chips are a 38 px face in a 44 px hit
-  area. Only the transcript scrolls; the shell follows `visualViewport` so the composer sits above the on-screen
+  send, all 44 px; its own `#` picker and Options are desktop-only. Only the transcript scrolls; the shell follows
+  `visualViewport` so the composer sits above the on-screen
   keyboard, and a reader scrolled up keeps their place while a new message raises **Jump to latest**. Measured in
   headless Chrome (`tests/fixtures/sessions-chat-v2-browser.ts --stage pr5` fails on a page scroll, a target under
   44 px, a field under 16 px or a composer overlap); a physical iPhone keyboard remains a device check. The whole app
   disables zoom (viewport `maximum-scale=1, user-scalable=no, viewport-fit=cover`, `touch-action: manipulation`).
 - **No inline decisions panel** (cp-dashboard-no-inline-decisions-58on): the chat renders no
-  pinned decisions bar or sheet; open asks are answered from the Context card ("Asked you", below) or quick replies.
+  pinned decisions bar or sheet and no option chips (cp-dashboard-no-ask-chips-lkq9); open asks are answered from the
+  Context card ("Asked you", below).
 - **Decision cards** (`components/TranscriptAsk.tsx`): every operator ask sits right
   after the `cp_parent ask` call that raised it (an open ask with no call in the
   file is placed by when it was raised; the 300-entry window never drops one). One
@@ -635,7 +636,7 @@ light-preference and dark-preference captures and `manifest.json`; `pr1` adds an
 `m3-transcript` all eight other screens and fails unless every capture is the dark palette, `pr2` the open steps card, a
 notice opened alone, tools shown, and a done job's Transcript tab reached through the card's link. From `pr2` on, an
 open card fails the run if a `cp_integrate` or `fetch_content` name is clipped, or if its summaries start at more than
-one x. `pr3` adds Chats with an empty Fleet. `pr4` adds quick replies (one ask, a refused answer POST, two asks,
+one x. `pr3` adds Chats with an empty Fleet. `pr4` adds an open ask (one bubble and no option chips in the chat,
 history, offline). `m3-shell` fails unless Chat is one 261 px column at 1440 (Context open) and 900 px, the phone layout at 899 and 390 px, More and Stats keep the 208 px rail, and a Stats select computes the body's family. `m3-fidelity-transcript` (1440×1000 and 390×844, a run closed and open) fails unless a reply computes transparent with no radius or padding, the own bubble `#2a2a2a`/`#ededed` at 16/16/4, an open run a transparent 2 px rail with 28 px rows, and the queued, failed and open-ask boxes keep their surface and borders. `m3-fidelity-surfaces` fails unless a real click on a reply's "Open job transcript →" keeps `.sessions` and the hash and opens `.job-detail-embedded` on Transcript (a 521 px pane at 1440, full screen at 390), the desktop Jobs drawer is 860 px of `rgb(22, 22, 22)`, the phone Jobs and Context sheets start at y96, and the Conversations drawer is 317 px. `m3-fidelity-composer` (1440×1000 and 390×844) fails unless the composer box spans the transcript column's content edges (664 px with 14/12/10/16 padding at 1440), the reply avatar is 20 px with text 28 px in at 1440 (34 px on a phone), the `/` menu starts at the box's edge on `rgb(27, 27, 27)` with 6 px padding (534 px at 1440), and the open-ask card computes `rgb(31, 26, 18)`. `m3-jobs` adds the operator chat's Jobs drawer (Ctrl/Cmd+J, desktop and the phone sheet) and a
 picked job beside the chat at 1440 px, over it at 900 px and full screen at 390 px, failing on sideways scroll.
 `reports-cards` captures Reports at 1440×1000, 1000×800 and 390×844 and Jobs at 1440×1000 (dark) and records each card's
@@ -667,7 +668,7 @@ an ordinary link. An unreadable job shows the pane's existing alert; a new sessi
 
 **Chat context and Conversations (M3 slice 3, cp-zm9f).** The same Full transcript gains `Context` beside `Jobs ⌘J`
 (an amber badge counts the open asks). `ConversationContext.tsx` shows "This conversation": Asked you (the transcript's
-open asks, answered here or by the chat's quick replies) and In flight (the live workers in the M1 selection, each with
+open asks, answered only here) and In flight (the live workers in the M1 selection, each with
 project, model, context, cost and last activity, "not recorded" when absent, Open job into the slice 2 pane and its
 Session link), then All jobs (the drawer). It is a 340 px inspector beside the chat from 1280 px, over the chat's right
 edge from 900 px, and a modal bottom sheet below. The phone's session bar adds a Conversations button: a 317 px modal
@@ -826,8 +827,8 @@ Relay rollups (Sessions chat, client only): in the operator transcript with Tool
 a cp-bridge notice (or the steps it opens) plus the session's replies right after it — fold into one `.session-rollup`
 card (`rollups()` in `viewer-app/session-rows.ts`, `components/RelayRollup.tsx`). The subject key is `pr:<url>` when the
 turn's replies name exactly one PR chip, else the head job's one PR chip, else `job:<id>`; a turn with neither stays
-separate. A run never crosses another subject, an operator message or card, a day start or a source-order gap,
-and ends before the quick-reply anchor's turn. The card shows the subject chip from `pr_chips` only when the latest relay
+separate. A run never crosses another subject, an operator message or card, a day start or a source-order gap.
+The card shows the subject chip from `pr_chips` only when the latest relay
 does not already chip that PR inline, then one muted meta line that never wraps (`time · job · N earlier · N notice`,
 the job id ellipsized first), then the latest relay. The meta line's one toggle (`aria-expanded`, 44 px on the phone)
 opens the earlier turns and the latest turn's bridge notice in place through the same row renderer; with neither, no
@@ -839,11 +840,10 @@ transcript reads `GET /api/operator/control` (`busy` true/false is Working/Idle,
 an unreadable status says so, an older file is "Historical transcript"), then the session's recorded model and ctx;
 the parent and workers keep their recorded phase. The file picker and *Tools N* sit in the ⋮ menu. The composer is
 one rounded box at 900 px and up: the field over the paperclip (disabled, its title saying why, while the session
-takes no attachments), `Options ▾` (the session file) and the round send; below 900 px one row. Quick replies
-(`QuickReplies.tsx`) are the verbatim options of exactly one open ask whose card is in the latest operator transcript;
-none for zero or several such asks, history, or other tiers. A chip sends the
-same `{kind:"answer", ask_id, label}` as the decision card, holds until the journal closes the ask, and a failure
-re-enables it. The client never generates a suggestion.
+takes no attachments), `Options ▾` (the session file) and the round send; below 900 px one row. The chat offers no
+quick-reply chips for an open ask (cp-dashboard-no-ask-chips-lkq9): its card is one bubble ("open, answer in Context") and
+its options answer only on the Context card, which sends `{kind:"answer", ask_id, label}`, holds until the journal
+closes the ask, and re-enables on a failure (`components/Answering.tsx`). The client never generates a suggestion.
 
 Type uses the system font stacks from doc 00 (`--font-sans`, `--font-mono` in `tokens.css`); no font files ship.
 

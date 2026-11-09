@@ -24,9 +24,12 @@ RUN npm install -g --prefix /tmp/warm-pi --ignore-scripts @earendil-works/pi-cod
 # The pinned release asset, as install-tools downloads it: no "latest" API call (#428).
 ARG TREEHOUSE_VERSION
 # The optional gh_token secret (BuildKit) authenticates the download; it is never an ARG, so no layer keeps it.
+# Bounded retry: one transient GitHub release-download failure used to fail the whole sandbox build.
 RUN --mount=type=secret,id=gh_token test -n "$TREEHOUSE_VERSION" && mkdir -p .local/bin \
 	&& auth="" && if [ -s /run/secrets/gh_token ]; then auth="Authorization: Bearer $(cat /run/secrets/gh_token)"; fi \
-	&& curl -fsSL ${auth:+-H "$auth"} "https://github.com/kunchenguid/treehouse/releases/download/v${TREEHOUSE_VERSION}/treehouse-v${TREEHOUSE_VERSION}-linux-$(dpkg --print-architecture).tar.gz" | tar xz -C .local/bin treehouse \
+	&& curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 --max-time 120 ${auth:+-H "$auth"} \
+		-o /tmp/treehouse.tar.gz "https://github.com/kunchenguid/treehouse/releases/download/v${TREEHOUSE_VERSION}/treehouse-v${TREEHOUSE_VERSION}-linux-$(dpkg --print-architecture).tar.gz" \
+	&& tar xzf /tmp/treehouse.tar.gz -C .local/bin treehouse && rm /tmp/treehouse.tar.gz \
 	&& treehouse --version
 ARG LENS_PACKAGES
 RUN npm install -g --prefix /tmp/warm-lens $LENS_PACKAGES && rm -rf /tmp/warm-lens

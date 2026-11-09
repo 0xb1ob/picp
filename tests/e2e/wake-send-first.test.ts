@@ -34,14 +34,20 @@ async function parent(t: TestContext, steps: ScriptStep[]) {
 }
 
 test("wake S19: assistant and custom send markers do not hold ordinary parent wakes", { timeout: 60_000 }, async (t) => {
-	const p = await parent(t, [{ kind: "text", text: SEND }, { kind: "hang", ms: 10_000 }, { kind: "text", text: "Unexpected held wake." }]);
+	let release!: () => void;
+	const busy = new Promise<void>((done) => { release = done; });
+	const p = await parent(t, [{ kind: "text", text: SEND }, { kind: "hang", until: busy }, { kind: "text", text: "Unexpected held wake." }]);
 	await p.child.prompt("Acknowledge readiness."); await p.child.waitForSettled();
 	p.enqueue("s19-custom-marker", frameBatch([{ id: "ps-20300101000000-0000000b", text: "S19 custom marker" }]));
 	await waitFor(p.requests, (requests) => requests.length === 2, { timeoutMs: 10_000, what: "idle wake after assistant marker" });
 	p.enqueue("s19-idle-next", "S19_IDLE_NEXT");
-	await waitFor(() => p.outbox.read().sends ?? [], (entries) => entries.some((entry) => entry.id === "s19-idle-next"),
-		{ timeoutMs: 10_000, what: "ordinary wake offered after custom marker" });
+	// Only the parent's 5 s sweep tick offers this wake, and CI saw none in 10 s: the window and the 10 s hang both
+	// ended on the second tick, so two slow ticks failed it. The turn now stays busy until the offer is seen, and
+	// the window holds three ticks. The whole outbox is the waited value, so a timeout names the wake's state.
+	await waitFor(() => p.outbox.read(), (file) => (file.sends ?? []).some((entry) => entry.id === "s19-idle-next"),
+		{ timeoutMs: 15_000, what: "ordinary wake offered after custom marker" });
 	await p.request("clear_queue");
+	release();
 	await waitFor(() => p.child.eventsOfType("agent_settled"), (events) => events.length >= 2,
 		{ timeoutMs: 20_000, what: "custom wake run settles after queue clear" });
 	await new Promise((done) => setTimeout(done, 1_500));

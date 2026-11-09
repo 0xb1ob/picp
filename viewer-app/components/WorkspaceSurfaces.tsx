@@ -11,7 +11,7 @@ import type { ComposerMenuContext } from "./ComposerMenu.tsx";
 import { ConversationContext } from "./ConversationContext.tsx";
 import { Icon } from "./icons.tsx";
 import { JobsDrawer } from "./JobsDrawer.tsx";
-import type { Answering } from "./QuickReplies.tsx";
+import type { Answering } from "./Answering.tsx";
 import { SessionDrawer } from "./SessionDrawer.tsx";
 import { type LogView, WorkspaceLog } from "./WorkspaceLog.tsx";
 import "./workspace.css";
