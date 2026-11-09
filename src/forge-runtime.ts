@@ -7,6 +7,8 @@
  * never in a render path.
  */
 
+import { statSync } from "node:fs";
+import { join } from "node:path";
 import { type PrObservation, prReceiptOf, type WatchableRecord } from "./ci-watch.ts";
 import { type ForgeResolution, parseChangeRequestUrl, parseRemote, resolveForgeRepository } from "./forge-url.ts";
 import { type ForgeObserver, type ObserverPorts, observerFor } from "./forges/adapter.ts";
@@ -14,11 +16,34 @@ import { githubObserver } from "./forges/github.ts";
 import { type GitlabTransport, gitlabObserver } from "./forges/gitlab.ts";
 import { ProjectRegistry } from "./projects.ts";
 
+const origins = new Map<string, { stamp: string; origin: string }>();
+
+/**
+ * The clone's origin, re-asked of git only when its `.git/config` changed. One sync `git remote get-url` per
+ * call blocked the parent's event loop for the CI watch's whole pass (ghCiUnwatched runs per held job, per tick).
+ */
+function cloneOrigin(registry: ProjectRegistry, project: string): string | undefined {
+	const clone = registry.pathOf(project);
+	let stamp: string;
+	try {
+		const config = statSync(join(clone, ".git", "config"));
+		stamp = `${config.ino}:${config.size}:${config.mtimeMs}`;
+	} catch {
+		return registry.originUrl(project);
+	}
+	const known = origins.get(clone);
+	if (known?.stamp === stamp) return known.origin;
+	const origin = registry.originUrl(project);
+	if (origin === undefined) origins.delete(clone);
+	else origins.set(clone, { stamp, origin });
+	return origin;
+}
+
 function registryEntry(home: string, project: string) {
 	try {
 		const registry = new ProjectRegistry({ home });
 		const entry = registry.get(project);
-		return entry ? { entry, origin: registry.originUrl(project) } : undefined;
+		return entry ? { entry, origin: cloneOrigin(registry, project) } : undefined;
 	} catch {
 		return undefined; // an unreadable registry is no configuration, never a crash out of a gate
 	}

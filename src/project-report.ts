@@ -137,8 +137,13 @@ export function homeMandateProjects(home: string): MandateProjects {
 /** The production resolver: files under `home` only, read lazily, never a subprocess. */
 export function homeProjectResolver(home: string): ProjectOf {
 	let labels: Map<string, string | undefined> | undefined;
+	// One fleet read per resolver, as for labels: a read per job made a many-fact CI notice quadratic.
+	let fleet: Map<string, string> | undefined;
 	return projectResolver({
-		fleet: (jobId) => new FleetStore({ home }).get(jobId)?.project,
+		fleet: (jobId) => {
+			fleet ??= new Map(new FleetStore({ home }).read().jobs.map((record) => [record.job_id, record.project]));
+			return fleet.get(jobId);
+		},
 		ledger: (jobId) => {
 			labels ??= new Map(readJobsDocument(home).jobs.map((job) => [job.id, parseJobLabels(job.labels).project]));
 			return labels.get(jobId);
