@@ -755,7 +755,7 @@ export default function (pi: ExtensionAPI): void {
 				}
 				if (params.action === "model") {
 					if (!params.model) throw new CpBridgeError("cp_parent model needs provider/model-id");
-					requireAvailableParentModel(params.model, ctx?.modelRegistry ? registryProbe(ctx.modelRegistry) : ALWAYS_AVAILABLE);
+					requireAvailableParentModel(params.model, ctx?.modelRegistry ? registryProbe(ctx.modelRegistry) : ALWAYS_AVAILABLE, parentDriverSetting((connectedTarget ?? resolveOperatorTarget()).home));
 				}
 				if (params.action === "restart") { const r = await parentRestart.restart(params.fresh ? "clean" : "resume"); return textResult(restartedLine(r), { ...r }); }
 				if (["status", "compact", "rotate", "model"].includes(params.action)) {

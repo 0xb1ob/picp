@@ -28,7 +28,7 @@ import { resolveProjectArg } from "../../src/mode.ts";
 import { admitScheduledMember, readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../../src/schedule-expand.ts";
 import { openScheduleRunStore, type ScheduleRunStore } from "../../src/schedule-runs.ts";
 import { describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "../../src/verify-external-ref.ts";
-import { piToolContext } from "./shared.ts";
+import type { ParentToolContext } from "./shared.ts";
 
 export const JOB_ACTIONS = [
 	"create",
@@ -439,6 +439,7 @@ export function parseJobsArgs(args: string): JobsCommand {
 
 export interface JobsRegistration {
 	commandPost: (registry?: unknown) => CommandPost;
+	toolContext: (ctx: ExtensionContext) => ParentToolContext;
 	emit: (ctx: ExtensionContext, source: string, text: string, options?: { level?: "info" | "error" }) => void;
 	/** The session's runtime; `project` is required. */
 	runtime: () => Runtime;
@@ -502,7 +503,7 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 		],
 		parameters: JobActionSchema,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const tc = piToolContext(ctx);
+			const tc = ports.toolContext(ctx);
 			const jobPorts = portsFor(ports.commandPost(tc.registry), ports.runtime());
 			if (params.action === "amend") jobPorts.operatorTexts = tc.operatorTexts();
 			if (ports.onJobCreated) jobPorts.noteCreated = ports.onJobCreated;

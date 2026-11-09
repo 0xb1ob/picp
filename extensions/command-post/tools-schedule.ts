@@ -23,7 +23,7 @@ import { RUNNER_DELIVERIES, ScheduleRunner } from "../../src/schedule-runner.ts"
 import { formatExpansionWake, pendingExpansions } from "../../src/schedule-expand.ts";
 import { SCHEDULE_CONTROL_POLL_MS, ScheduleControl } from "../../src/schedule-control.ts";
 import { formatScheduleEvent, formatSchedules, SCHEDULE_SKILLS, type ScheduleEvent, Scheduler, schedulerTickMs } from "../../src/scheduler.ts";
-import { type ExtensionDeps, type ParentToolContext, piToolContext } from "./shared.ts";
+import { type ExtensionDeps, type ParentToolContext, toolContextOf } from "./shared.ts";
 
 import { schedulePolicyView } from "../../src/viewer/schedule-policy-view.ts";
 import { RUN_THINKING_LEVELS } from "../../src/viewer/schedule-policy.ts";
@@ -248,8 +248,8 @@ export function registerScheduleTools(
 		],
 		parameters,
 		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-			deps.setLive(ctx);
-			const tc = piToolContext(ctx);
+			const tc = toolContextOf(deps, ctx);
+			tc.setLive();
 			const s = (scheduler ??= build());
 			const need = (key: keyof typeof params): string => {
 				const value = params[key];

@@ -3,7 +3,7 @@
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { OperatorModelPickReferenceSchema, type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, SkillNameSchema, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
@@ -13,7 +13,7 @@ import { checkStoredPick } from "../../src/reroute.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
 import { currentRuntime } from "./helpers.ts";
-import { type ExtensionDeps, piToolContext } from "./shared.ts";
+import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 
 /** R1 D2: the reference `cp_parent model_pick` returned; only with an explicit model it names. */
 const OperatorQuoteParam = Type.Object(OperatorModelPickReferenceSchema.properties, {
@@ -24,7 +24,8 @@ const OperatorQuoteParam = Type.Object(OperatorModelPickReferenceSchema.properti
 });
 
 export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, setLive, refreshWidget, askQuestion } = deps;
+	const { commandPost, askQuestion } = deps;
+	const toolContext = (ctx: ExtensionContext) => toolContextOf(deps, ctx);
 	/**
 	 * cp-u3o4: the Q&A path as a tool, for a question the operator asked in chat.
 	 *
@@ -60,16 +61,17 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			operator_quote: Type.Optional(OperatorQuoteParam),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
+			const tc = toolContext(ctx);
+			tc.setLive();
 			const result = await askQuestion({
 				...(params.project ? { project: params.project } : {}),
 				question: params.question,
 				...(params.model ? { model: params.model } : {}),
 				...(params.thinking ? { thinking: params.thinking as ThinkingLevel } : {}),
 				...(params.operator_quote ? { operatorQuote: params.operator_quote } : {}),
-				registry: piToolContext(ctx).registry,
+				registry: tc.registry,
 			});
-			refreshWidget(ctx);
+			tc.refresh();
 			return {
 				content: [
 					{
@@ -187,8 +189,8 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const tc = piToolContext(ctx);
+			const tc = toolContext(ctx);
+			tc.setLive();
 			if (params.operator_quote && (await commandPost(tc.registry).ledger().show(params.job_id)).script) throw new Error(`${params.job_id} is a script job: operator_quote is refused, a script runs no model`);
 			if (params.dry_run === true) {
 				// No `refreshWidget`: preview changes no fleet state.
@@ -248,7 +250,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 						error.message += ` (not armed: ${(armError as Error).message.split("\n")[0]})`;
 						throw error;
 					}
-					refreshWidget(ctx);
+					tc.refresh();
 					return {
 						content: [{ type: "text", text: `${armed.rearmed ? "re-armed" : "armed"}: ${error.blockers.length > 0 ? `${params.job_id} starts when ${error.blockers.join(", ")} land(s)` : error.message}; every gate re-runs then, and the outcome arrives as a wake-up — do not re-dispatch` }],
 						details: { state: "armed", job_id: params.job_id, blockers: error.blockers, rearmed: armed.rearmed },
@@ -267,7 +269,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					(error as Error).message += ` (not queued: ${(queueError as Error).message.split("\n")[0]})`;
 					throw error;
 				}
-				refreshWidget(ctx);
+				tc.refresh();
 				return {
 					content: [{ type: "text", text: `queued (position ${position}): ${params.job_id} starts when a worker slot frees; the outcome arrives as a wake-up — do not re-dispatch` }],
 					details: { state: "queued", position, job_id: params.job_id },
@@ -280,7 +282,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			} catch (error) {
 				armedLine = `\n  armed entry not cleared (its release drops it as already in the fleet): ${(error as Error).message.split("\n")[0]}`;
 			}
-			refreshWidget(ctx);
+			tc.refresh();
 			return {
 				content: [{ type: "text", text: `${formatDispatchResult(result)}${armedLine}` }],
 				details: { ...result },
@@ -318,7 +320,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			fetch: Type.Optional(Type.Boolean({ description: "Run `git fetch origin` first. Default true." })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const result = await commandPost(piToolContext(ctx).registry).preflight.check({
+			const result = await commandPost(toolContext(ctx).registry).preflight.check({
 				project: resolveProjectArg(currentRuntime(), params.project, "cp_check"),
 				jobId: params.job_id,
 				...(params.model ? { model: params.model } : {}),

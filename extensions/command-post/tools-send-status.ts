@@ -3,7 +3,7 @@
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { awaitingRowsNotSupplied } from "../../src/awaiting.ts";
 import { isoTimestamp, type AwaitingItem } from "../../src/contracts.ts";
@@ -20,10 +20,11 @@ import {
 } from "../../src/status-block.ts";
 import { resolveAwaitingRows } from "../../src/awaiting-rows.ts";
 import { formatRevivePlan, formatReviveResult } from "../../src/revive.ts";
-import { type ExtensionDeps, piToolContext } from "./shared.ts";
+import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 
 export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, setLive, refreshWidget } = deps;
+	const { commandPost } = deps;
+	const toolContext = (ctx: ExtensionContext) => toolContextOf(deps, ctx);
 
 	pi.registerTool({
 		name: "cp_send",
@@ -69,8 +70,9 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const result = await commandPost(piToolContext(ctx).registry).send({
+			const tc = toolContext(ctx);
+			tc.setLive();
+			const result = await commandPost(tc.registry).send({
 				jobId: params.job_id,
 				message: params.message,
 				...(params.mode ? { mode: params.mode as "auto" | "prompt" | "steer" | "follow_up" } : {}),
@@ -78,7 +80,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 				...(params.task ? { task: params.task } : {}),
 				...(params.task_file ? { taskFile: params.task_file } : {}),
 			});
-			refreshWidget(ctx);
+			tc.refresh();
 			return {
 				content: [{ type: "text", text: JSON.stringify(result) }],
 				// SAFETY: send returns a plain structured payload; tool details accepts its fields as unknown values.
@@ -131,8 +133,9 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const reviver = commandPost(piToolContext(ctx).registry).reviver();
+			const tc = toolContext(ctx);
+			tc.setLive();
+			const reviver = commandPost(tc.registry).reviver();
 			const options = params.continue_failed ? { continueFailed: true } : {};
 			const plan = await reviver.plan(params.job_id, options);
 			if (!plan.ok || !params.confirm) {
@@ -143,7 +146,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 				};
 			}
 			const result = await reviver.revive(params.job_id, options);
-			refreshWidget(ctx);
+			tc.refresh();
 			return {
 				content: [{ type: "text", text: formatReviveResult(result) }],
 				// SAFETY: ReviveResult is a plain JSON-serializable object; details only needs a record shape.
@@ -225,8 +228,8 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const tc = piToolContext(ctx);
+			const tc = toolContext(ctx);
+			tc.setLive();
 			const post = commandPost(tc.registry);
 			// include: "all" so a job that shipped this turn (phase done) is still
 			// visible for Shipped; "in progress" filters back to the active phases

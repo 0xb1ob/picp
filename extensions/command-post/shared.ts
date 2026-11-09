@@ -18,7 +18,7 @@ import type { OpenPlanViewerDeps } from "./plan-viewer.ts";
 
 /**
  * What a cp_* tool body reads of its caller: pi builds it from its ctx (`piToolContext`), a native parent from its entry.
- * `sessionId` and `notify` serve cp_status_block's Shipped memory key and its warnings.
+ * `sessionId` and `notify` serve cp_status_block's Shipped memory key and its warnings; `setLive`/`refresh` the widget.
  */
 export interface ParentToolContext {
 	registry?: unknown;
@@ -27,11 +27,15 @@ export interface ParentToolContext {
 	headless: boolean;
 	sessionId(): string;
 	notify(message: string, level: "info" | "warning" | "error"): void;
+	setLive(): void;
+	refresh(): void;
 }
 
 /** The pi path's ParentToolContext; every pi member is read at call time, as the tool bodies read `ctx` before. */
-export function piToolContext(ctx: ExtensionContext): ParentToolContext {
+export function piToolContext(ctx: ExtensionContext, live: Pick<ParentToolContext, "setLive" | "refresh">): ParentToolContext {
 	return {
+		setLive: live.setLive,
+		refresh: live.refresh,
 		get registry() {
 			return ctx.modelRegistry;
 		},
@@ -47,8 +51,21 @@ export function piToolContext(ctx: ExtensionContext): ParentToolContext {
 	};
 }
 
+/** `deps.toolContext(ctx)`; deps built without one get pi's, from their `setLive`/`refreshWidget`. */
+export function toolContextOf(
+	deps: Partial<Pick<ExtensionDeps, "toolContext" | "setLive" | "refreshWidget">>,
+	ctx: ExtensionContext,
+): ParentToolContext {
+	return deps.toolContext?.(ctx) ?? piToolContext(ctx, { setLive: () => deps.setLive?.(ctx), refresh: () => deps.refreshWidget?.(ctx) });
+}
+
+/** A native parent's override: it receives pi's context for the same ctx and returns the one the tools read. */
+export type ToolContextOverride = (ctx: ExtensionContext, base: ParentToolContext) => ParentToolContext;
+
 export interface ExtensionDeps {
 	commandPost: (modelRegistry?: unknown) => CommandPost;
+	/** A tool body's view of its caller (`ParentToolContext`), built per call from the ctx the tool ran with. */
+	toolContext: (ctx: ExtensionContext) => ParentToolContext;
 	setLive: (ctx: ExtensionContext) => void;
 	emit: (ctx: ExtensionContext, source: string, text: string, options?: { level?: "info" | "error"; json?: boolean }) => void;
 	refreshWidget: (ctx: ExtensionContext | undefined) => void;

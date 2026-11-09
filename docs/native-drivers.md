@@ -628,3 +628,19 @@ Glob confined to its scratch packet plus `report_verdict`, an in-process MCP too
 call refused by name. No Bash, Edit, Write or forge tools. A run that ends without a verdict is pi's no-verdict case
 (settled or exited), inside the same deadline; `native_run` records the lockdown and measured usage in the review's run
 dir. Rollback: set `claude_review` false.
+
+## Native parent entry (S1c)
+
+`data/parent.json` `driver: "claude"` (default `pi`) starts `src/drivers/claude-parent.ts` in place of `pi --mode rpc`.
+The bridge, its outboxes and the pi RPC lines are unchanged. The entry runs `extensions/command-post` on a headless host
+(`claude-parent-session.ts`), so startup, shutdown, wake-ups and the `tool_call` guards are the pi parent's own code. It
+serves the 22 `cp_*` tools from an in-process MCP server `cp`, prefixed `mcp__cp__` for the model and unprefixed in
+events. Each turn is one Agent SDK `query()` that resumes the claude session id kept in the session record. The record
+(`sessions/cp-parent.jsonl`) also logs every operator text as it enters the model's input, and that log is what
+`get_entries` serves. Wake-ups reach the model behind a `[fleet wake-up <type> — …]` line, so a resumed session can still
+tell them from operator sends. A send that arrives while a turn runs is queued to the next turn (no mid-turn steer).
+Not yet on native (Stage 2): `compact`, `new_session`, `set_model`, `set_thinking_level` and the slash diagnostics. Each
+one is refused by name, and `get_commands` lists none.
+
+Ledger ids are generated (`cp-xxxx`), on this parent as on pi: a job is dispatched by the id `cp_job create` returned,
+never under a name the parent picks (POC gap 11).

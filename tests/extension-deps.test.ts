@@ -6,10 +6,10 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { extensionDeps } from "../extensions/command-post/index.ts";
 import type { SessionPost } from "../extensions/command-post/session-post.ts";
-import { createSessionState, type ExtensionDeps } from "../extensions/command-post/shared.ts";
+import { createSessionState, type ExtensionDeps, piToolContext } from "../extensions/command-post/shared.ts";
 import { registerMandateTools } from "../extensions/command-post/tools-mandate.ts";
 import { MANDATE_JOBS_THIS_TURN } from "../src/mandate.ts";
 
@@ -43,8 +43,7 @@ test("cp_mandate issue expands the sentinel from the array current at call time,
 	};
 	const deps = {
 		commandPost: () => post,
-		setLive: () => {},
-		refreshWidget: () => {},
+		toolContext: (ctx: ExtensionContext) => piToolContext(ctx, { setLive: () => {}, refresh: () => {} }),
 		projectOf: () => () => undefined,
 		get createdThisTurn() {
 			return s.createdThisTurn;

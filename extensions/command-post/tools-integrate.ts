@@ -3,7 +3,7 @@
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { formatMerge } from "../../src/merges.ts";
 import { formatIntegration } from "../../src/integrate.ts";
@@ -14,10 +14,11 @@ import { FORWARDED_RESULTS, type ForwardedResult, recordForwardedCi } from "../.
 import { parsePrUrl } from "../../src/ci-watch.ts";
 import { pendingStackActions, StackFollowups } from "../../src/stack-followups.ts";
 import { formatTeardown } from "../../src/teardown.ts";
-import { type ExtensionDeps, piToolContext } from "./shared.ts";
+import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 
 export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
-	const { commandPost, setLive, refreshWidget } = deps;
+	const { commandPost } = deps;
+	const toolContext = (ctx: ExtensionContext) => toolContextOf(deps, ctx);
 
 	pi.registerTool({
 		name: "cp_teardown",
@@ -43,8 +44,8 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			operator_quote: Type.Optional(Type.String({ description: "With force: one complete sentence, verbatim from an operator message in this session, authorizing this forced teardown; recorded with it." })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const tc = piToolContext(ctx);
+			const tc = toolContext(ctx);
+			tc.setLive();
 			if (params.operator_quote !== undefined && !params.force) throw new Error("cp_teardown: operator_quote authorizes force; pass force: true with it, or neither");
 			// issue #2: verified before anything runs; Teardown decides whether force needs it (unreported_live_worker).
 			const verified = params.force && params.operator_quote !== undefined
@@ -54,7 +55,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 				...(params.force ? { force: true, requireAuthorization: true } : {}),
 				...(verified ? { authorization: { by: verified.decidedBy, quote: verified.stored.operator_quote } } : {}),
 			});
-			refreshWidget(ctx);
+			tc.refresh();
 			return {
 				content: [{ type: "text", text: formatTeardown(result) }],
 				details: result,
@@ -86,13 +87,14 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 		// A refusal throws, like every other tool here: MergeError's message names
 		// what was not observed, and nothing is ever half-written on that path.
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const result = await commandPost(piToolContext(ctx).registry).recordMerge({
+			const tc = toolContext(ctx);
+			tc.setLive();
+			const result = await commandPost(tc.registry).recordMerge({
 				jobId: params.job_id,
 				...(params.pr ? { pr: params.pr } : {}),
 				...(params.strategy ? { strategy: params.strategy as MergeStrategy } : {}),
 			});
-			refreshWidget(ctx);
+			tc.refresh();
 			return {
 				content: [{ type: "text", text: formatMerge(result) }],
 				details: result,
@@ -156,13 +158,13 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			disposition: Type.Optional(StringEnum(["done", "disposed"], { description: "stack_ack: done (merged and retargeted) or disposed (not needed)" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			setLive(ctx);
-			const tc = piToolContext(ctx);
+			const tc = toolContext(ctx);
+			tc.setLive();
 			const post = commandPost(tc.registry);
 			const holds = new IntegrationHolds(post.home);
 			if (params.action === "hold" || params.action === "release") {
 				const hold = params.action === "hold" ? holds.hold(params.job_id, params.reason ?? "") : (holds.release(params.job_id), null);
-				refreshWidget(ctx);
+				tc.refresh();
 				return {
 					content: [{ type: "text", text: hold ? `${params.job_id}: integration held: ${hold.reason}` : `${params.job_id}: integration hold released; call cp_integrate advance to resume with all gates rechecked.` }],
 					details: { job_id: params.job_id, hold },
@@ -188,7 +190,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 					currentHead,
 					url: params.url,
 				});
-				refreshWidget(ctx);
+				tc.refresh();
 				const text = `${params.job_id}: forwarded CI ${observation.result} recorded on ${observation.head_sha.slice(0, 12)}; display only, native CI still gates the handoff`;
 				return { content: [{ type: "text", text }], details: { job_id: params.job_id, observation } };
 			}
@@ -230,7 +232,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 				...(params.strategy ? { strategy: params.strategy as MergeStrategy } : {}),
 				...(params.base ? { base: params.base } : {}),
 			});
-			refreshWidget(ctx);
+			tc.refresh();
 			// The parent kept re-calling cp_review on a head already under review and ate the refusal: say so here (text only; `details` stays the step result).
 			const inFlight = result.next === "review" ? post.reviewRuns.pending(params.job_id, "review") : undefined;
 			if (inFlight) {
@@ -269,7 +271,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const tc = piToolContext(ctx);
+			const tc = toolContext(ctx);
 			const store = commandPost(tc.registry).artifacts;
 			const cwd = tc.cwd;
 			if (params.action === "path") {
