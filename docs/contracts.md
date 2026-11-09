@@ -1008,7 +1008,11 @@ running, for a head no run has started on yet, or for an unknown state — those
 are the states the watcher exists to sit through quietly. A `ci_failed` fact
 names the failing run — the first completed, not-green run on that head, never a
 `skipped` one (`src/ci-run-ref.ts`): `run <databaseId>` and its Actions URL,
-derived from the PR URL, with no extra query and its key unchanged.
+derived from the PR URL, with no extra query and its key unchanged. It also
+names that run's failing tests (`name (file)` from the node reporter's `✖ failing
+tests:` block of `gh run view <id> -R <repo> --attempt <n> --log-failed`), or why
+none are named (unreadable log, non-github.com PR, no test listed); the read never
+withholds the wake.
 
 - **CI is evaluated by cp-gmy's evaluator, unforked.** `evaluateMergeAskCi`
   already encodes the only correct rule ("a completed run counts only when its
@@ -3598,7 +3602,9 @@ listed gate or, with its test-suite step as its only failed step, every entry of
 its `✖ failing tests:` block (node's spec reporter) is listed and their number
 equals the reporter's `ℹ fail N`, read by `gh run view <id> -R <repo> --attempt
 <attempt> --log-failed`; an errored, empty, expired, cut or miscounted log
-refuses. Workers add entries only from a
+refuses. A failure whose file the PR's own diff changed (`git fetch origin`, then
+`git diff --name-only origin/<base>...<head>`) is the implementer's, never a flake;
+an unreadable diff refuses too. Workers add entries only from a
 confirmed failed-attempt log. A known-flake claim records `attempt` and `outcome`
 (`uncertain` → `accepted`/`refused`; absent is a legacy, spent claim): the next
 call on that head settles an `uncertain` one from the run's attempts and never
