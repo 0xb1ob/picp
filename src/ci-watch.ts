@@ -100,7 +100,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { retryTransientRead } from "./actions-ci.ts";
 import { CI_UNREADABLE, ciReadDenied } from "./ci-access.ts";
-import { ciRunRef, failedRunOn, formatRunRef } from "./ci-run-ref.ts";
+import { ciRunRef, failedRunOn, failingTestsLine, formatRunRef } from "./ci-run-ref.ts";
 import { parseChangeRequestUrl } from "./forge-url.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import {
@@ -205,6 +205,9 @@ export interface CiObservation {
 	/** ci_failed only: the failing run (src/ci-run-ref.ts); never part of the key. */
 	run_id?: number;
 	run_url?: string;
+	/** ci_failed only: the failing run's listed tests (`name (file)`), or why they were not read. */
+	failing_tests?: string[];
+	failing_tests_unread?: string;
 }
 
 /**
@@ -511,6 +514,8 @@ export interface CiWatchDeps {
 	runs: (job: WatchableRecord, head: string, timeoutMs?: number) => Promise<readonly CiRun[]>;
 	/** The branch's pushed head, asked only when the PR did not answer. */
 	head?: (job: WatchableRecord) => Promise<HeadResolution>;
+	/** The tests a failed run's `--log-failed` lists; a throw names why they were not read (the wake still goes). */
+	failingTests?: (job: WatchableRecord, run: { id: number; attempt: number }, prUrl: string | undefined) => Promise<string[]>;
 	now?: () => Date;
 	intervalMs?: number;
 	idleMultiplier?: number;
@@ -702,6 +707,7 @@ export class CiWatch {
 			if (existing !== undefined && millis - existing.sentAt < wait) continue;
 			const isResend = existing !== undefined;
 			this.#inFlight.set(observation.key, { sentAt: millis, sends: (existing?.sends ?? 0) + 1 });
+			if (observation.event === "ci_failed") await this.#readFailingTests(record, observation, runs);
 			due.push(observation);
 			if (!isResend) {
 				try {
@@ -726,6 +732,17 @@ export class CiWatch {
 			last_ci: ciStateOf(facts),
 		});
 		return due;
+	}
+
+	/** Names the failing run's tests on the red fact, or why not; never throws, so a log read never costs the wake. */
+	async #readFailingTests(record: WatchableRecord, observation: CiObservation, runs: readonly CiRun[]): Promise<void> {
+		const run = runs.find((entry) => entry.databaseId === observation.run_id);
+		try {
+			if (!this.#deps.failingTests || !run || observation.run_id === undefined) throw new Error("no failing run or log reader");
+			observation.failing_tests = await this.#deps.failingTests(record, { id: observation.run_id, attempt: run.attempt ?? 1 }, observation.pr_url);
+		} catch (error) {
+			observation.failing_tests_unread = (error as Error).message.split("\n")[0]?.slice(0, 200) ?? "unreadable";
+		}
 	}
 
 	#due(jobId: string, now: Date): boolean {
@@ -858,7 +875,8 @@ export function formatCiNotice(observations: readonly CiObservation[], projectOf
 			: `CI/PR OBSERVED — ${observations.length} new facts about ${jobs.size} held PR(s)`,
 	];
 	const fact = (observation: CiObservation) =>
-		`  ${observation.job_id}: ${HEADLINES[observation.event]} on ${observation.head_sha.slice(0, 12)} — ${observation.reason}${formatRunRef(observation)}${observation.pr_url ? ` ${observation.pr_url}` : ""}`;
+		`  ${observation.job_id}: ${HEADLINES[observation.event]} on ${observation.head_sha.slice(0, 12)} — ${observation.reason}${formatRunRef(observation)}${observation.pr_url ? ` ${observation.pr_url}` : ""}` +
+		(observation.event === "ci_failed" ? `\n    ${failingTestsLine(observation)}` : "");
 	lines.push(...projectGroupedLines(observations, projectOf && ((observation) => projectOf(observation.job_id)), fact));
 	if (observations.some((observation) => observation.event === "ci_green")) {
 		lines.push(
@@ -870,7 +888,7 @@ export function formatCiNotice(observations: readonly CiObservation[], projectOf
 	if (observations.some((observation) => observation.event === "ci_failed")) {
 		lines.push(
 			"Merging red is forbidden, so there is no merge question here: relay the failure, name the job, the",
-			"workflow and the run, and exercise ordinary judgment (promote the held worker, or re-dispatch).",
+			"workflow, the run and its failing tests, and exercise ordinary judgment (promote the held worker, or re-dispatch).",
 		);
 	}
 	if (observations.some((observation) => observation.event === "pr_merged")) {
