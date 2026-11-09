@@ -2,7 +2,7 @@
  * Native worker run core (N2 spike, production since N3b): one isolated Claude research-role run through the official
  * Agent SDK `query()` on the user's installed `claude`. src/drivers/claude-worker.ts wraps it for dispatch.
  */
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join, relative, resolve } from "node:path";
@@ -44,7 +44,7 @@ import {
 	validateEnvelope,
 	WORKER_FORBIDDEN_TOOLS,
 } from "../contracts.ts";
-import { whichAll } from "../doctor.ts";
+import { ClaudeSpikeError, resolveClaude } from "./claude-cli.ts";
 import {
 	credentialSearchRefusal,
 	detectCredentialSearch,
@@ -67,8 +67,8 @@ import { shipBashRefusal } from "./claude-ship-policy.ts";
 import { type HooksListing, type Lockdown, lockdownVerdict } from "./claude-lockdown.ts";
 import { assertNativeEffort } from "./claude.ts";
 
-/** The lowest `claude --version` this spike measured working (docs/native-drivers.md "Spike result"). */
-export const CLAUDE_VERSION_FLOOR = "2.1.318";
+export { CLAUDE_VERSION_FLOOR, ClaudeSpikeError, claudeVersionRefusal, parseClaudeVersion, resolveClaude } from "./claude-cli.ts";
+
 export const SPIKE_TOOLS: readonly string[] = RESEARCH_TOOLS;
 export const REPORT_TOOL = "mcp__picp__report_result";
 const HOST_ENV_ALLOW = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] as const;
@@ -78,11 +78,6 @@ const EXIT_GRACE_MS = 10_000;
  * the headless reconcile installing the passed settings' enabledPlugins into the kept scratch for the next process.
  */
 export const CHILD_MANAGED_SETTINGS = { disableAllHooks: true, strictKnownMarketplaces: [] } satisfies Options["managedSettings"];
-
-export class ClaudeSpikeError extends Error {
-	/** Set by `resolveClaude`: no CLI on PATH, or one that cannot prove the floor. */
-	cli?: "missing" | "version";
-}
 
 /** A routed thinking level as SDK options: off disables thinking, low…max is `effort`, absent is the CLI default. */
 export function nativeEffortOptions(level: string | undefined): Pick<Options, "thinking" | "effort"> {
@@ -112,34 +107,6 @@ export interface NormalizedCall {
 }
 
 export type SpikeGuard = (call: NormalizedCall) => string | undefined;
-
-export function parseClaudeVersion(output: string): string | undefined {
-	return /^\s*(\d+\.\d+\.\d+)/.exec(output)?.[1];
-}
-
-/** Undefined when `version` meets `floor`; otherwise the refusal naming the remedy. No auto-update. */
-export function claudeVersionRefusal(version: string | undefined, floor = CLAUDE_VERSION_FLOOR): string | undefined {
-	if (version === undefined) return "claude --version printed no version: reinstall Claude Code, then run `claude update`";
-	const [a, b] = [version, floor].map((v) => v.split(".").map(Number));
-	const cmp = (a ?? []).map((n, i) => n - ((b ?? [])[i] ?? 0)).find((d) => d !== 0) ?? 0;
-	return cmp < 0 ? `claude ${version} is below the native driver floor ${floor}: run \`claude update\`` : undefined;
-}
-
-/** The first `claude` on PATH and its version; throws with a named remedy when missing or too old. */
-export function resolveClaude(env: NodeJS.ProcessEnv = process.env): { path: string; version: string } {
-	const path = whichAll("claude", env)[0];
-	if (path === undefined) throw Object.assign(new ClaudeSpikeError("claude is not on PATH: install Claude Code, then run `claude update`"), { cli: "missing" as const });
-	let raw = "";
-	try {
-		raw = execFileSync(path, ["--version"], { encoding: "utf8", env: { PATH: env.PATH ?? "" }, stdio: ["ignore", "pipe", "ignore"] });
-	} catch (error) {
-		throw Object.assign(new ClaudeSpikeError(`${path} --version failed (${(error as Error).message}): run \`claude update\``), { cli: "version" as const });
-	}
-	const version = parseClaudeVersion(raw);
-	const refusal = claudeVersionRefusal(version);
-	if (refusal !== undefined || version === undefined) throw Object.assign(new ClaudeSpikeError(refusal), { cli: "version" as const });
-	return { path, version };
-}
 
 /** The installed SDK's version, or "unknown" when its package.json cannot be read. */
 export function sdkVersion(): string {

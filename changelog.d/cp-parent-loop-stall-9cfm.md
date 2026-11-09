@@ -1,0 +1,1 @@
+- The parent logs a `loop_stall` line to `state/daemon.log` when its event loop stalls for 5 s or more, naming the tool call or timer tick that was running; native selection no longer loads the Claude Agent SDK in the parent (a 13–16 s stall on the first native dispatch after a restart) and asks `claude --version` asynchronously with a 10 s bound.

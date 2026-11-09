@@ -5,6 +5,7 @@
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { LAYOUT } from "../../src/contracts.ts";
+import { operation } from "../../src/loop-stall.ts";
 import { escalationProjects, homeMandateProjects, homeProjectResolver } from "../../src/project-report.ts";
 import { runPushSweep } from "../../src/push/sweep.ts";
 import type { ExtensionDeps } from "./shared.ts";
@@ -39,7 +40,7 @@ export function registerPushTick(pi: ExtensionAPI, deps: ExtensionDeps, holdsLoc
 	// Registered after the session hooks, so the lock is already decided when this runs.
 	pi.on("session_start", async () => {
 		if (!holdsLock() || timer) return;
-		timer = setInterval(() => void tick(), PUSH_TICK_MS);
+		timer = setInterval(() => void operation("push_tick", tick), PUSH_TICK_MS);
 		timer.unref();
 		setTimeout(() => void tick(), 0).unref(); // catch-up pass, after startup returns
 	});

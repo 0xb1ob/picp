@@ -9,6 +9,7 @@ import { type Delivery, type FleetRecord, type JobKind, LAYOUT, type Role } from
 import { PACKAGE_ROOT } from "../home.ts";
 import { loadNativeConfig, type NativeClass, nativeConfigFile, type NativeDriver } from "../worker-driver.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
+import { resolveClaudeAsync } from "./claude-cli.ts";
 import { NATIVE_SHUTDOWN_GRACE_MS } from "./claude-usage.ts";
 
 /** Why a job may not run native (S1): the resolver falls back to pi on these; an explicit request refuses.
@@ -28,8 +29,6 @@ const NATIVE_SYSTEM_PROMPT_FILE = "native-system-prompt.md";
 const PARENT_ENTRY = fileURLToPath(new URL("./claude-parent.ts", import.meta.url));
 const NATIVE_PARENT_SYSTEM_PROMPT_FILE = "native-parent-system-prompt.md";
 const LIVE_PHASES: readonly string[] = ["launching", "waiting", "held"];
-// One shared load: concurrent admissions awaiting their own import() could see a half-evaluated module.
-let spike: Promise<typeof import("./claude-spike.ts")> | undefined;
 const RESEARCH_DELIVERIES: readonly Delivery[] = ["local", "answer", "board", "pipeline"];
 const SHIP_DELIVERIES: readonly Delivery[] = ["pr", "local"];
 const SWITCH_WHERE: Record<NativeClass, string> = {
@@ -83,10 +82,7 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs), input.jobId, config.max_concurrent);
 	if (occupied) return occupied;
 	try {
-		// Loaded on use: the SDK it imports is not on the extension's startup path.
-		spike ??= import("./claude-spike.ts");
-		const { resolveClaude } = await spike;
-		resolveClaude(input.env ?? process.env);
+		await resolveClaudeAsync(input.env ?? process.env);
 	} catch (error) {
 		return { category: (error as { cli?: string }).cli === "missing" ? "cli_missing" : "cli_version", why: (error as Error).message };
 	}
@@ -102,8 +98,7 @@ export async function assertNativeSelection(input: NativeSelection): Promise<voi
 /** The installed CLI's version (S2 invalidation iii), or undefined when it cannot be resolved. */
 export async function installedClaudeVersion(env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
 	try {
-		spike ??= import("./claude-spike.ts");
-		return (await spike).resolveClaude(env).version;
+		return (await resolveClaudeAsync(env)).version;
 	} catch {
 		return undefined;
 	}
