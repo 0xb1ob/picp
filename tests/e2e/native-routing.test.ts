@@ -124,7 +124,7 @@ test("N4i concurrency: with max_concurrent 2 two row-preferred jobs run native a
 	assert.match(fell.routing?.driver_reason ?? "", new RegExp(`^occupied: native concurrency is 2 and ${first.id}, ${second.id} are live`));
 });
 
-test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned planner run pi with the reason named", { skip, timeout: 300_000 }, async (t) => {
+test("S1 fallback: switch off, CLI missing or too old, and a denied primary run pi with the reason named", { skip, timeout: 300_000 }, async (t) => {
 	const h = await routedHome(t, []);
 	const [off, absent, old, explicit, denied, deniedExplicit] = await Promise.all([h.job(), h.job(), h.job(), h.job(), h.job(), h.job()]);
 	// Missing: PATH keeps every other tool from claude's directories, minus claude. Too old: a fake that prints 2.1.0.
@@ -148,7 +148,6 @@ test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned plan
 	const runAlone = async (steps: Parameters<typeof h.b.run>[0], env: NodeJS.ProcessEnv) => { await h.b.closeParents(); return (await h.b.run(steps, env)) as Tool[]; };
 	const absentEnds = await runAlone([{ kind: "tool_calls", calls: [dispatch(absent.id)] }], { ...h.env, PATH: [shim, ...kept].join(delimiter) });
 	const oldEnds = await runAlone([{ kind: "tool_calls", calls: [dispatch(old.id)] }], { ...h.env, PATH: [oldDir, process.env.PATH].join(delimiter) });
-	const pipelineEnds = await runAlone([tool("cp_pipeline", { action: "start", title: `s1 pipeline ${Math.random()}`, project: "demo", task: "Plan a README tweak.", delivery: "local", scope: "S" })], h.env);
 	// A row with fallbacks skips pickModel's allowlist check; a primary denied for the role still never runs native.
 	const denyRole = { ...JSON.parse(h.routing()) as object, deny_by_role: { planner: [FAKE_NATIVE_MODEL] } };
 	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify(denyRole));
@@ -169,12 +168,7 @@ test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned plan
 	assert.equal(deniedEnds[1]?.isError, true, text(deniedEnds[1]));
 	assert.match(text(deniedEnds[1]), /cannot run on the native claude driver: deny_by_role\.planner matches /);
 	h.noLease(deniedExplicit.id);
-	// D2: the pipeline's research child is planner research, yet stays on pi because the pipeline owns it.
-	const research = (pipelineEnds[0]?.result.details as { research_id?: string } | undefined)?.research_id;
-	assert.ok(research, text(pipelineEnds[0]));
-	const child = h.fleet(research)!;
-	assert.deepEqual([child.worker.driver, child.routing?.driver], [undefined, "pi"]);
-	assert.match(child.routing?.driver_reason ?? "", /^pipeline: /);
+	// D2: a pipeline's planner is no longer a fallback; it runs native (native-worker-followups.test.ts, J3).
 	assert.equal(h.claude.requests.length, 0, "no fallback reached the native model");
 });
 

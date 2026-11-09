@@ -13,7 +13,8 @@ import { CommandPost } from "../../src/command-post.ts";
 import { QUOTA_CONTINUE_NUDGE, type QuotaIntent, quotaContinuationFile } from "../../src/quota-continuation.ts";
 import { recordRecoveryAttempt } from "../../src/recovery.ts";
 import { childPids } from "../../src/revive.ts";
-import { DEFAULT_BUDGET_CONFIG, type Failure, LAYOUT, paths } from "../../src/contracts.ts";
+import { DEFAULT_BUDGET_CONFIG, type Failure, LAYOUT, paths, type ReviewSurface } from "../../src/contracts.ts";
+import { ReviewRuns } from "../../src/review-runs.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { NATIVE_FOLLOWUPS_FILE, NATIVE_SESSION_FILE, nativeRevivePrompt, queuedFollowUps, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { OBSERVATION_EVENT } from "../../src/drivers/claude-observation.ts";
@@ -22,7 +23,7 @@ import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { VERDICT_TOOL } from "../../src/drivers/claude-verdict.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, type RecordedClaudeRequest, routeNativeModel, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
-import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, REPO_ROOT, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, REPO_ROOT, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -797,4 +798,96 @@ test("J7 bound: a native wall-clock bound is recovered once by a plain revive, a
 	for (let i = 0; i < 60 && down.failure?.code === "job_in_flight"; i++) down = await sleep(1_000).then(() => f.post.tearDown(id));
 	assert.equal(down.torn_down, true, JSON.stringify(down));
 	assert.equal(f.h.claude.overrun(), 0);
+});
+
+// Scenario: Given cp_pipeline start on a claude planner row, When the planner reports and cp_gate returns revise,
+// Then the revise resumes the same native session (busy: queued; idle: resuming), a second report is accepted
+// And cp_pipeline advance dispatches the implementer natively. Main kept a pipeline's planner on pi (D2).
+test("J3 pipeline planner: a native planner takes the gate revise busy or idle, reports again, and the implementer runs native", { skip, timeout: 420_000 }, async (t) => {
+	const ids: Record<string, string> = {};
+	const body = "# Goal\nAdd a line to README.md.\n\n# File list\n- README.md\n\n# Test plan\nnpm test\n\n# Unknowns/Blockers\nnone\n";
+	const known = (key: string) => () => waitFor(() => ids[key], Boolean, { timeoutMs: 60_000, what: `the ${key} research id` }).then(() => undefined);
+	const write = (key: string, content: string, beforeAnswer = known(key)): ClaudeStep => ({ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[key]!)), content }) }], beforeAnswer });
+	const assessed = { scope: "S", confidence: "high", destructive_scope: false, blocking_unknowns: false };
+	const filed = (key: string): ClaudeStep => call(REPORT_TOOL, () => ({ ...report(ids[key]!, h.b.home), self_assessment: assessed }));
+	const queued = (key: string) => () => waitFor(() => existsSync(join(h.b.home, paths.runDir(ids[key]!), NATIVE_FOLLOWUPS_FILE)), Boolean, { timeoutMs: 120_000, what: "the queued revise" }).then(() => undefined);
+	const planner = (key: string, busy: boolean): ClaudeStep[] => [
+		write(key, body), filed(key),
+		// Busy: the reporting turn holds its last answer until the gate's revise is queued behind it.
+		{ kind: "text", text: `Reported ${key}.`, ...(busy ? { beforeAnswer: queued(key) } : {}) },
+		// The gate's verdict time has whole seconds: a rewrite in the same second reads as unchanged.
+		write(key, `${body}\n# Revised\nnpm test -- readme\n`, () => sleep(1_100)), filed(key), { kind: "text", text: "Revised." },
+		// The implementer's first call never returns; the test tears it down once it is native.
+		{ kind: "tool_use", calls: [{ name: "Read", input: { file_path: "/nonexistent" } }], beforeAnswer: () => new Promise<void>(() => {}) },
+	];
+	const h = await nativeHome(t, [...planner("busy", true), ...planner("idle", false)]);
+	const gate: ScriptStep[] = [];
+	const reviewer = h.b.provider.addScript("j3-gate", gate);
+	const fallback = h.b.provider.addScript("j3-pi", Array.from({ length: 8 }, () => ({ kind: "text" as const, text: "idle" })));
+	h.b.agent.writeModels(h.b.provider);
+	const routing = JSON.parse(readFileSync(join(h.b.home, LAYOUT.routingFile), "utf8")) as { rubric: unknown[] };
+	routing.rubric.unshift(
+		{ id: "j3-plan", role: "planner", model: FAKE_NATIVE_MODEL, fallbacks: [fallback], driver: "claude" },
+		{ id: "j3-gate", role: "gate-reviewer", model: reviewer },
+		{ id: "j3-ship", role: "implementer", model: FAKE_NATIVE_MODEL, fallbacks: [fallback], driver: "claude" },
+	);
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify(routing));
+	writeFileSync(join(h.b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true, claude_ship: true }));
+	// A native implementer refuses to start without a commit identity.
+	const gitconfig = join(h.env.HOME, "gitconfig");
+	writeFileSync(gitconfig, "[user]\n\tname = j3 e2e\n\temail = j3@test.invalid\n");
+	const post = h.b.ownPost(new CommandPost({
+		home: h.b.home, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentEnv: { ...process.env, ...h.b.agent.env, ...h.env, GIT_CONFIG_GLOBAL: gitconfig },
+		authorizer: { ask: async () => ({ approved: true, by: "j3 operator" }) },
+	}));
+	const settle = async (jobId: string, surface: ReviewSurface, attempt: number) => {
+		const key = ReviewRuns.key(jobId, surface, attempt);
+		post.reviewRuns.handBack(key);
+		await post.reviewRuns.settled(key);
+	};
+	const offered = () => h.claude.requests.filter((request) => request.path.split("?")[0] === "/v1/messages" && Array.isArray(request.body.tools) && request.body.tools.length > 0).length;
+	const flags = { destructive_scope: false, scope_growth: false, blocking_unknowns: false };
+	for (const [key, busy] of [["busy", true], ["idle", false]] as const) {
+		const started = await post.startPipeline({ title: `j3 ${key}`, project: "demo", task: "Add a line to README.md.", delivery: "local", fetch: false });
+		const id = started.research_id;
+		ids[key] = id;
+		assert.equal(post.fleet.get(id)?.worker.driver, "claude", `${key}: ${post.fleet.get(id)?.routing?.driver_reason}`);
+		const types = () => readRunEvents(h.b.home, id).map((event) => event.type);
+		const count = (type: string) => types().filter((each) => each === type).length;
+		const until = (what: string, done: (seen: string[]) => boolean) =>
+			waitFor(types, done, { timeoutMs: 120_000, what: `${key}: ${what}` }).catch((error: Error) => assert.fail(`${error.message}: ${types().join(",")}`));
+		await until("the first report", (seen) => seen.includes("envelope_received") && (busy || seen.lastIndexOf("agent_settled") > seen.indexOf("envelope_received")));
+		gate.push(tool("report_verdict", { job_id: id, verdict: "revise", revisions: ["name the exact test command"], flags, reasons: ["vague"] }), tool("report_verdict", { job_id: id, verdict: "pass", flags, reasons: ["concrete"] }));
+		const gating = await post.advancePipeline(id);
+		assert.equal(gating.pending?.surface, "gate", gating.message);
+		await settle(id, "gate", gating.pending!.attempt);
+		await until("the revised report", (seen) => seen.filter((type) => type === "envelope_received").length === 2 && seen.lastIndexOf("agent_settled") > seen.lastIndexOf("envelope_received"));
+
+		// The revise reopened generation 1's slot and reached the planner's own session: queued busy, resuming idle.
+		const revise = readRunEvents(h.b.home, id).find((event) => (event.payload as { superseded_generation?: number } | undefined)?.superseded_generation === 1);
+		const sent = revise?.payload as { receipt?: string; disposition?: string } | undefined;
+		assert.deepEqual([revise?.type, sent?.receipt], busy ? ["follow_up_sent", "queued"] : ["prompt_sent", "delivered"], JSON.stringify(revise));
+		if (!busy) assert.equal(sent?.disposition, "resuming");
+		assert.equal(count("native_followup_delivered"), busy ? 1 : 0);
+		const runs = readRunEvents(h.b.home, id).filter((event) => event.type === "native_run").map((event) => (event.payload as { resumed?: boolean }).resumed);
+		assert.deepEqual(runs, [false, true], `${key}: the revise did not resume the planner's session`);
+		const revisedCall = modelCalls(h.claude.requests).find((request) => messages(request).includes(`Gate review of your artifact for ${id} `));
+		assert.ok(messages(revisedCall).includes(`Reported ${key}.`), `${key}: the revise turn lost the reporting turn`);
+		assert.deepEqual([count("envelope_received"), count("envelope_superseded")], [2, 1]);
+
+		// Re-gate passes; advance authorizes and dispatches the implementer on the native driver.
+		let result = await post.advancePipeline(id);
+		for (let guard = 0; result.pending && guard < 10; guard += 1) {
+			await settle(result.pending.surface === "review" ? result.ship_id : id, result.pending.surface, result.pending.attempt);
+			result = await post.advancePipeline(id);
+		}
+		assert.equal(result.state, "implementing", result.message);
+		const ship = post.fleet.get(started.ship_id);
+		assert.deepEqual([ship?.worker.driver, ship?.routing?.driver], ["claude", "claude"], ship?.routing?.driver_reason);
+		await waitFor(offered, (n) => n >= (busy ? 7 : 14), { timeoutMs: 60_000, what: `${key}: the native implementer's first model call` });
+		let down = await post.tearDown(started.ship_id, { force: true });
+		for (let i = 0; i < 60 && down.failure?.code === "job_in_flight"; i++) down = await sleep(1_000).then(() => post.tearDown(started.ship_id, { force: true }));
+		assert.equal(down.torn_down, true, JSON.stringify(down));
+	}
+	assert.equal(h.claude.overrun(), 0);
 });

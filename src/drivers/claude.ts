@@ -2,15 +2,16 @@
  * The native Claude research driver's dispatch side (N3b): which job may run on it, and the spawn that starts
  * src/drivers/claude-worker.ts in place of pi. Every refusal names its reason and happens before any process starts.
  */
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Delivery, type FleetRecord, type JobKind, paths, type Role } from "../contracts.ts";
+import type { Delivery, FleetRecord, JobKind, Role } from "../contracts.ts";
 import { loadNativeConfig, type NativeClass, nativeConfigFile, type NativeDriver } from "../worker-driver.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
 import { NATIVE_SHUTDOWN_GRACE_MS } from "./claude-usage.ts";
 
-/** Why a job may not run native (S1): the resolver falls back to pi on these; an explicit request refuses. */
+/** Why a job may not run native (S1): the resolver falls back to pi on these; an explicit request refuses.
+ * `pipeline` is no longer returned (D2): it stays for recorded `driver_reason`s and their readers. */
 export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort" | "denied" | "window" | "auth" | "lockdown";
 
 export class NativeDriverError extends Error {
@@ -26,7 +27,7 @@ const NATIVE_SYSTEM_PROMPT_FILE = "native-system-prompt.md";
 const LIVE_PHASES: readonly string[] = ["launching", "waiting", "held"];
 // One shared load: concurrent admissions awaiting their own import() could see a half-evaluated module.
 let spike: Promise<typeof import("./claude-spike.ts")> | undefined;
-const RESEARCH_DELIVERIES: readonly Delivery[] = ["local", "answer", "board"];
+const RESEARCH_DELIVERIES: readonly Delivery[] = ["local", "answer", "board", "pipeline"];
 const SHIP_DELIVERIES: readonly Delivery[] = ["pr", "local"];
 const SWITCH_WHERE: Record<NativeClass, string> = {
 	claude_research: "dashboard Settings → Native workers",
@@ -53,15 +54,15 @@ export interface NativeSelection {
 }
 
 /** The switch a job's role/kind/delivery falls under, or undefined when no native class takes it (N4f). Research
- * delivery is checked after the pipeline rule, so pipeline-owned research is named as such (D2). */
+ * delivery is checked after the switch, so a research job with the switch off names the switch. */
 export function nativeClassOf(kind: JobKind, role: Role, delivery: Delivery): NativeClass | undefined {
 	if (role === "planner" && kind === "research") return "claude_research";
 	if (role === "implementer" && kind === "ship" && SHIP_DELIVERIES.includes(delivery)) return "claude_ship";
 	return role === "gate-reviewer" ? "claude_review" : undefined;
 }
 
-/** The first selection condition that fails, typed, or undefined: a native class whose switch is on, not owned by a
- * pipeline (D2), a free slot under `max_concurrent`, pinned claude. */
+/** The first selection condition that fails, typed, or undefined: a native class whose switch is on, an eligible
+ * delivery (pipeline research included, D2), a free slot under `max_concurrent`, pinned claude. */
 export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ category: NativeRefusal; why: string } | undefined> {
 	let config: ReturnType<typeof loadNativeConfig>;
 	try {
@@ -70,15 +71,11 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 		return { category: "switch", why: `the native switch is unreadable (${(error as Error).message})` };
 	}
 	const nativeClass = nativeClassOf(input.kind, input.role, input.delivery);
-	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local, answer or board), ship (role implementer, delivery pr or local) and gate-reviewer jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
+	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local, answer, board or pipeline), ship (role implementer, delivery pr or local) and gate-reviewer jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
 	if (nativeClass === undefined) return ineligible;
 	if (input.profile === "ops") return { category: "ineligible", why: "the ops profile needs ssh/scp, which the native Bash policy refuses" };
 	if ((input.skills ?? 0) > 0) return { category: "ineligible", why: "per-job skills load only on pi (`--skill`)" };
 	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
-	// A reviewer is one-shot and never sent to: the pipeline rule guards the planner's queued sends, not its gate (N4h).
-	if (nativeClass !== "claude_review" && existsSync(join(input.home, paths.pipelineFile(input.jobId)))) {
-		return { category: "pipeline", why: "pipeline-owned research stays on pi; only local, answer and board research run native" };
-	}
 	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs), input.jobId, config.max_concurrent);
 	if (occupied) return occupied;
