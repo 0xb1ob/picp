@@ -21,20 +21,19 @@ export function ContextText({text}: {text:string}) {
 
 /**
  * One open operator ask, decidable in one tap: a button per option (`{kind:"answer"}`, the guarded PR 351 path),
- * an "Other answer…" message, and the context behind it. Shared by the Awaiting page and the transcript's pinned block.
+ * an "Other answer…" message, and the context behind it. The Awaiting page's card.
  * Without control the buttons stay, disabled, with the one reason; never a copy command.
  */
-export function DecisionCard({ask,control,level = 2,factsOpen = false,contextOpen,children}: {ask:AwaitingDetail;control?:ControlView | undefined;level?:2 | 3;factsOpen?:boolean;contextOpen?:boolean;children?:ComponentChildren}) {
+export function DecisionCard({ask,control,factsOpen = false,children}: {ask:AwaitingDetail;control?:ControlView | undefined;factsOpen?:boolean;children?:ComponentChildren}) {
  const [other,setOther] = useState("");
  const ready = controlReady(control?.status);
  const mine = control?.delivery?.ask_id === ask.id ? control.delivery : null;
  const disabled = !ready || control?.delivery?.state === "sending" || (mine !== null && mine.state !== "failed");
- const Heading = level === 2 ? "h2" : "h3";
  const sendOther = () => { const body = other.trim(); if (disabled || !body) return; control!.send({kind:"message",text:`${ask.id}: ${body}`},ask.id); setOther(""); };
  return <article class="decision-card" aria-labelledby={`question-${ask.id}`}>
   {children}
-  <div class="decision-card-question"><Heading id={`question-${ask.id}`}>{ask.question}</Heading>{ask.reason && <span class="awaiting-reason">yours because: {ask.reason}</span>}</div>
-  {ask.context && <details class="decision-card-context" open={contextOpen ?? ask.context.length <= 600}><summary>Background</summary><ContextText text={ask.context}/></details>}
+  <div class="decision-card-question"><h2 id={`question-${ask.id}`}>{ask.question}</h2>{ask.reason && <span class="awaiting-reason">yours because: {ask.reason}</span>}</div>
+  {ask.context && <details class="decision-card-context" open={ask.context.length <= 600}><summary>Background</summary><ContextText text={ask.context}/></details>}
   <div class="decision-card-options">{ask.options.map(option => <button key={option.label} type="button" class={ask.recommendation === option.label ? "decision-card-option decision-card-recommended" : "decision-card-option"} disabled={disabled} onClick={() => control?.send({kind:"answer",ask_id:ask.id,label:option.label})}>
    <span class="decision-card-option-heading"><strong>{option.label}</strong>{ask.recommendation === option.label && <span class="overview-rec-badge">recommended</span>}</span><span class="decision-card-consequence">{option.consequence}</span>
   </button>)}</div>
