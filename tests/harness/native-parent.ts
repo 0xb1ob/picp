@@ -59,7 +59,7 @@ export type NativeFleet = Awaited<ReturnType<typeof nativeFleet>>;
 
 /** A driver-claude home with a registered project, a no-op script job under a mandate, and the fake model behind a
  * fake HOME's Claude settings; the bridge stops before anything is removed. */
-export async function nativeFleet(t: TestContext, script: (jobId: () => string) => ClaudeStep[]) {
+export async function nativeFleet(t: TestContext, script: (jobId: () => string) => ClaudeStep[], settingsEnv: Record<string, string> = {}) {
 	let jobId = "";
 	const provider = await startClaudeMockProvider(script(() => jobId));
 	const scratch = scratchHome({ driver: "claude" });
@@ -74,7 +74,7 @@ export async function nativeFleet(t: TestContext, script: (jobId: () => string) 
 	post.mandates.issue({ projects: ["demo"], objective: "native parent", job_ids: [jobId], expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 1, tokens: 100_000 }, job_cap: 2 });
 	const fakeHome = mkdtempSync(join(tmpdir(), "cp-native-parent-home-"));
 	mkdirSync(join(fakeHome, ".claude"), { recursive: true, mode: 0o700 });
-	writeFileSync(join(fakeHome, ".claude", "settings.json"), JSON.stringify({ env: subscriberEnv(provider.url) }));
+	writeFileSync(join(fakeHome, ".claude", "settings.json"), JSON.stringify({ env: { ...subscriberEnv(provider.url), ...settingsEnv } }));
 	// A gh whose main branch has no CI runs: the mandated project's CI watch reads it instead of waking a failure turn.
 	const bin = join(fakeHome, "bin");
 	mkdirSync(bin);

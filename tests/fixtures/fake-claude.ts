@@ -12,7 +12,7 @@ import { createInterface } from "node:readline";
 import { CLAUDE_VERSION_FLOOR } from "../../src/drivers/claude-cli.ts";
 
 type Block = Record<string, unknown>;
-type Message = { role: "user" | "assistant"; content: string | Block[] };
+type Message = { role: "user" | "assistant" | "system"; content: string | Block[] };
 type Pending = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void };
 type Queued = { message: Message; priority?: string; uuid?: string };
 
@@ -139,9 +139,18 @@ async function runTool(use: Block): Promise<Block> {
 			return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: out.hookSpecificOutput.permissionDecisionReason ?? "denied" };
 		}
 	}
+	// Test knob (settings env): hold the first allowed call to this tool before it runs, until an interrupt ends the turn.
+	if (env.FAKE_CLAUDE_HOLD_AFTER_ALLOW === name && !existsSync(join(store, "held"))) {
+		writeFileSync(join(store, "held"), toolUseId);
+		const signal = turnAbort?.signal;
+		if (signal && !signal.aborted) await new Promise((done) => signal.addEventListener("abort", done, { once: true }));
+		return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: "Interrupted before the tool ran" };
+	}
 	const server = servers.find((each) => name.startsWith(`mcp__${each}__`));
 	if (!server) return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: `No such tool available: ${name}` };
-	const params = { name: name.slice(`mcp__${server}__`.length), arguments: use.input ?? {}, _meta: { "claudecode/toolUseId": toolUseId } };
+	// Test knob: FAKE_CLAUDE_NO_TOOL_META=1 sends no tool_use id with tools/call, as a CLI without the meta would.
+	const meta = env.FAKE_CLAUDE_NO_TOOL_META === "1" ? {} : { _meta: { "claudecode/toolUseId": toolUseId } };
+	const params = { name: name.slice(`mcp__${server}__`.length), arguments: use.input ?? {}, ...meta };
 	const called = await mcp(server, "tools/call", params) as { content?: Block[]; isError?: boolean };
 	return { type: "tool_result", tool_use_id: toolUseId, is_error: called.isError === true, content: called.content ?? [] };
 }
@@ -191,11 +200,15 @@ async function turn(item: Queued): Promise<void> {
 		const results: Block[] = [];
 		for (const use of uses) results.push(await runTool(use));
 		send({ type: "user", message: { role: "user", content: results }, parent_tool_use_id: null, session_id: sessionId, uuid: randomUUID() });
-		// The pass between tool batches: input sent mid-turn (not at "later") joins the next model call.
+		history.push({ role: "user", content: results });
+		// The pass between tool batches: input sent mid-turn (not at "later") joins the next model call as claude 2.1.318
+		// sends it (observed): a system-role message after the tool results, not a user turn.
 		const joining = inbox.filter((each) => each.priority !== "later" && !textOf(each.message.content).startsWith("/compact"));
-		for (const each of joining) inbox.splice(inbox.indexOf(each), 1);
-		const steered = joining.flatMap((each): Block[] => { const content = take(each); return typeof content === "string" ? [{ type: "text", text: content }] : content; });
-		history.push({ role: "user", content: [...results, ...steered] });
+		for (const each of joining) {
+			inbox.splice(inbox.indexOf(each), 1);
+			const text = `The user sent a new message while you were working:\n${textOf(take(each))}\n\nThis is how Claude Code surfaces messages the user sends mid-turn.`;
+			history.push({ role: "system", content: [{ type: "text", text }] });
+		}
 		save();
 	}
 	if (interrupted) {

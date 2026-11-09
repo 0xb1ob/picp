@@ -18,7 +18,7 @@ import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { type WorkerEvent, WorkerProcess } from "../../src/worker-process.ts";
 import { type ClaudeStep, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, toolResults } from "../harness/claude-mock-provider.ts";
 import { waitFor } from "../harness/index.ts";
-import { alive, claudeChildren, isModelCall, type NativeFleet, nativeFleet, recordLines, userTexts } from "../harness/native-parent.ts";
+import { alive, claudeChildren, isModelCall, REAL_CLAUDE, type NativeFleet, nativeFleet, recordLines, userTexts } from "../harness/native-parent.ts";
 
 const LINUX = process.platform === "linux" ? false : "reads the claude child from /proc";
 const gate = () => {
@@ -80,9 +80,13 @@ test("native parent S2b: a mid-turn send joins after the tool batch, else at the
 	const settled = (id?: string) => row(f, id)?.state === "settled";
 	await waitFor(() => settled(a.send_id) && settled(b.send_id), Boolean, { timeoutMs: 60_000, what: "A and B settled" });
 	assert.equal(modelCalls(f).length, 2, "B rode A's turn: no model call of its own");
-	assert.ok(userTexts(modelCalls(f)[1]).some((text) => text.includes("steer B joins the tool batch")), "B is in the call after the tool batch");
+	// claude 2.1.318 sends a mid-turn message as a system-role note after the tool results (seen on the real CLI).
+	const texts = (modelCalls(f)[1]?.body.messages as Array<{ role: string; content: unknown }>).map((message) => JSON.stringify(message.content));
+	assert.ok(texts.some((text) => text.includes("steer B joins the tool batch")), "B is in the call after the tool batch");
 	assert.equal(logged(started.sessionFile, "steer B joins the tool batch"), 1);
-	assert.equal(f.bridge.sendReceipt(b.send_id!)?.reply?.includes("steered reply") || f.bridge.sendReceipt(b.send_id!)?.reply?.includes(a.send_id!), true, JSON.stringify(f.bridge.sendReceipt(b.send_id!)));
+	// One span, as a pi steer: A's receipt carries the reply, B's points at it (P9f-send-batch).
+	assert.equal(f.bridge.sendReceipt(a.send_id!)?.reply, "steered reply", JSON.stringify(f.bridge.sendReceipt(a.send_id!)));
+	assert.equal(f.bridge.sendReceipt(b.send_id!)?.reply, `answered together with ${a.send_id} — see that reply`, JSON.stringify(f.bridge.sendReceipt(b.send_id!)));
 
 	const c = await f.bridge.send("send C streams its answer", 500);
 	await waitFor(() => modelCalls(f).length, (n) => n === 3, { timeoutMs: 60_000, what: "C's model call" });
@@ -165,22 +169,22 @@ test("native parent S2b: stop with discardPending drops the queued send as on pi
 	assert.ok(modelCalls(f).every((call) => userTexts(call).every((text) => !text.includes("steer B is dropped by the stop"))), "B never reached the model");
 });
 
-// Scenario: Given a native entry on the bridge's spawn seam, When `abort` arrives during a turn, Then the turn ends
-// `aborted` through Query.interrupt() (the CLI keeps "[Request interrupted by user]" in the resumed transcript),
-// And the next turn's cp_next reports its own tool_use id, never a stale one queued before the abort (#824 review 2).
-test("native parent S2b: abort interrupts the query and leaves no stale tool-call id", { skip: LINUX, timeout: 180_000 }, async (t) => {
-	const hang = gate();
-	t.after(() => hang.release());
+// Scenario (#824 review 2): Given a CLI that sends no tool_use id with tools/call, When `abort` arrives while a cp_next
+// the hook allowed is held before it runs, Then the turn ends `aborted` through Query.interrupt() (the CLI keeps
+// "[Request interrupted by user]"), And the next turn's cp_next reports its own id, not the never-run call's queued one.
+test("native parent S2b: abort interrupts the query and leaves no stale tool-call id", { skip: LINUX || (REAL_CLAUDE && "holds a call with a fake-claude knob"), timeout: 180_000 }, async (t) => {
 	const f = await nativeFleet(t, () => [
-		{ kind: "text", text: "never answered", beforeAnswer: () => hang.opened },
+		{ kind: "tool_use", calls: [{ name: "mcp__cp__cp_next", input: {} }] },
 		{ kind: "tool_use", calls: [{ name: "mcp__cp__cp_next", input: {} }] },
 		{ kind: "text", text: "after the abort" },
-	]);
+	], { FAKE_CLAUDE_HOLD_AFTER_ALLOW: "mcp__cp__cp_next", FAKE_CLAUDE_NO_TOOL_META: "1" });
 	const events: WorkerEvent[] = [];
 	const proc = spawnEntry(t, f, FAKE_NATIVE_MODEL, events);
 	await proc.getState(30_000);
 	await proc.prompt("hold the turn");
-	await waitFor(() => modelCalls(f).length, (n) => n === 1, { timeoutMs: 60_000, what: "the held model call" });
+	const held = join(f.home, layoutForHome("multi", f.home).sessions, "native-parent-claude", "config", "fake-claude", "held");
+	await waitFor(() => existsSync(held), Boolean, { timeoutMs: 60_000, what: "the allowed cp_next held before it runs" });
+	const heldId = readFileSync(held, "utf8");
 	const child = (await firstChild(proc.pid!))!;
 	assert.equal((await proc.abort()).success, true);
 	const settled = () => events.filter((event) => event.type === "agent_settled").length;
@@ -192,8 +196,10 @@ test("native parent S2b: abort interrupts the query and leaves no stale tool-cal
 	await waitFor(settled, (n) => n === 2, { timeoutMs: 60_000, what: "the next turn to settle" });
 	assert.ok(userTexts(modelCalls(f)[1]).some((text) => text.includes("[Request interrupted by user]")), "interrupted, not killed: the CLI kept its note");
 	const calls = (modelCalls(f)[2]?.body.messages as Array<{ role: string; content: unknown }>).flatMap((message) => message.role === "assistant" && Array.isArray(message.content) ? (message.content as Array<{ type: string; id?: string }>).filter((block) => block.type === "tool_use") : []);
-	const end = events.find((event) => event.type === "tool_execution_end" && event.toolName === "cp_next");
-	assert.equal(end?.toolCallId, calls.at(-1)?.id, "cp_next reports the model's own tool_use id");
+	const ends = events.filter((event) => event.type === "tool_execution_end" && event.toolName === "cp_next");
+	assert.equal(ends.length, 1, "the held call never ran");
+	assert.notEqual(calls.at(-1)?.id, heldId);
+	assert.equal(ends[0]?.toolCallId, calls.at(-1)?.id, `cp_next reports its own tool_use id, never the held call's ${heldId}`);
 });
 
 // Scenario (#826 review): Given a native entry launched on --model M, When set_model switches it to M2 and the entry is
