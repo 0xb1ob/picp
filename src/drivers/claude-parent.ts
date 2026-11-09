@@ -22,8 +22,8 @@ import { standingOrdersDigest } from "../parent-context.ts";
 import { messageText } from "../parent-outbox.ts";
 import { recentWorkContext } from "../recent-work.ts";
 import { resolveClaude } from "./claude-cli.ts";
-import { type CustomMessage, HeadlessHost, ParentRecord, type SendOptions } from "./claude-parent-session.ts";
-import { buildChildEnv, CHILD_MANAGED_SETTINGS, operatorClaudeSettings } from "./claude-spike.ts";
+import { type ContextUsage, type CustomMessage, HeadlessHost, type HostPorts, ParentRecord, type SendOptions } from "./claude-parent-session.ts";
+import { buildChildEnv, CHILD_MANAGED_SETTINGS, nativeEffortOptions, operatorClaudeSettings } from "./claude-spike.ts";
 import { nativeModelId } from "./claude.ts";
 
 // stdout is the RPC channel: nothing the extension logs may land on it.
@@ -67,13 +67,15 @@ configureLayout("multi", home);
 type Message = { role: "user"; content: Array<{ type: "text"; text: string }>; timestamp: number } | (CustomMessage & { role: "custom"; timestamp: number });
 type Assistant = Record<string, unknown> & { role: "assistant"; stopReason: string };
 
-const record = new ParentRecord(sessionFile);
+let record = new ParentRecord(sessionFile);
 let sessionId = record.sessionId();
+/** pi's thinking level, applied to the next query as the native effort (`nativeEffortOptions`). */
+let thinking = record.thinking();
 let busy = false;
 let stopping = false;
 let messageCount = 0;
 let turnIndex = 0;
-let usage: { tokens: number | null; contextWindow?: number; percent?: number } = { tokens: null };
+let usage: ContextUsage = record.usage();
 /** Waiting to start a turn: operator texts and triggering wake-ups, in arrival order. */
 const queue: Message[] = [];
 /** Quiet wake-ups already landed (pi appends them to context at once); they ride the next turn. */
@@ -85,7 +87,7 @@ let running: Promise<void> | undefined;
 /** The turn's live query while it still takes input: a steer joins it, an abort interrupts it. */
 let live: { push: (message: Message) => boolean; interrupt: () => Promise<void> } | undefined;
 
-const host = new HeadlessHost({
+const ports: HostPorts = {
 	write,
 	sendMessage: deliver,
 	isIdle: () => !busy,
@@ -93,17 +95,24 @@ const host = new HeadlessHost({
 	sessionId: () => sessionId ?? sessionFile,
 	contextTokens: () => usage.tokens,
 	entries: () => record.entries(),
-}, process.cwd());
-const { session } = registerCommandPost(host.api(), (_ctx, base) => ({
-	registry: undefined,
-	operatorTexts: () => record.operatorTexts(),
-	cwd: base.cwd,
-	headless: base.headless,
-	sessionId: () => sessionId ?? sessionFile,
-	notify: base.notify,
-	setLive: base.setLive,
-	refresh: base.refresh,
-}));
+};
+
+/** One extension instance on a fresh host: at boot, and again on `new_session`, as pi's runtime swap loads one. */
+function mount() {
+	const host = new HeadlessHost(ports, process.cwd());
+	const { session } = registerCommandPost(host.api(), (_ctx, base) => ({
+		registry: undefined,
+		operatorTexts: () => record.operatorTexts(),
+		cwd: base.cwd,
+		headless: base.headless,
+		sessionId: () => sessionId ?? sessionFile,
+		notify: base.notify,
+		setLive: base.setLive,
+		refresh: base.refresh,
+	}));
+	return { host, session };
+}
+let { host, session } = mount();
 
 /** pi's `sendMessage`: a digest becomes a prompt section, a quiet notice lands now, a triggering one starts a turn. */
 function deliver(message: CustomMessage, options: SendOptions): void {
@@ -284,14 +293,23 @@ function resultError(result: SDKResultMessage): string {
 	return Array.isArray(errors) && errors.length > 0 ? errors.map(String).join("; ") : result.subtype;
 }
 
-/** `getContextUsage()` of the turn's live query, cached for `get_session_stats`; bounded, never a hang. */
-async function readUsage(q: Query): Promise<void> {
+/** `getContextUsage()` of the live query, kept in the record for `get_session_stats`; bounded, never a hang. */
+async function readUsage(q: Query): Promise<ContextUsage | undefined> {
 	try {
 		const read = await Promise.race([q.getContextUsage(), sleep(SHUTDOWN_WAIT_MS, undefined, { ref: false })]);
-		if (read) usage = { tokens: read.totalTokens, contextWindow: read.maxTokens, percent: read.percentage };
+		if (read) {
+			keepUsage({ tokens: read.totalTokens, contextWindow: read.maxTokens, percent: read.percentage });
+			return usage;
+		}
 	} catch (error) {
 		process.stderr.write(`[native claude parent] context usage unread: ${(error as Error).message}\n`);
 	}
+	return undefined;
+}
+
+function keepUsage(next: ContextUsage): void {
+	if (JSON.stringify(next) !== JSON.stringify(usage)) record.setUsage(next);
+	usage = next;
 }
 
 const STOP_REASONS: Record<string, string> = { end_turn: "stop", stop_sequence: "stop", pause_turn: "stop", refusal: "stop", tool_use: "toolUse", max_tokens: "length", model_context_window_exceeded: "length" };
@@ -475,6 +493,7 @@ function sdkOptions(claudePath: string, abort: AbortController): Options {
 		maxTurns: MAX_TURNS,
 		abortController: abort,
 		model: modelId,
+		...nativeEffortOptions(thinking),
 		systemPrompt: systemPrompt(),
 		...(sessionId ? { resume: sessionId } : {}),
 	};
@@ -499,8 +518,124 @@ async function abortTurn(): Promise<void> {
 	if (!answered) current?.abort();
 }
 
+const cancelled = (results: unknown[]): boolean => results.some((each) => (each as { cancel?: unknown } | undefined)?.cancel === true);
+
+/** A control step between turns: no turn starts while it runs, and the queue resumes after it. */
+async function between<T>(name: string, step: () => Promise<T>): Promise<T> {
+	if (busy) throw new Error(`the native parent is mid-turn; ${name} once it settles`);
+	busy = true;
+	const done = step();
+	running = done.then(() => undefined, () => undefined);
+	try {
+		return await done;
+	} finally {
+		busy = false;
+		running = undefined;
+		pump();
+	}
+}
+
+/** pi's manual `compact`: the CLI's own `/compact <instructions>` on the recorded session, with pi's compact events. */
+async function compact(instructions: string): Promise<{ tokensBefore?: number; estimatedTokensAfter?: number }> {
+	if (!sessionId) throw new Error("nothing to compact: the native parent has no claude session yet");
+	if (cancelled(await host.fire("session_before_compact", { reason: "manual", customInstructions: instructions }))) {
+		throw new Error("compaction cancelled by the parent extension");
+	}
+	try {
+		const outcome = await runCompact(instructions);
+		await host.fire("session_compact", { reason: "manual", fromExtension: false });
+		return outcome;
+	} catch (error) {
+		await host.fire("session_compact_failed", { reason: "manual", error: (error as Error).message });
+		throw error;
+	}
+}
+
+async function runCompact(instructions: string): Promise<{ tokensBefore?: number; estimatedTokensAfter?: number }> {
+	const claude = resolveClaude(process.env);
+	const abort = new AbortController();
+	current = abort;
+	let settle: () => void = () => {};
+	const settled = new Promise<void>((done) => (settle = done));
+	abort.signal.addEventListener("abort", () => settle(), { once: true });
+	async function* input(): AsyncGenerator<SDKUserMessage> {
+		yield { type: "user", message: { role: "user", content: `/compact ${instructions}`.trimEnd() }, parent_tool_use_id: null };
+		await settled;
+	}
+	const before = usage.tokens;
+	let boundary: { pre_tokens: number; post_tokens?: number } | undefined;
+	let failure: string | undefined;
+	let after: ContextUsage | undefined;
+	let result: SDKResultMessage | undefined;
+	try {
+		const q = query({ prompt: input(), options: sdkOptions(claude.path, abort) });
+		for await (const message of q) {
+			if (message.type === "system" && message.subtype === "init" && message.session_id !== sessionId) {
+				sessionId = message.session_id;
+				record.setSessionId(message.session_id);
+			} else if (message.type === "system" && message.subtype === "compact_boundary") {
+				boundary = message.compact_metadata;
+			} else if (message.type === "system" && message.subtype === "status" && message.compact_result === "failed") {
+				failure = message.compact_error ?? "the claude CLI reported a failed compaction";
+			} else if (message.type === "result") {
+				result = message;
+				if (boundary) after = await readUsage(q);
+				settle();
+			}
+		}
+	} finally {
+		settle();
+		if (current === abort) current = undefined;
+	}
+	if (!boundary) {
+		const why = failure ?? (abort.signal.aborted ? "aborted" : result ? resultError(result) : "the claude query ended without a result");
+		throw new Error(`compaction did not run: ${why}`);
+	}
+	if (!after) keepUsage({ ...usage, tokens: boundary.post_tokens ?? null });
+	const tokensBefore = before ?? boundary.pre_tokens;
+	return { tokensBefore, ...(usage.tokens === null ? {} : { estimatedTokensAfter: usage.tokens }) };
+}
+
+/** pi's `new_session`: a fresh record beside the old one and a fresh extension instance; the next turn starts anew. */
+async function rotate(): Promise<boolean> {
+	if (cancelled(await host.fire("session_before_switch", { reason: "new" }))) return false;
+	const previous = sessionFile;
+	const next = join(dirname(sessionFile), `native-parent-${Date.now()}.jsonl`);
+	await host.fire("session_shutdown", { reason: "new", targetSessionFile: next });
+	sessionFile = next;
+	record = new ParentRecord(next);
+	sessionId = undefined;
+	usage = { tokens: null };
+	messageCount = 0;
+	if (thinking !== undefined) record.setThinking(thinking);
+	backlog.length = 0;
+	promptSections.clear();
+	toolCallIds.clear();
+	({ host, session } = mount());
+	served = undefined;
+	await host.fire("session_start", { reason: "new", previousSessionFile: previous });
+	return true;
+}
+
+/** A pi model ref or thinking level for the next turn; a refusal answers by name and keeps the value in force. */
+function applySetting(type: "set_model" | "set_thinking_level", request: Record<string, unknown>): Record<string, unknown> {
+	try {
+		if (type === "set_model") {
+			modelId = nativeModelId(`${String(request.provider)}/${String(request.modelId)}`);
+			return { success: true, data: { provider: "anthropic", id: modelId } };
+		}
+		const level = String(request.level);
+		nativeEffortOptions(level);
+		thinking = level;
+		record.setThinking(level);
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: (error as Error).message };
+	}
+}
+
 function command(line: string): void {
-	let request: { id?: unknown; type?: unknown; message?: unknown; since?: unknown; streamingBehavior?: unknown };
+	let request: { id?: unknown; type?: unknown; message?: unknown; since?: unknown } & Record<string, unknown>;
 	try {
 		request = JSON.parse(line) as typeof request;
 	} catch {
@@ -539,6 +674,13 @@ function command(line: string): void {
 		reply({ success: true, data: { disposition } });
 		return pump();
 	}
+	if (type === "set_model" || type === "set_thinking_level") return reply(applySetting(type, request));
+	const failed = (error: unknown) => reply({ success: false, error: (error as Error).message });
+	if (type === "compact") {
+		const instructions = typeof request.customInstructions === "string" ? request.customInstructions : "";
+		return void between("compact", () => compact(instructions)).then((data) => reply({ success: true, data }), failed);
+	}
+	if (type === "new_session") return void between("rotate", rotate).then((done) => reply({ success: true, data: { cancelled: !done } }), failed);
 	reply({ success: false, error: `the native claude parent does not take ${type} yet` });
 }
 
