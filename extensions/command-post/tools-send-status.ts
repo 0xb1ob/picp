@@ -20,7 +20,7 @@ import {
 } from "../../src/status-block.ts";
 import { resolveAwaitingRows } from "../../src/awaiting-rows.ts";
 import { formatRevivePlan, formatReviveResult } from "../../src/revive.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, piToolContext } from "./shared.ts";
 
 export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
 	const { commandPost, setLive, refreshWidget } = deps;
@@ -70,7 +70,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const result = await commandPost(ctx.modelRegistry).send({
+			const result = await commandPost(piToolContext(ctx).registry).send({
 				jobId: params.job_id,
 				message: params.message,
 				...(params.mode ? { mode: params.mode as "auto" | "prompt" | "steer" | "follow_up" } : {}),
@@ -132,7 +132,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const reviver = commandPost(ctx.modelRegistry).reviver();
+			const reviver = commandPost(piToolContext(ctx).registry).reviver();
 			const options = params.continue_failed ? { continueFailed: true } : {};
 			const plan = await reviver.plan(params.job_id, options);
 			if (!plan.ok || !params.confirm) {
@@ -226,13 +226,14 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			const post = commandPost(ctx.modelRegistry);
+			const tc = piToolContext(ctx);
+			const post = commandPost(tc.registry);
 			// include: "all" so a job that shipped this turn (phase done) is still
 			// visible for Shipped; "in progress" filters back to the active phases
 			// itself, so this is still one query, not a second source.
 			const snapshot = await post.status({ include: "all" });
 			const warn = (message: string): void => {
-				if (ctx.hasUI) ctx.ui.notify(message, "warning");
+				if (!tc.headless) tc.notify(message, "warning");
 				else process.stderr.write(`${message}\n`);
 			};
 			// cp-gmy: promote every deferred merge ask whose CI has since finished,
@@ -313,7 +314,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			];
 			const result = renderSessionStatusBlock({
 				store: post.shippedSeen,
-				sessionId: ctx.sessionManager.getSessionId(),
+				sessionId: tc.sessionId(),
 				snapshot,
 				input: {
 					...(params.labels ? { labels: params.labels } : {}),

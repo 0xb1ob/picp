@@ -13,7 +13,7 @@ import { checkStoredPick } from "../../src/reroute.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
 import { currentRuntime } from "./helpers.ts";
-import type { ExtensionDeps } from "./shared.ts";
+import { type ExtensionDeps, piToolContext } from "./shared.ts";
 
 /** R1 D2: the reference `cp_parent model_pick` returned; only with an explicit model it names. */
 const OperatorQuoteParam = Type.Object(OperatorModelPickReferenceSchema.properties, {
@@ -67,7 +67,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				...(params.model ? { model: params.model } : {}),
 				...(params.thinking ? { thinking: params.thinking as ThinkingLevel } : {}),
 				...(params.operator_quote ? { operatorQuote: params.operator_quote } : {}),
-				registry: ctx.modelRegistry,
+				registry: piToolContext(ctx).registry,
 			});
 			refreshWidget(ctx);
 			return {
@@ -188,10 +188,11 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
-			if (params.operator_quote && (await commandPost(ctx.modelRegistry).ledger().show(params.job_id)).script) throw new Error(`${params.job_id} is a script job: operator_quote is refused, a script runs no model`);
+			const tc = piToolContext(ctx);
+			if (params.operator_quote && (await commandPost(tc.registry).ledger().show(params.job_id)).script) throw new Error(`${params.job_id} is a script job: operator_quote is refused, a script runs no model`);
 			if (params.dry_run === true) {
 				// No `refreshWidget`: preview changes no fleet state.
-				const preview = await commandPost(ctx.modelRegistry).previewDispatch({
+				const preview = await commandPost(tc.registry).previewDispatch({
 					jobId: params.job_id,
 					...(params.task === undefined ? {} : { task: params.task }),
 					...(params.task_file === undefined ? {} : { taskFile: params.task_file }),
@@ -211,7 +212,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					details: { ...preview },
 				};
 			}
-			const post = commandPost(ctx.modelRegistry);
+			const post = commandPost(tc.registry);
 			// 4b-2: a queued job starts when a slot frees; a second dispatch would race it.
 			const queuedAt = post.dispatchQueue.position(params.job_id);
 			if (queuedAt !== undefined) throw new Error(`${params.job_id} is already queued at position ${queuedAt} — it starts when a worker slot frees; the outcome arrives as a wake-up. Do not re-dispatch.`);
@@ -317,7 +318,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			fetch: Type.Optional(Type.Boolean({ description: "Run `git fetch origin` first. Default true." })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const result = await commandPost(ctx.modelRegistry).preflight.check({
+			const result = await commandPost(piToolContext(ctx).registry).preflight.check({
 				project: resolveProjectArg(currentRuntime(), params.project, "cp_check"),
 				jobId: params.job_id,
 				...(params.model ? { model: params.model } : {}),

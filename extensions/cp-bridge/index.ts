@@ -33,7 +33,7 @@ import { PACKAGE_ROOT } from "../../src/home.ts";
 import { resolveRuntime, SINGLE_MODE_REMOVED } from "../../src/mode.ts";
 import { readParentLock } from "../../src/parent-lock.ts";
 import type { ParentStartResult } from "../../src/parent-control.ts";
-import { parentModelSetting } from "../../src/parent-context.ts";
+import { parentDriverSetting, parentModelSetting } from "../../src/parent-context.ts";
 import { FleetStore, isPidAlive } from "../../src/fleet.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_MAX_TIMEOUT_S, killNotice } from "../../src/drain.ts";
 import { ParentSendDelegationSchema, parentSendFile, sendIdOfMessage } from "../../src/parent-outbox.ts";
@@ -686,7 +686,7 @@ export default function (pi: ExtensionAPI): void {
 							},
 							sessionModel,
 						);
-					requireAvailableParentModel(model, ctx?.modelRegistry ? registryProbe(ctx.modelRegistry) : ALWAYS_AVAILABLE);
+					requireAvailableParentModel(model, ctx?.modelRegistry ? registryProbe(ctx.modelRegistry) : ALWAYS_AVAILABLE, parentDriverSetting(params.home));
 					const startDeadline = Date.now() + 10_000;
 					let started: ParentStartResult;
 					for (;;) {
