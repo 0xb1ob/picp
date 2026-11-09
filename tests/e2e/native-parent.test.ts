@@ -13,7 +13,7 @@ import { type ClaudeStep, FAKE_NATIVE_MODEL, startClaudeMockProvider, subscriber
 import { alive, isModelCall, NATIVE, nativeFleet, recordLines, scratchHome, userTexts, withEnv } from "../harness/native-parent.ts";
 import { layoutForHome } from "../../src/contracts.ts";
 import { buildParentArgv, CpBridge, parentSkillPaths } from "../../src/cp-bridge.ts";
-import { nativeParentLogFile } from "../../src/drivers/claude-transcript.ts";
+import { nativeParentLogFile } from "../../src/viewer/native-parent-log.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { readParentLock } from "../../src/parent-lock.ts";
 import { COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, MockProvider, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";

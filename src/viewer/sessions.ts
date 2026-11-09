@@ -8,9 +8,9 @@
 
 import { closeSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
-import { nativeParentLogFile } from "../drivers/claude-transcript.ts";
 import type { ContextUsage } from "./api-types.ts";
 import { fileCache, scopedRealpath } from "./file-cache.ts";
+import { nativeParentLogFile } from "./native-parent-log.ts";
 
 export const PARENT_ID = "cp-parent";
 export const RECENT_LIMIT = 10;

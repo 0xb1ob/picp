@@ -5,16 +5,13 @@
  */
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 export const TRANSCRIPT_BLOCK_CAP = 64 * 1024;
 
 /** `<state>/sessions/native/<job>.jsonl`; the run dir is `<state>/runs/<job>` in every home layout. */
 export const nativeTranscriptFile = (runDir: string, jobId: string): string => join(runDir, "..", "..", "sessions", "native", `${jobId}.jsonl`);
-
-/** The native parent's log for its record `<sessions>/<name>.jsonl`: `<sessions>/native-parent-log/<name>.jsonl`. */
-export const nativeParentLogFile = (record: string): string => join(dirname(record), "native-parent-log", basename(record));
 
 /** Text over the 64 KiB cap is cut there and says so. */
 export function capped(text: string): string {

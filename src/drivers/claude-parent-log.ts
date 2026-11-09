@@ -5,7 +5,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { capped, nativeParentLogFile, nativeTranscript, type NativeTranscript } from "./claude-transcript.ts";
+import { nativeParentLogFile } from "../viewer/native-parent-log.ts";
+import { capped, nativeTranscript, type NativeTranscript } from "./claude-transcript.ts";
 
 const WAKE = /^\[fleet wake-up (\S+) — from the fleet, not an operator message\]\n/;
 /** The Claude CLI's session store under its config dir: `<config>/projects/<cwd>/<id>.jsonl`, never the home's. */
@@ -88,7 +89,11 @@ export function parentLog(record: string, options: { cwd: string; claudeConfig: 
 	return {
 		file: log.file,
 		land: (message) => landed(log, message),
-		relay: (message) => log.relay(message),
+		relay: (message) => {
+			// A compaction the CLI ran on its own mid-turn; a manual `/compact` is logged by `compacted` instead.
+			if (message.type === "system" && message.subtype === "compact_boundary") log.entry("compaction", { tokensBefore: message.compact_metadata.pre_tokens });
+			else log.relay(message);
+		},
 		failed: (stopReason, errorMessage) => log.message("assistant", [], { stopReason, errorMessage }),
 		compacted: (tokensBefore) => log.entry("compaction", tokensBefore === undefined ? {} : { tokensBefore }),
 	};
