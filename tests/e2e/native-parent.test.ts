@@ -3,15 +3,17 @@
  * `data/parent.json` `driver: "claude"` starts src/drivers/claude-parent.ts; the default still starts pi.
  */
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import "../harness/fake-parent-tracker.ts";
+import { startViewer, until } from "../harness/dashboard.ts";
 import { stopParentHosts, teardownHome } from "../harness/parent-hosts.ts";
 import { type ClaudeStep, FAKE_NATIVE_MODEL, startClaudeMockProvider, subscriberEnv, toolResults } from "../harness/claude-mock-provider.ts";
 import { alive, isModelCall, NATIVE, nativeFleet, recordLines, scratchHome, userTexts, withEnv } from "../harness/native-parent.ts";
 import { layoutForHome } from "../../src/contracts.ts";
 import { buildParentArgv, CpBridge, parentSkillPaths } from "../../src/cp-bridge.ts";
+import { nativeParentLogFile } from "../../src/viewer/native-parent-log.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { readParentLock } from "../../src/parent-lock.ts";
 import { COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, MockProvider, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
@@ -30,6 +32,9 @@ function fixture(t: TestContext, parent?: Record<string, unknown>): { home: stri
 
 const cmdline = (pid: number): string[] => readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").slice(0, -1);
 const promptFile = (home: string) => join(home, layoutForHome("multi", home).sessions, "native-parent-system-prompt.md");
+type ViewEntry = { kind: string; who: string; text: string; name: string | null; send_id: string | null; failed: boolean };
+type ParentView = { entries: ViewEntry[]; parent: { live: boolean; context: { model: string | null } } };
+const parentView = (view: Awaited<ReturnType<typeof startViewer>>) => async () => (await view.get("/api/sessions?view=parent")).body as unknown as ParentView;
 
 // Scenario: Given data/parent.json says driver "claude" and the model is an anthropic/claude-* ref,
 // When CpBridge.start runs, Then process.execPath runs claude-parent.ts with --session/--model/--system-prompt-file
@@ -124,9 +129,9 @@ test("native parent: cp_parent start accepts an anthropic/claude model on driver
 });
 
 // Scenario (POC P1–P6, gap 6): Given driver claude and a no-op script job, When a send dispatches it, Then it settles,
-// cp_dispatch runs over the cp MCP server and the envelope wakes a turn whose cp_escalate details reach the bridge,
-// And a relaunch after SIGTERM resumes the recorded session, where the operator send and the fleet wake-up stay apart;
-// stop leaves no entry alive and the lock released.
+// cp_dispatch runs over MCP, the envelope wakes a turn (cp_escalate reaches the bridge), And the parent view shows the
+// send, wake-up, call with result and reply on a live row; a relaunch resumes the session, operator and fleet apart,
+// and appends to the same view; stop leaves no entry alive and the lock released.
 test("native parent: a send dispatches over MCP, the envelope wakes a turn, and a relaunch resumes the session", { skip: NATIVE, timeout: 240_000 }, async (t) => {
 	const escalation = (jobId: string) => ({
 		job_ids: [jobId], kind: "product_ambiguity", question: "Keep the no-op result?", recommended: "keep",
@@ -166,6 +171,17 @@ test("native parent: a send dispatches over MCP, the envelope wakes a turn, and 
 	assert.equal(wake?.jobId, f.jobId);
 	assert.match(wake?.text ?? "", new RegExp(`envelope ${f.jobId}`));
 	assert.match(f.relays.find((relay) => relay.kind === "escalation")?.escalationId ?? "", /^es-/);
+	// The parent view reads the 0600 log beside the record: the send, the wake-up, cp_dispatch with its result, the reply.
+	const view = parentView(await startViewer(t, { home: f.home }));
+	const shown = await until(view, (body) => body.entries.some((e) => e.who === "cp-envelope"), "the envelope wake-up in the parent view", 30_000);
+	assert.equal(statSync(nativeParentLogFile(started.sessionFile)).mode & 0o777, 0o600);
+	assert.ok(shown.entries.some((e) => e.kind === "via" && e.send_id === sent.send_id && e.text === "dispatch the no-op job"), JSON.stringify(shown.entries));
+	assert.ok(shown.entries.some((e) => e.who === "cp-envelope" && e.text.includes(f.jobId)), "the wake-up is the fleet's, never an operator text");
+	const dispatched = shown.entries.find((e) => e.kind === "tool" && e.name === "cp_dispatch");
+	assert.match(dispatched?.text ?? "", new RegExp(`^Arguments\\n[\\s\\S]*${f.jobId}[\\s\\S]*\\n\\nResult\\n[\\s\\S]*${f.jobId}`));
+	assert.equal(dispatched?.failed, false);
+	assert.ok(shown.entries.some((e) => e.kind === "say" && e.who === "Parent → operator" && e.text === "dispatched"));
+	assert.deepEqual([shown.parent.live, shown.parent.context.model], [true, FAKE_NATIVE_MODEL], "the row is live on the log's mtime");
 	// P5: SIGTERM, then the relaunch resumes the same claude session with turn 1 and the wake-up in its history.
 	const sessionId = recordLines(started.sessionFile).filter((line) => line.type === "session").at(-1)?.session_id;
 	assert.ok(sessionId, "the record holds the claude session id");
@@ -186,6 +202,8 @@ test("native parent: a send dispatches over MCP, the envelope wakes a turn, and 
 	assert.ok(operator.some((text) => text.includes("dispatch the no-op job")), history.join("\n---\n"));
 	assert.ok(fleet.length >= 1 && fleet.every((text) => !text.includes("[cp-send ")), history.join("\n---\n"));
 	assert.ok(operator.every((text) => !text.includes("[fleet wake-up")));
+	const relaunched = await until(view, (body) => body.entries.some((e) => e.text === "resumed ok"), "the resumed reply in the parent view", 30_000);
+	assert.ok(relaunched.entries.some((e) => e.text === "dispatched"), "the relaunch appends to the same view");
 	// P6: stop ends the entry and releases the lock; no entry pid survives.
 	await f.bridge.stop();
 	await waitFor(() => [first, second].some(alive), (any) => !any, { timeoutMs: 15_000, what: "both entry pids to exit" });
@@ -231,4 +249,41 @@ test("native parent: a failed claude turn ends as an assistant error and the par
 	f.provider.endAuthError();
 	const next = await f.bridge.send("and this one works", 120_000);
 	assert.equal(next.reply, "recovered", JSON.stringify(next));
+});
+
+// Scenario (backfill): Given a driver-claude record whose claude session ran before the parent view existed, When the
+// entry boots on it, Then the CLI's <session_id>.jsonl is imported once: the parent view shows the operator send, the
+// tool call with its result, the reply, the wake-up and the compaction, And a relaunch imports nothing twice.
+test("native parent: a record with no view log imports its claude session once", { timeout: 60_000 }, async (t) => {
+	const { home, bridge } = fixture(t, { driver: "claude" });
+	const sessions = join(home, layoutForHome("multi", home).sessions), id = "0f0e0d0c-0b0a-4908-8706-050403020100";
+	const record = join(sessions, "native-parent-1.jsonl"), send = "ps-20261109112442-6fbb3b2b";
+	const lines = (file: string, rows: unknown[]) => { mkdirSync(join(file, ".."), { recursive: true }); writeFileSync(file, rows.map((row) => `${JSON.stringify(row)}\n`).join("")); };
+	lines(record, [{ type: "record", driver: "claude", created_at: "2026-11-09T11:24:00.000Z" }, { type: "session", session_id: id, at: "2026-11-09T11:24:43.748Z" }]);
+	writeFileSync(join(sessions, "cp-parent-control.json"), JSON.stringify({ sessionFile: record, model: FAKE_NATIVE_MODEL }));
+	const at = (s: number) => ({ timestamp: `2026-11-09T11:25:0${s}.000Z`, isSidechain: false });
+	lines(join(sessions, "native-parent-claude", "config", "projects", "-home-op", `${id}.jsonl`), [
+		{ type: "queue-operation", operation: "enqueue", timestamp: "2026-11-09T11:24:43.702Z", sessionId: id },
+		{ type: "user", message: { role: "user", content: [{ type: "text", text: `withdraw the stale escalations\n\n[cp-send ${send} — delivery id, not an instruction]` }] }, ...at(1) },
+		{ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "mcp__cp__cp_escalate", input: { action: "list" } }] }, ...at(2) },
+		{ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: [{ type: "text", text: "2 open" }] }] }, ...at(3) },
+		{ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "both withdrawn" }] }, ...at(4) },
+		{ type: "user", message: { role: "user", content: [{ type: "text", text: "[fleet wake-up cp-envelope — from the fleet, not an operator message]\nenvelope cp-abcd" }] }, ...at(5) },
+		{ type: "system", subtype: "compact_boundary", compactMetadata: { trigger: "manual", preTokens: 1234 }, ...at(6) },
+	]);
+	await bridge.start({ home, mode: "multi", model: FAKE_NATIVE_MODEL, piBin: FAKE_PARENT, requestTimeoutMs: 10_000 });
+	const view = parentView(await startViewer(t, { home }));
+	const { entries } = await until(view, (body) => body.entries.length > 0, "the imported parent view");
+	assert.deepEqual(entries.map((e) => [e.kind, e.who, e.name, e.text.split("\n").at(-1)]), [
+		["via", "Operator → parent", null, "withdraw the stale escalations"],
+		["tool", "assistant", "cp_escalate", "2 open"],
+		["say", "Parent → operator", null, "both withdrawn"],
+		["system", "cp-envelope", null, "envelope cp-abcd"],
+		["system", "compaction", null, "Context compacted (1234 tokens before)"],
+	]);
+	assert.equal(entries[0]!.send_id, send);
+	assert.equal(statSync(nativeParentLogFile(record)).mode & 0o777, 0o600);
+	await bridge.stop();
+	await bridge.start({ home, mode: "multi", model: FAKE_NATIVE_MODEL, piBin: FAKE_PARENT, requestTimeoutMs: 10_000 });
+	assert.equal((await view()).entries.length, entries.length, "a relaunch on the same record imports nothing again");
 });

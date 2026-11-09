@@ -6,10 +6,11 @@
  * A field that is missing or the wrong type is absent in the row, never a crash.
  */
 
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import type { ContextUsage } from "./api-types.ts";
 import { fileCache, scopedRealpath } from "./file-cache.ts";
+import { nativeParentLogFile } from "./native-parent-log.ts";
 
 export const PARENT_ID = "cp-parent";
 export const RECENT_LIMIT = 10;
@@ -206,9 +207,26 @@ export function deriveSidebar(
 	};
 }
 
+/** Whether `file` opens with the native parent's `record` line (src/drivers/claude-parent-session.ts). */
+function nativeRecord(file: string): boolean {
+	const head = Buffer.alloc(64);
+	let fd: number | undefined;
+	try {
+		fd = openSync(file, "r");
+		return /^\{"type":"record","driver":"claude"/.test(head.toString("utf8", 0, readSync(fd, head, 0, head.length, 0)));
+	} catch {
+		return false;
+	} finally {
+		if (fd !== undefined) closeSync(fd);
+	}
+}
+
+/** The parent's session file; on driver claude, the pi-format log beside the native record, once it exists. */
 export function parentFile(state: ViewerState): string {
 	const saved = str(readObject(join(state.stateDir, "sessions", "cp-parent-control.json"))?.sessionFile);
-	return saved && saved.endsWith(".jsonl") && realInside(saved, sessionRoots(state)) ? saved : join(state.stateDir, "sessions", `${PARENT_ID}.jsonl`);
+	if (!saved || !saved.endsWith(".jsonl") || !realInside(saved, sessionRoots(state))) return join(state.stateDir, "sessions", `${PARENT_ID}.jsonl`);
+	const log = nativeParentLogFile(saved);
+	return nativeRecord(saved) && realInside(log, sessionRoots(state)) ? log : saved;
 }
 
 export function parentRow(state: ViewerState, now = Date.now()): SessionRow {

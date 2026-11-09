@@ -22,6 +22,7 @@ import { standingOrdersDigest } from "../parent-context.ts";
 import { messageText } from "../parent-outbox.ts";
 import { recentWorkContext } from "../recent-work.ts";
 import { resolveClaude } from "./claude-cli.ts";
+import { parentLog, wakeBlock } from "./claude-parent-log.ts";
 import { type ContextUsage, type CustomMessage, HeadlessHost, type HostPorts, ParentRecord, type SendOptions } from "./claude-parent-session.ts";
 import { buildChildEnv, CHILD_MANAGED_SETTINGS, nativeEffortOptions, operatorClaudeSettings } from "./claude-spike.ts";
 import { nativeModelId } from "./claude.ts";
@@ -69,6 +70,14 @@ type Assistant = Record<string, unknown> & { role: "assistant"; stopReason: stri
 
 let record = new ParentRecord(sessionFile);
 let sessionId = record.sessionId();
+const openLog = () => parentLog(sessionFile, {
+	cwd: process.cwd(),
+	claudeConfig: join(claudeRoot(), "config"),
+	sessionIds: record.lines().flatMap((line) => (line.type === "session" ? [line.session_id] : [])),
+	toolName: (name) => name.replace(MCP_PREFIX, ""),
+});
+/** The session view the dashboard reads on driver claude; the record stays what the bridge and a relaunch read. */
+let log = openLog();
 /** The `--model` this process was launched with; a recorded `set_model` on top of it survives a relaunch. */
 const launchModel = modelId;
 modelId = record.model(launchModel);
@@ -136,6 +145,7 @@ function deliver(message: CustomMessage, options: SendOptions): void {
 /** A message enters the parent's context: the extension sees `message_start`, the bridge its `message_end`. */
 async function land(message: Message): Promise<void> {
 	if (message.role === "user") record.addOperatorText(messageText(message));
+	log.land(message);
 	await host.fire("message_start", { message });
 	write({ type: "message_end", message });
 }
@@ -160,7 +170,7 @@ function pump(): void {
 /** What the model reads for one message: an operator text as sent, a wake-up behind its fleet marker. */
 function blockOf(message: Message): string {
 	const text = messageText(message);
-	return message.role === "custom" ? `[fleet wake-up ${message.customType} — from the fleet, not an operator message]\n${text}` : text;
+	return message.role === "custom" ? wakeBlock(message.customType, text) : text;
 }
 
 /** One turn in pi's order: before_agent_start, agent_start, the landed messages, context review, query, settle. */
@@ -181,6 +191,8 @@ async function runTurn(items: Message[]): Promise<void> {
 		assistants.push(message);
 		last = message;
 		messageCount += 1;
+		// A relayed claude message is logged as it arrives; only the entry's own error stand-ins are logged here.
+		if (typeof message.errorMessage === "string" && (message.content as unknown[]).length === 0) log.failed(message.stopReason, message.errorMessage);
 		write({ type: "message_end", message });
 	};
 	const turnEnd = async (toolResults: unknown[]): Promise<void> => {
@@ -256,6 +268,7 @@ async function ask(blocks: string[], emit: (message: Assistant) => void, turnEnd
 	try {
 		q = query({ prompt: input(), options: sdkOptions(claude.path, abort) });
 		for await (const message of q) {
+			log.relay(message);
 			if (message.type === "system" && message.subtype === "init" && message.session_id !== sessionId) {
 				sessionId = message.session_id;
 				record.setSessionId(message.session_id);
@@ -427,7 +440,9 @@ function mcpTool(definition: ToolDefinition): SdkMcpToolDefinition<Record<string
 const mcpTools = (): SdkMcpToolDefinition<Record<string, z.ZodType>>[] => host.tools.map(mcpTool);
 let served: ReturnType<typeof mcpTools> | undefined;
 
-const claudeRoot = (): string => join(dirname(sessionFile), "native-parent-claude");
+function claudeRoot(): string {
+	return join(dirname(sessionFile), "native-parent-claude");
+}
 const childFile = (): string => join(claudeRoot(), "child.json");
 /** `/proc/<pid>/stat` start time: a recorded pid is only ever the same process when this matches. */
 function procStart(pid: number): string | undefined {
@@ -546,6 +561,7 @@ async function compact(instructions: string): Promise<{ tokensBefore?: number; e
 	}
 	try {
 		const outcome = await runCompact(instructions);
+		log.compacted(outcome.tokensBefore);
 		await host.fire("session_compact", { reason: "manual", fromExtension: false });
 		return outcome;
 	} catch (error) {
@@ -607,6 +623,7 @@ async function rotate(): Promise<boolean> {
 	await host.fire("session_shutdown", { reason: "new", targetSessionFile: next });
 	sessionFile = next;
 	record = new ParentRecord(next);
+	log = openLog();
 	sessionId = undefined;
 	usage = { tokens: null };
 	messageCount = 0;

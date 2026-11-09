@@ -1,0 +1,1 @@
+- The dashboard's parent session view (`#sessions?view=parent`) works on the native Claude parent again: the entry writes a pi-format log beside its record (`sessions/native-parent-log/`), the viewer reads it on driver claude, and a record with no log yet imports its claude session once. Pi parents are unchanged.
