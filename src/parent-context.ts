@@ -2,6 +2,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFil
 import { dirname, join } from "node:path";
 import { LAYOUT, layoutForHome, type Mandate, ReviewerModelSchema, type ThinkingLevel, ThinkingLevelSchema, validate } from "./contracts.ts";
 import type { ParentStatus } from "./cp-bridge.ts";
+import { CpBridgeError } from "./cp-bridge-error.ts";
+import { isNativeModel } from "./drivers/claude.ts";
 import { EscalationStore } from "./escalation.ts";
 import { FleetStore } from "./fleet.ts";
 import { isActive, MandateStore } from "./mandate.ts";
@@ -60,6 +62,24 @@ export function parentModelSetting(home: string): string | undefined {
 		const model: unknown = JSON.parse(readFileSync(join(home, layoutForHome("multi", home).data, "parent.json"), "utf8"))?.model;
 		return validate(ReviewerModelSchema, model).ok ? (model as string) : undefined;
 	} catch { return undefined; }
+}
+
+export type ParentDriver = "pi" | "claude";
+
+/**
+ * `data/parent.json` `driver`: absent or unreadable file = `pi` (today's parent). A value other than pi/claude, or
+ * `claude` beside a `model` that is not `anthropic/claude-*`, throws naming the file.
+ */
+export function parentDriverSetting(home: string): ParentDriver {
+	const file = join(home, layoutForHome("multi", home).data, "parent.json");
+	let value: { driver?: unknown; model?: unknown } | null;
+	try { value = JSON.parse(readFileSync(file, "utf8")); } catch { return "pi"; }
+	const driver = value?.driver ?? "pi";
+	if (driver !== "pi" && driver !== "claude") throw new CpBridgeError(`${file} driver must be "pi" or "claude", not ${JSON.stringify(driver)}`);
+	if (driver === "claude" && value?.model !== undefined && !(typeof value.model === "string" && isNativeModel(value.model))) {
+		throw new CpBridgeError(`${file} driver claude runs an explicit anthropic/claude-… model, not ${JSON.stringify(value.model)}`);
+	}
+	return driver;
 }
 
 /**

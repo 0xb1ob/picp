@@ -16,8 +16,9 @@ import {
 	type ThinkingLevel,
 	WORKER_FORBIDDEN_FLAGS,
 } from "./contracts.ts";
-import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentModelSetting, parentThinkingSetting } from "./parent-context.ts";
+import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentDriverSetting, parentModelSetting, parentThinkingSetting } from "./parent-context.ts";
 import { CpBridgeError } from "./cp-bridge-error.ts";
+import { nativeParentSpawnOptions } from "./drivers/claude.ts";
 import { journalBridgeEvent, runAutoControl, trackAssistant } from "./parent-auto-control.ts";
 import { PARENT_COMPACT_TIMEOUT_MS } from "./parent-compact-hold.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
@@ -534,18 +535,18 @@ export class CpBridge {
 	async #spawn(sessionFile: string): Promise<void> {
 		const options = this.#options;
 		if (!options || !this.#home || !this.#mode) throw new CpBridgeError("start options missing");
-		const extension = options.commandPostExtension ?? join(PACKAGE_ROOT, "extensions/command-post/index.ts");
-		const argv = buildParentArgv({
+		const native = parentDriverSetting(this.#home) === "claude" ? nativeParentSpawnOptions({ home: this.#home, sessionFile, model: options.model }) : undefined;
+		const argv = native?.argv ?? buildParentArgv({
 			sessionFile,
 			model: options.model,
-			extension,
+			extension: options.commandPostExtension ?? join(PACKAGE_ROOT, "extensions/command-post/index.ts"),
 			skills: parentSkillPaths(this.#home),
 			thinking: options.thinking ?? parentThinkingSetting(this.#home),
 		});
 		const proc = WorkerProcess.spawn({
 			cwd: options.cwd ?? this.#home,
 			model: options.model,
-			piBin: options.piBin,
+			piBin: native?.piBin ?? options.piBin,
 			argv,
 			env: parentEnv(this.#home, this.#mode),
 			replaceEnv: true,
