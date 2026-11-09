@@ -152,42 +152,46 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	assert.equal(askFill.flatMap((selector) => tab.$$(selector)).length, 0, "the inspector stays open and nothing wears the ask fill");
 });
 
-test("M3-context-answer: the context card's options and the inline chips share one pending answer; one request, never two", { timeout: 180_000 }, async (t) => {
+// Scenario: the context card sends one answer, never two
+//   Given an open ask in the desktop inspector   When two of its options are clicked before a re-render
+//   Then one answer request posts, every option is held and the card says the answer is on its way
+test("M3-context-answer: two clicks on the context card's options before a re-render send one answer, never two", { timeout: 180_000 }, async (t) => {
 	const d = await start(t);
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	browserShims(t, tab);
-	const option = await tab.find(".workspace-context-option", (o) => o.textContent!.startsWith("Merge now") && !o.hasAttribute("disabled"));
-	const chip = await tab.find(".session-entries > .session-replies .session-reply", (b) => b.textContent === "Hold" && !b.hasAttribute("disabled"));
+	const option = (label: string) => tab.find(".workspace-context-option", (o) => o.textContent!.startsWith(label) && !o.hasAttribute("disabled"));
+	const [merge, hold] = [await option("Merge now"), await option("Hold")];
 	// Both clicks land before a re-render (linkedom fires a disabled button's listener too): only the shared
 	// in-flight guard refuses the second. Negative control: removing that guard posts two answers here.
-	tab.click(option);
-	tab.click(chip);
+	tab.click(merge);
+	tab.click(hold);
 	const answers = () => tab.requests.filter((r) => r.method === "POST" && r.path === "/api/operator/message" && /"kind":"answer"/.test(r.body ?? ""));
 	await until(() => answers().length, (n) => n > 0, "the answer request");
 	await new Promise((done) => setTimeout(done, 200));
-	const held = (selector: string) => tab.$$(selector).length > 0 && tab.$$(selector).every((b) => b.hasAttribute("disabled"));
-	assert.deepEqual([answers().map((r) => JSON.parse(r.body!).label), held(".workspace-context-option"), held(".session-entries .session-reply")],
-		[["Merge now"], true, true], "one answer, both surfaces held");
+	const held = tab.$$(".workspace-context-option").every((b) => b.hasAttribute("disabled"));
+	assert.deepEqual([answers().map((r) => JSON.parse(r.body!).label), held], [["Merge now"], true], "one answer, every option held");
 	assert.match(tab.$(".workspace-context-ask [role=status]")?.textContent ?? "", /the options close when the session records/, "the card says it is on its way");
 });
 
 // Scenario: the sidebar card is the one place in the chat to answer an open ask
 //   Given an open ask carded in the operator chat   When the chat opens on a phone and from 900 px
-//   Then the main chat view renders no decisions panel and the sidebar card shows the ask, its options and context
+//   Then the main chat view renders no decisions panel and no option chips; the sidebar card shows the ask and context
 //   When its "Hold" option is clicked   Then the session receives the dashboard message "<ask-id>: Hold"
-test("M3-context-sole-answer: an open ask renders no decisions panel in the chat; the sidebar card shows it and its answer reaches the session", { timeout: 180_000 }, async (t) => {
+test("M3-context-sole-answer: an open ask renders no decisions panel or option chips in the chat; the sidebar card shows it and its answer reaches the session", { timeout: 180_000 }, async (t) => {
 	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed: (stateDir: string, home: string) => seed(stateDir, home) });
 	const session = await operatorSession(t, d.stateDir);
 	const [ask] = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl")).open();
-	const panel = (tab: Tab) => [tab.$$(".session-panel .session-pinned, .session-panel .decision-card").length, /decisions? waiting/.test(tab.$(".session-panel")!.textContent!)];
+	// Chips were buttons labelled with the ask's options under its bubble; negative control: restoring them fails here.
+	const panel = (tab: Tab) => [tab.$$(".session-panel .session-pinned, .session-panel .decision-card").length, /decisions? waiting/.test(tab.$(".session-panel")!.textContent!),
+		tab.$$(".session-panel button").filter((b) => ["Merge now", "Hold"].includes(b.textContent!)).length, tab.$$(".session-panel .session-ask-pointer").length];
 	const phone = await openTab(t, d.port, CHAT);
 	await phone.waitText(/REPLY-CARD/);
-	assert.deepEqual(panel(phone), [0, false], "phone: no decisions panel in the chat");
+	assert.deepEqual(panel(phone), [0, false, 0, 1], "phone: the one-line ask bubble, no decisions panel, no option chips");
 	phone.close();
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	browserShims(t, tab);
 	await tab.waitText(/REPLY-CARD/);
-	assert.deepEqual(panel(tab), [0, false], "desktop: no decisions panel in the chat");
+	assert.deepEqual(panel(tab), [0, false, 0, 1], "desktop: the one-line ask bubble, no decisions panel, no option chips");
 	const card = await tab.find("aside.workspace-context .workspace-context-ask");
 	assert.deepEqual([card.querySelector("b")!.textContent, texts(tab, ".workspace-context-option > b"), !!card.querySelector("details.workspace-context-why[open]")],
 		[QUESTION, ["Merge now · suggested", "Hold"], true], "the sidebar card: the question, its options with the suggested one, the context");
@@ -196,7 +200,7 @@ test("M3-context-sole-answer: an open ask renders no decisions panel in the chat
 	assert.match(text, new RegExp(`^${ask!.id}: Hold\\n\\n\\[cp-dashboard dc-.* — from the dashboard; ask=${ask!.id}\\]$`), "the same ask-id: label dashboard message");
 });
 
-test("M3-context-history: a context-less ask reads not recorded; on an older session file its options refuse, like the chips", { timeout: 180_000 }, async (t) => {
+test("M3-context-history: a context-less ask reads not recorded; on an older session file its options refuse", { timeout: 180_000 }, async (t) => {
 	const d = await start(t, null);
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	browserShims(t, tab);
@@ -210,12 +214,12 @@ test("M3-context-history: a context-less ask reads not recorded; on an older ses
 	await tab.waitText(/Historical transcript/);
 	if (!tab.$("aside.workspace-context")) tab.click(await tab.find(".workspace-context-open"));
 	const option = await tab.find(".workspace-context-option");
-	// replyTo's rule on the card: an older file never answers the live ask. Negative control: dropping `!current`.
+	// An older file never answers the live ask. Negative control: dropping `!current`.
 	tab.click(option);
 	await new Promise((done) => setTimeout(done, 200));
-	assert.deepEqual([tab.$$(".workspace-context-option").every((o) => o.hasAttribute("disabled")), !!tab.$(".session-replies .session-reply"),
+	assert.deepEqual([tab.$$(".workspace-context-option").every((o) => o.hasAttribute("disabled")),
 		tab.$(".workspace-context-history")?.textContent, tab.requests.filter((r) => r.method === "POST" && /"kind":"answer"/.test(r.body ?? "")).length],
-		[true, false, "Open now; answer from the latest transcript, not this older file.", 0], "history: options and chips refuse, no answer sent");
+		[true, "Open now; answer from the latest transcript, not this older file.", 0], "history: the options refuse, no answer sent");
 });
 
 test("M3-context-phone: the context sheet and the Conversations drawer are modal, close on Escape back to their button, keep the selection and drop on leaving", { timeout: 180_000 }, async (t) => {

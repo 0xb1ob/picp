@@ -3,7 +3,7 @@ import type { AwaitingDetail } from "../../src/viewer/api-types.ts";
 import { type ControlView, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { restartInFlight } from "../restart-control.ts";
 
-/** The asks a click answered, shared by the inline chips and the context card so one answer request is in flight. */
+/** The asks a click answered, kept per chat so the context card sends one answer request at a time. */
 export interface Answering { asks: string[]; answer(ask: AwaitingDetail, label: string): void }
 const failedFor = (id: string, control?: ControlView) => control?.delivery?.ask_id === id ? control.delivery.state === "failed"
  : control?.pending?.some(p => p.ask_id === id && p.state === "failed") === true;
@@ -23,7 +23,7 @@ export function useAnswering(control?: ControlView): Answering {
  }};
 }
 /**
- * One ask's answer state: held while any answer to it is clicked (here or on the context card), pending or recorded,
+ * One ask's answer state: held while any answer to it is clicked, pending or recorded,
  * until the journal closes it; only a failure re-enables. A later send can replace `delivery`; `pending` then decides.
  */
 export function answerView(ask: AwaitingDetail, control: ControlView | undefined, answering: Answering) {
@@ -37,7 +37,7 @@ export function answerView(ask: AwaitingDetail, control: ControlView | undefined
  const disabled = !ready || control?.delivery?.state === "sending" || control?.starting?.state === "starting" || restartInFlight(control?.restarting) || answered;
  return {ready, mine, answered, disabled};
 }
-/** The state line under either answer surface. */
+/** The state line under the context card's options. */
 export function AnswerLine({ask, control, answering}: {ask: AwaitingDetail; control: ControlView | undefined; answering: Answering}) {
  const {ready, mine, answered} = answerView(ask, control, answering);
  return <>
@@ -45,19 +45,4 @@ export function AnswerLine({ask, control, answering}: {ask: AwaitingDetail; cont
   {mine ? <p role={mine.state === "failed" ? "alert" : "status"} class={mine.state === "failed" ? "session-replies-state session-replies-failed" : "session-replies-state"}>{deliveryLine(mine)}{mine.state === "failed" ? "" : " — the options close when the session records the answer"}</p>
    : answered && <p role="status" class="session-replies-state">An answer is on its way — the options close when the session records it</p>}
  </>;
-}
-/**
- * Quick replies (chat v2): the verbatim options of one attributable open ask (session-rows.ts replyAsk), each sent as
- * its typed answer through `answering`, the state the context card shares. Key it by ask id.
- */
-export function QuickReplies({ask, control, answering}: {ask: AwaitingDetail; control?: ControlView | undefined; answering: Answering}) {
- const {disabled} = answerView(ask, control, answering);
- return <section class="session-replies" aria-label={`Quick replies to ${ask.id}`}>
-  <p class="session-replies-to">Options from <code>{ask.id}</code>: {ask.question}</p>
-  <div class="session-replies-chips">{ask.options.map((option, i) => <span key={option.label} class="session-reply-wrap">
-   <button type="button" class={ask.recommendation === option.label ? "session-reply session-reply-recommended" : "session-reply"} disabled={disabled} title={option.consequence} aria-describedby={`${ask.id}-reply-${i}`} onClick={() => answering.answer(ask, option.label)}>{option.label}</button>
-   <span id={`${ask.id}-reply-${i}`} class="session-replies-why">{ask.recommendation === option.label ? "Recommended. " : ""}{option.consequence}</span>
-  </span>)}</div>
-  <AnswerLine ask={ask} control={control} answering={answering}/>
- </section>;
 }

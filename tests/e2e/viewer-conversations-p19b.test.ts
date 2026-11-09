@@ -230,7 +230,7 @@ test("P19-rollup-steps: a rollup's wake notice shows once, inside its steps pill
 	assert.ok(text.indexOf("early update") < text.indexOf("LATEST woke") && text.indexOf("LATEST woke") < text.indexOf("latest relay"), "in order");
 });
 
-test("P19-rollup-chips: the header chip stays when the latest relay names no PR; a notice chips a PR like the turn card; quick replies keep their anchor", { timeout: 120_000 }, async (t) => {
+test("P19-rollup-chips: the header chip stays when the latest relay names no PR; a notice chips a PR like the turn card", { timeout: 120_000 }, async (t) => {
 	const head = "e".repeat(40);
 	const quiet = await transcript(t, [wake("cp-a", "first woke"), relay("first update"), wake("cp-a", "second woke"), relay("second update")]);
 	const tab = await quiet.open(FULL);
@@ -259,13 +259,6 @@ test("P19-rollup-chips: the header chip stays when the latest relay names no PR;
 	assert.equal(notice.textContent, "#355 ✓ Review ✓ CI ○ Draft", "(b) separated, never #355review");
 	const rule = /(?:^|\})([^{}]*a\.pr-chip)\{display:inline-flex[;}]/.exec(await servedCss(chipped))?.[1];
 	assert.ok(rule && notice.matches(rule) && card.matches(rule), `(a) the served pill rule reaches the notice row: ${rule}`);
-
-	const asked = await transcript(t, turns, (stateDir) => write(join(stateDir, "operator/asks.jsonl"), jsonl([{ type: "open", id: "ask-aaaa", project: "picp", question: "Merge?", created_at: local(15, 8), recommendation: "Merge", options: [{ label: "Merge", consequence: "Lands" }] }])));
-	const replies = await asked.open(FULL);
-	const anchor = await replies.find(".session-entries > .session-replies");
-	assert.equal(replies.$$(".session-rollup").length, 1, "(l) the turns before the anchor's still fold");
-	assert.match(anchor.previousElementSibling?.textContent ?? "", /latest update/, "(g) replies follow the anchor's own turn");
-	assert.doesNotMatch(replies.$(".session-rollup")!.textContent!, /latest update/, "(g) the anchor's turn stays out of the card");
 });
 
 // ---- Sessions and Files: empty, awaiting, failed and confined states --------------------------------------------

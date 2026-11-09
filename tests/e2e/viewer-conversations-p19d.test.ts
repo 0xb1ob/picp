@@ -13,7 +13,7 @@ import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { type ControlPorts, type DashboardControl, startDashboardControl } from "../../src/dashboard-control.ts";
 import { type Context, type Json, jsonl, pick, viewer, write } from "../harness/conversations.ts";
-import { openTab, type Tab, until } from "../harness/dashboard.ts";
+import { browserShims, openTab, type Tab, until } from "../harness/dashboard.ts";
 
 const OPERATOR = "#sessions?view=you&transcript=1";
 const PENDING = "cp-operator-pending-sends";
@@ -609,42 +609,11 @@ test("P19-chat-chats: the Operator preview is the newest loaded message of the l
 	}
 });
 
-test("P19-chat-replies: the one open ask carded in this transcript gets quick replies after the newest message; two candidates, history, another tier or an answered card get none", { timeout: 120_000 }, async (t) => {
-	const ids: string[] = [];
-	let asks!: OperatorAsks;
-	const ask = (question: string) => ids.push(asks.open({ project: "picp", question, recommendation: "Keep", options: [{ label: "Keep", consequence: "Paused until Monday" }, { label: "Raise", consequence: "Spends more" }] }).id);
-	const d = await home(t, [], (stateDir) => { asks = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")); ask("Which way?"); });
-	d.append(stamped(local(15, 8), { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "cp_parent", arguments: { action: "ask" } }] }),
-		stamped(local(15, 8), { role: "toolResult", toolCallId: "call-1", toolName: "cp_parent", content: [{ type: "text", text: JSON.stringify({ id: ids[0] }) }] }),
-		reply(local(15, 9), "Pick one"));
-	const chips = (tab: Tab) => tab.$(".session-entries > .session-replies");
-	let tab = await openTab(t, d.port, OPERATOR);
-	const replies = await tab.find(".session-entries > .session-replies");
-	assert.match(replies.previousElementSibling?.textContent ?? "", /Pick one/, "after the newest operator-session message");
-	assert.deepEqual([...replies.querySelectorAll("button")].map((b) => [b.textContent, b.getAttribute("title")]), [["Keep", "Paused until Monday"], ["Raise", "Spends more"]], "verbatim labels and consequences");
-	assert.equal(replies.querySelector(".session-reply-recommended")?.textContent, "Keep");
-	ask("Other?");
-	tab = await tab.reopen();
-	await tab.waitText(/Other\?/);
-	await settle();
-	assert.equal(chips(tab), null, "two candidates: no guess");
-	asks.answer(ids[1]!, "Keep");
-	const older = join(d.home, "pi-sessions", "old.jsonl");
-	write(older, jsonl(d.rows));
-	write(operatorSessionsFile(join(d.stateDir, "sessions")), jsonl([{ at: ago(172_800_000), session_file: older }, { at: ago(86_400_000), session_file: d.file }]));
-	for (const hash of [`${OPERATOR}&session=old.jsonl`, "#sessions?view=parent"]) {
-		tab = await tab.reopen(hash);
-		await tab.find(".session-entries");
-		await settle();
-		assert.equal(chips(tab), null, `${hash}: an older file or another tier never answers the live ask`);
-	}
-	asks.answer(ids[0]!, "Keep");
-	tab = await tab.reopen(OPERATOR);
-	await tab.find(".session-ask-settled");
-	assert.equal(chips(tab), null, "the card's journal state decides: an answered ask offers none");
-});
-
-test("P19-chat-replies-send: a chip sends the exact answer once and holds through a composer send, a reload and a queued card reply until the ask closes; a failure re-enables; control off disables", { timeout: 180_000 }, async (t) => {
+// Scenario: the context card's answer goes once and holds until the ask closes
+//   Given an open ask carded in the operator chat, its context card beside it   When an option's answer is refused
+//   Then it reads Failed: and re-enables; a retry is one click, held through a composer send, a reload and a queued
+//   reply to the card, until the journal closes the ask; control off disables with its reason
+test("P19-chat-replies-send: the context card sends the exact answer once and holds through a composer send, a reload and a queued card reply until the ask closes; a failure re-enables; control off disables", { timeout: 180_000 }, async (t) => {
 	let asks!: OperatorAsks, id = "";
 	const d = await home(t, [], (stateDir) => {
 		asks = new OperatorAsks(join(stateDir, "operator", "asks.jsonl"));
@@ -653,49 +622,50 @@ test("P19-chat-replies-send: a chip sends the exact answer once and holds throug
 	d.append(stamped(local(15, 8), { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "cp_parent", arguments: { action: "ask" } }] }),
 		stamped(local(15, 8), { role: "toolResult", toolCallId: "call-1", toolName: "cp_parent", content: [{ type: "text", text: JSON.stringify({ id }) }] }));
 	const first = await session(t, d, () => false, DELIVERED_WAIT_MS);
-	let tab = await openTab(t, d.port, OPERATOR);
-	const held = (view: Tab) => view.$$(".session-reply").length > 0 && view.$$(".session-reply").every((b) => b.hasAttribute("disabled"));
-	await tab.find(".session-reply", (b) => !b.hasAttribute("disabled"));
+	const wide = async (opened: Promise<Tab>) => { const tab = await opened; browserShims(t, tab); return tab; };
+	let tab = await wide(openTab(t, d.port, OPERATOR, new Map(), undefined, {}, true));
+	const OPTION = ".workspace-context-option", held = (view: Tab) => view.$$(OPTION).length > 0 && view.$$(OPTION).every((b) => b.hasAttribute("disabled"));
+	await tab.find(OPTION, (b) => !b.hasAttribute("disabled"));
 	first.control.stop(); // the next session's new token refuses this tab's answer
 	const live = await session(t, d, () => false, DELIVERED_WAIT_MS);
-	tab.click(tab.$(".session-reply")!);
+	tab.click(tab.$(OPTION)!);
 	assert.deepEqual(pick(await posted(tab, 1), ["kind", "ask_id", "label"]), { kind: "answer", ask_id: id, label: "Keep" });
-	assert.match((await tab.find(".session-replies [role=alert]")).textContent!, /^Failed: /);
-	assert.equal(held(tab), false, "a failure re-enables the chips");
-	tab = await tab.reopen();
-	tab.click(await tab.find(".session-reply", (b) => b.textContent === "Raise" && !b.hasAttribute("disabled")));
+	assert.match((await tab.find(".workspace-context-ask [role=alert]")).textContent!, /^Failed: /);
+	assert.equal(held(tab), false, "a failure re-enables the options");
+	tab = await wide(tab.reopen());
+	tab.click(await tab.find(OPTION, (b) => b.textContent!.startsWith("Raise") && !b.hasAttribute("disabled")));
 	assert.deepEqual(pick(await posted(tab, 1), ["kind", "ask_id", "label"]), { kind: "answer", ask_id: id, label: "Raise" }, "retry is one click");
 	assert.ok(await until(() => held(tab), Boolean, "held after the answer"), "no second answer while the first is on its way");
-	assert.match(tab.$(".session-replies [role=status]")?.textContent ?? "", /the options close when the session records the answer$/);
+	assert.match(tab.$(".workspace-context-ask [role=status]")?.textContent ?? "", /the options close when the session records the answer$/);
 	await compose(tab, "other");
 	await posted(tab, 2);
 	await settle();
-	assert.ok(held(tab), "the composer's send replaced the delivery; the chips stay disabled");
+	assert.ok(held(tab), "the composer's send replaced the delivery; the options stay disabled");
 	assert.equal(live.injected.filter((text) => text.includes("Raise")).length, 1, "the answer was sent once");
-	tab = await tab.reopen();
-	await tab.find(".session-reply");
-	assert.match(await until(() => tab.$(".session-replies [role=status]")?.textContent ?? "", (s) => /^An answer/.test(s), "the recorded answer"), /^An answer is on its way/);
+	tab = await wide(tab.reopen());
+	await tab.find(OPTION);
+	assert.match(await until(() => tab.$(".workspace-context-ask [role=status]")?.textContent ?? "", (s) => /^An answer/.test(s), "the recorded answer"), /^An answer is on its way/);
 	assert.ok(held(tab), "after a reload, the recorded answer holds them");
 	asks.answer(id, "Raise");
 	tab.refresh();
-	assert.equal(await until(() => tab.$(".session-entries > .session-replies") === null, Boolean, "the closed ask"), true, "the journal closing the ask removes them");
+	assert.equal(await until(() => tab.$(".workspace-context-ask") === null, Boolean, "the closed ask"), true, "the journal closing the ask removes the card");
 
 	const other = asks.open({ project: "picp", question: "Again?", recommendation: "Keep", options: [{ label: "Keep", consequence: "x" }] }).id;
 	d.append(stamped(local(15, 9), { role: "assistant", content: [{ type: "toolCall", id: "call-2", name: "cp_parent", arguments: { action: "ask" } }] }),
 		stamped(local(15, 9), { role: "toolResult", toolCallId: "call-2", toolName: "cp_parent", content: [{ type: "text", text: JSON.stringify({ id: other }) }] }));
 	const queued = pending(dc("f"), "free text", { ask_id: other, at: ago(1_000) });
-	const ready = (view: Tab) => until(() => texts(view, ".session-replies-state").join("|"), (s) => !/Checking/.test(s), "the control status");
-	let reader = await openTab(t, d.port, OPERATOR, new Map([[PENDING, JSON.stringify({ items: [queued], dismissed: [] })]]));
-	await reader.find(".session-reply");
+	const ready = (view: Tab) => until(() => texts(view, ".workspace-context-ask .session-replies-state").join("|"), (s) => !/Checking/.test(s), "the control status");
+	let reader = await wide(openTab(t, d.port, OPERATOR, new Map([[PENDING, JSON.stringify({ items: [queued], dismissed: [] })]]), undefined, {}, true));
+	await reader.find(OPTION);
 	assert.equal(await ready(reader), `Queued · ${dc("f")} — the options close when the session records the answer`, "deliveryLine: Queued · <its id>");
 	assert.ok(held(reader), "a queued free-text reply to the same card holds them");
-	reader = await openTab(t, d.port, OPERATOR, new Map([[PENDING, JSON.stringify({ items: [{ ...queued, state: "failed", reason: "x" }], dismissed: [] })]]));
+	reader = await wide(openTab(t, d.port, OPERATOR, new Map([[PENDING, JSON.stringify({ items: [{ ...queued, state: "failed", reason: "x" }], dismissed: [] })]]), undefined, {}, true));
 	await reader.find(".session-pending-failed");
 	await ready(reader);
 	assert.equal(held(reader), false, "a failed one does not");
 	write(controlConfigFile(d.stateDir), '{"enabled": false}');
-	reader = await reader.reopen();
-	await reader.find(".session-replies-state");
+	reader = await wide(reader.reopen());
+	await reader.find(".workspace-context-ask .session-replies-state");
 	assert.match(await ready(reader), /^Dashboard control is off/);
 	assert.ok(held(reader));
 });

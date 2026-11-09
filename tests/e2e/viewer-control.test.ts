@@ -962,14 +962,14 @@ const posts = (tab: Tab, path: string) => tab.requests.filter((r) => r.method ==
 
 // Scenario: open asks stay out of the operator chat
 //   Given two open asks and one withdrawn, carded in the transcript   When the operator chat opens
-//   Then no decisions panel renders, the inline cards are history and the chips offer the open ask
+//   Then no decisions panel renders, the inline cards are history and no chips offer the open ask's options
 //   And the composer sends, steers and aborts; off or gone, it says why
 test("P17-composer: open asks render no decisions panel in the chat; it sends, steers and aborts; off or gone, it says why", { timeout: 180_000 }, async (t) => {
 	let busy = false;
 	const d = await dashboard(t);
 	const asks = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl"));
 	const first = asks.open(choice("Keep paused?", ["Keep", "Raise"]));
-	const merge = asks.open(choice("Merge now?", ["Yes", "No"]));
+	asks.open(choice("Merge now?", ["Yes", "No"]));
 	const gone = asks.open(choice("Old?", ["Drop"]));
 	asks.withdraw(gone.id, "No longer needed");
 	// The transcript's cp_parent ask calls place the first ask's card and the withdrawn one inline, as history.
@@ -984,8 +984,8 @@ test("P17-composer: open asks render no decisions panel in the chat; it sends, s
 	asks.answer(first.id, "Keep");
 	tab.refresh();
 	assert.match((await tab.find(".session-ask-settled", (p) => /^Answered/.test(p.textContent ?? ""))).textContent ?? "", /^Answered: Keep · /);
-	const replies = await tab.find(".session-entries > .session-replies");
-	assert.deepEqual([replies.querySelector(".session-replies-to")?.textContent, ...[...replies.querySelectorAll("button.session-reply")].map((b) => b.textContent)], [`Options from ${merge.id}: Merge now?`, "Yes", "No"], "the one carded open ask's quick replies");
+	const labels = (view: Tab) => view.$$(".session-panel button").map((b) => b.textContent).filter((text) => text === "Yes" || text === "No");
+	assert.deepEqual([labels(tab), tab.$$(".session-ask-pointer").length], [[], 1], "the open ask's options are no chips in the chat");
 	const sheet = (await tab.find("details.session-bar-more .session-bar-file")).closest(".session-bar-sheet")!;
 	assert.deepEqual([sheet.parentElement?.querySelector("summary")?.getAttribute("aria-label"), sheet.querySelector('.session-bar-views a[aria-current="page"]')?.textContent, [...sheet.querySelectorAll("button")].some((b) => b.textContent === "Search"), sheet.querySelector(".session-bar-state .session-dot")?.getAttribute("class")], ["More", "Operator ↔ you", true, "session-dot session-dot-idle"], "the ⋯ sheet");
 	assert.match(sheet.querySelector(".session-bar-file")?.textContent ?? "", /^Delivers to \S+\.jsonl$/);
