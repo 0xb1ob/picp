@@ -200,6 +200,81 @@ test("M3-context-sole-answer: an open ask renders no decisions panel or option c
 	assert.match(text, new RegExp(`^${ask!.id}: Hold\\n\\n\\[cp-dashboard dc-.* — from the dashboard; ask=${ask!.id}\\]$`), "the same ask-id: label dashboard message");
 });
 
+const ctrlEnter = (tab: Tab, el: Element) => {
+	const event = new (tab.globals.Event as typeof Event)("keydown", { bubbles: true, cancelable: true });
+	Object.defineProperties(event, { key: { value: "Enter" }, ctrlKey: { value: true } });
+	el.dispatchEvent(event);
+};
+const replies = (tab: Tab) => tab.requests.filter((r) => r.method === "POST" && r.path === "/api/operator/message" && /"kind":"message"/.test(r.body ?? ""));
+const held = (tab: Tab) => tab.$$(".workspace-context-option, .workspace-context-other").every((b) => b.hasAttribute("disabled"));
+
+// Scenario: the sidebar card's "Other answer…" sends a typed reply tied to its ask, from a centered modal
+//   Given an open ask in the desktop inspector   When "Other answer…" opens the modal and only blanks are typed
+//   Then Send is refused; Escape with text asks first and a declined confirm keeps the modal and the inspector
+//   When Ctrl+Enter sends a two-line reply   Then one message posts "<ask-id>: <text>", the modal closes, the card locks
+test("M3-context-other: Other answer opens a modal; blanks never send, Escape confirms, Ctrl+Enter sends the reply and locks the card", { timeout: 180_000 }, async (t) => {
+	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed: (stateDir: string, home: string) => seed(stateDir, home) });
+	const session = await operatorSession(t, d.stateDir);
+	const [ask] = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl")).open();
+	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
+	const focused = browserShims(t, tab);
+	tab.click(await tab.find("aside.workspace-context .workspace-context-other", (b) => !b.hasAttribute("disabled")));
+	const modal = await tab.find("dialog.ask-other[open]");
+	const field = modal.querySelector("textarea")!, send = () => modal.querySelector(".ask-other-send")!;
+	assert.deepEqual([modal.querySelector("h2")!.textContent, focused() === field, tab.$$(".workspace-context-option").length], [QUESTION, true, 2],
+		"the ask's question heads a modal, its textarea focused; the options are unchanged");
+	tab.type(field, "  \n ");
+	await new Promise((done) => setTimeout(done, 50));
+	ctrlEnter(tab, field);
+	tab.click(send());
+	await new Promise((done) => setTimeout(done, 200));
+	assert.deepEqual([send().hasAttribute("disabled"), replies(tab).length], [true, 0], "a blank reply cannot be sent");
+	tab.type(field, "Hold until Friday\nthen merge");
+	await until(() => send().hasAttribute("disabled"), (off) => !off, "Send enabled by the text");
+	tab.decline();
+	assert.equal(tab.key(field, "Escape").defaultPrevented, true);
+	// Negative control: an Escape that reached the chat's own handler would close the inspector behind the modal.
+	assert.deepEqual([tab.confirms, !!tab.$("dialog.ask-other[open]"), !!tab.$("aside.workspace-context")], [["Discard this answer?"], true, true],
+		"Escape with text asks first; declined, the modal and the inspector stay");
+	ctrlEnter(tab, field);
+	await until(() => replies(tab).length, (n) => n > 0, "the reply request");
+	await until(() => tab.$("dialog.ask-other"), (el) => el === null, "the modal to close on send");
+	assert.deepEqual(replies(tab).map((r) => JSON.parse(r.body!).text), [`${ask!.id}: Hold until Friday\nthen merge`], "one reply, tied to its ask");
+	await new Promise((done) => setTimeout(done, 200));
+	assert.equal(held(tab), true, "the options and Other answer… lock as an option click does");
+	const [text] = (await until(() => session.injected, (rows) => rows.length > 0, "the injected reply")).at(-1)!;
+	assert.match(text, new RegExp(`^${ask!.id}: Hold until Friday\\nthen merge\\n\\n\\[cp-dashboard dc-.* — from the dashboard\\]$`));
+});
+
+// Scenario: a failed reply from the phone sheet re-enables the card and keeps the typed text
+//   Given the context sheet on a phone and a session whose handoff fails   When the modal opens over the sheet
+//   Then the textarea has focus and an empty Escape closes only the modal, focus back on its button
+//   When a reply is sent and fails   Then the card shows the failure, re-enables, and the modal reopens with the text
+test("M3-context-other-failed: over the phone sheet the modal stacks; a failed reply re-enables the card and keeps its text", { timeout: 180_000 }, async (t) => {
+	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed: (stateDir: string, home: string) => seed(stateDir, home) });
+	await operatorSession(t, d.stateDir, () => true, { inject: () => { throw new Error("FIXTURE-HANDOFF-DOWN"); } });
+	const tab = await openTab(t, d.port, CHAT);
+	const focused = browserShims(t, tab);
+	tab.click(await tab.find(".workspace-context-open"));
+	const other = await tab.find("dialog.workspace-context-sheet[open] .workspace-context-other", (b) => !b.hasAttribute("disabled")) as unknown as HTMLElement;
+	other.focus();
+	tab.click(other);
+	const modal = await tab.find("dialog.workspace-context-sheet[open] dialog.ask-other[open]");
+	assert.ok(focused() === modal.querySelector("textarea"), "the modal over the sheet takes focus");
+	tab.key(modal.querySelector("textarea")!, "Escape");
+	await until(() => tab.$("dialog.ask-other"), (el) => el === null, "an empty Escape to close the modal");
+	assert.deepEqual([!!tab.$("dialog.workspace-context-sheet[open]"), focused() === other, tab.confirms], [true, true, []], "only the modal closed; nothing to confirm");
+	tab.click(other);
+	tab.type((await tab.find("dialog.ask-other[open] textarea")), "KEEP-THIS-REPLY");
+	tab.click(await tab.find("dialog.ask-other .ask-other-send", (b) => !b.hasAttribute("disabled")));
+	await until(() => tab.$(".workspace-context-ask [role=alert]")?.textContent ?? "", (s) => /FIXTURE-HANDOFF-DOWN/.test(s), "the failure line");
+	await until(() => held(tab), (h) => !h, "the card to re-enable");
+	assert.equal(replies(tab).length, 1);
+	tab.click(other);
+	const reopened = await tab.find("dialog.ask-other[open] textarea") as unknown as { value: string };
+	assert.equal(reopened.value, "KEEP-THIS-REPLY", "the typed text survives the failure");
+});
+
 test("M3-context-history: a context-less ask reads not recorded; on an older session file its options refuse", { timeout: 180_000 }, async (t) => {
 	const d = await start(t, null);
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);

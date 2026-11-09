@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { AwaitingDetail, SessionsResponse, ViewerJob } from "../../src/viewer/api-types.ts";
 import { modelText } from "../../src/viewer/model-text.ts";
 import type { ControlView } from "../control.ts";
@@ -8,6 +8,7 @@ import { sessionHref } from "../routes.ts";
 import { contextText } from "./ContextChip.tsx";
 import { Icon } from "./icons.tsx";
 import { AnswerLine, type Answering, answerView } from "./Answering.tsx";
+import { OtherAnswer } from "./OtherAnswer.tsx";
 
 type Worker = SessionsResponse["workers"][number];
 /**
@@ -24,6 +25,7 @@ const NONE = "not recorded";
 /** The recorded context and the exact recorded options, answered through the chat's one shared answer path. */
 function AskCard({ask, control, answering, current}: {ask: AwaitingDetail; control: ControlView | undefined; answering: Answering; current: boolean}) {
  const {disabled} = answerView(ask, control, answering);
+ const [other, setOther] = useState(false), [draft, setDraft] = useState("");
  const lines = ask.context?.split("\n").map(line => line.replace(/^\s*(?:[-*•]\s+)?/, "").trim()).filter(Boolean) ?? [];
  return <li class="workspace-context-ask">
   <small>Operator asked · {time(ask.created_at)} · {ask.project}</small>
@@ -38,6 +40,9 @@ function AskCard({ask, control, answering, current}: {ask: AwaitingDetail; contr
     <small>{option.consequence}</small>
    </button>
   </li>)}</ul>
+  <button type="button" class="workspace-context-other" aria-haspopup="dialog" disabled={disabled || !current} onClick={() => { if (current && !disabled) setOther(true); }}>Other answer…</button>
+  {other && <OtherAnswer ask={ask} text={draft} disabled={disabled || !current} onText={setDraft} onClose={() => setOther(false)}
+   onSend={() => { answering.reply(ask, draft); setOther(false); }}/>}
   <AnswerLine ask={ask} control={control} answering={answering}/>
  </li>;
 }

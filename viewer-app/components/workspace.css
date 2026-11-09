@@ -109,6 +109,24 @@
 .workspace-context-option > b { font-size: 14px; font-weight: 500; }
 .workspace-context-option > small { font-size: 12.5px; line-height: 18px; color: var(--muted); }
 .workspace-context-option:disabled { cursor: default; opacity: 0.6; }
+.workspace-context-ask .workspace-context-other { min-height: 44px; padding: 0 12px; background: transparent; color: var(--muted); border: 1px dashed var(--border); border-radius: 10px; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.workspace-context-other:disabled { cursor: default; opacity: 0.6; }
+/* The ask's typed answer: a centered modal over the sidebar or the phone sheet, wide enough to read a long reply. */
+.ask-other { width: min(720px, 92vw); max-width: none; max-height: calc(100dvh - 32px); padding: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 64px var(--page); overflow-wrap: anywhere; }
+.ask-other::backdrop { background: var(--page); opacity: 0.7; }
+.ask-other-body { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; }
+.ask-other-body > small { font-size: 12px; color: var(--dim); }
+.ask-other-body > h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 22px; }
+.ask-other-context { font-size: 13px; color: var(--muted); }
+.ask-other-context > summary { cursor: pointer; }
+.ask-other-context > p { max-height: 160px; margin: 6px 0 0; overflow-y: auto; white-space: pre-wrap; font-size: 13px; color: var(--muted); }
+.ask-other textarea { box-sizing: border-box; width: 100%; min-height: 112px; max-height: 50dvh; padding: 10px 12px; resize: none; overflow-y: auto; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: inherit; font-size: 14px; line-height: 20px; }
+.ask-other-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.ask-other-actions > small { flex: 1 1 160px; min-width: 0; font-size: 12px; color: var(--dim); }
+.ask-other-actions > button { min-height: 44px; padding: 0 16px; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13.5px; cursor: pointer; }
+.ask-other-actions > .ask-other-send { background: var(--text); color: var(--background); border-color: var(--text); }
+.ask-other-actions > button:disabled { cursor: default; opacity: 0.4; }
+@media (max-width: 599px) { .ask-other { width: 100%; margin: auto 0; border-inline: 0; border-radius: 0; } }
 .workspace-context-ask .session-replies-state { font-size: 12.5px; }
 .workspace-context-links > button, .workspace-context-jobs { min-height: 44px; padding: 0 12px; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13px; cursor: pointer; }
 /* Frame 1: glyph, short id, status on the right, then the title; glyph and status stay neutral (palette rule). */
