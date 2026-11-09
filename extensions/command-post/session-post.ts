@@ -7,8 +7,8 @@
 import { getMarkdownTheme, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Markdown } from "@earendil-works/pi-tui";
 import { type ResolvedAwaitingItem } from "../../src/awaiting.ts";
-import { CommandPost } from "../../src/command-post.ts";
-import { type OperatorModelPickReference, PLAN_VIEW_MAX_BYTES, type ThinkingLevel } from "../../src/contracts.ts";
+import { CommandPost, type CommandPostOptions } from "../../src/command-post.ts";
+import { type OperatorModelPickReference, PLAN_VIEW_MAX_BYTES, type Runtime, type ThinkingLevel } from "../../src/contracts.ts";
 import { checkStoredPick } from "../../src/reroute.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { formatIntake, type IntakeResult } from "../../src/intake.ts";
@@ -17,7 +17,7 @@ import { type Authorizer } from "../../src/pipeline.ts";
 import { type PlanTarget, readPlanSource, renderGateDocument } from "../../src/plan-view.ts";
 import { type Asker, dialogOptions } from "../../src/questions.ts";
 import { formatSettleOutcome } from "../../src/settle.ts";
-import { verdictStamp } from "../../src/wakeups.ts";
+import { verdictStamp, type WakeupStamp } from "../../src/wakeups.ts";
 import { renderFleetWidget, statusWidgetLines, WIDGET_MAX_WIDTH } from "../../src/widget.ts";
 import { styleWidgetLines } from "./fleet-widget.ts";
 import { chooseOutputChannel, currentRuntime, FLEET_WIDGET_KEY, type OutputEntry } from "./helpers.ts";
@@ -36,6 +36,56 @@ export function claimedRun(
 	runner.onReported(result).catch((error: unknown) => {
 		log(`schedule runner: onReported for ${result.job_id} rejected: ${(error as Error)?.message ?? String(error)}; waking the parent`);
 		try { wake(result); } catch (wakeError) { log(`schedule runner: fallback envelope wake for ${result.job_id} failed: ${(wakeError as Error)?.message ?? String(wakeError)}`); }
+	});
+}
+
+/**
+ * The human authorization channel. A model cannot answer this: it is a UI
+ * request that the operator's client renders, and "not now" (dismiss) leaves
+ * the checkpoint pending rather than declining it forever.
+ */
+const authorizer: Authorizer = {
+	async ask(_checkpoint) {
+		// Overlay retired: pending until cp_decide cites a mandate or operator quote.
+		return undefined;
+	},
+};
+
+/** The parent's wake-up transport (stamp, headline, details); pi's is `WakeupSurfaces.sendWakeup`. */
+export type ParentSendWakeup = (stamp: Omit<WakeupStamp, "issued_at">, content: string, details: Record<string, unknown>) => boolean;
+
+/** The parent's own reactions to fleet events; the rest of a parent's CommandPost wiring is `buildCommandPost`'s. */
+export type CommandPostCallbacks = Pick<
+	CommandPostOptions,
+	"asker" | "beforeWakeup" | "parentControlBusy" | "onReported" | "onAnswered" | "onDurableWakeup" | "onHardBound" | "onUnreportedSettle"
+>;
+
+/** A live parent's CommandPost: `registry` is read per probe, verdicts wake through `sendWakeup`, held PRs continue. */
+export function buildCommandPost(input: {
+	home: string;
+	packageRoot: string;
+	runtime: Runtime;
+	sendWakeup: ParentSendWakeup;
+	registry: () => unknown;
+	callbacks: CommandPostCallbacks;
+}): CommandPost {
+	const { home, packageRoot, runtime, sendWakeup, registry, callbacks } = input;
+	return new CommandPost({
+		home,
+		packageRoot,
+		runtime,
+		authorizer,
+		modelRegistry: () => registry() as never,
+		// spec 2026-09-05: a reviewer's verdict wakes this session like an
+		// envelope does — stamped, re-checked at delivery, confirmed on arrival.
+		sendWakeup: (wakeup) =>
+			sendWakeup(verdictStamp(wakeup.jobId, wakeup.surface, wakeup.attempt, wakeup.headSha), wakeup.content, {
+				...wakeup.details,
+				verdict_key: `${wakeup.jobId}|${wakeup.surface}|${wakeup.attempt}`,
+			}),
+		// jje.2: this live parent advances its held PRs on envelope/CI/review/startup facts itself.
+		continuation: true,
+		...callbacks,
 	});
 }
 
@@ -63,18 +113,6 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 			// SAFETY: IntakeResult is a plain JSON object; details only needs string keys.
 			result as unknown as Record<string, unknown>,
 		);
-	};
-
-	/**
-	 * The human authorization channel. A model cannot answer this: it is a UI
-	 * request that the operator's client renders, and "not now" (dismiss) leaves
-	 * the checkpoint pending rather than declining it forever.
-	 */
-	const authorizer: Authorizer = {
-		async ask(_checkpoint) {
-			// Overlay retired: pending until cp_decide cites a mandate or operator quote.
-			return undefined;
-		},
 	};
 
 	/**
@@ -248,102 +286,95 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 	const commandPost = (modelRegistry?: unknown): CommandPost => {
 		if (modelRegistry) s.registry = modelRegistry;
 		if (!s.post) {
-			s.post = new CommandPost({
+			s.post = buildCommandPost({
 				home: currentRuntime().home,
 				packageRoot: PACKAGE_ROOT,
 				runtime: currentRuntime(),
-				authorizer,
-				asker,
-				modelRegistry: () => s.registry as never,
-				// spec 2026-09-05: a reviewer's verdict wakes this session like an
-				// envelope does — stamped, re-checked at delivery, confirmed on arrival.
-				sendWakeup: (wakeup) =>
-					sendWakeup(verdictStamp(wakeup.jobId, wakeup.surface, wakeup.attempt, wakeup.headSha), wakeup.content, {
-						...wakeup.details,
-						verdict_key: `${wakeup.jobId}|${wakeup.surface}|${wakeup.attempt}`,
-					}),
-				// cp-runtime-deferred-recheck: a passing diff review is the other fact a
-				// deferred merge ask waits on (`green but unreviewed`). Awaited *before*
-				// the wake-up above is sent, with the verdict already on disk, so a parent
-				// that reads "review passed" finds the merge row already open whenever the
-				// re-gate finished in time — and `ReviewRuns` bounds the wait, so a hook
-				// that hangs delays neither the verdict nor the slot. The payload is
-				// handed over verbatim and parsed defensively: an irrelevant surface, a
-				// revise, or details of any other shape does nothing.
-				beforeWakeup: (wakeup) => recheckDeferredRows({ kind: "verdict", wakeup }),
-				// jje.2: this live parent advances its held PRs on envelope/CI/review/startup facts itself.
-				continuation: true,
-				// cp-35d0 S6: no drain starts, and none finishes drained, while the parent's compact hold is on.
-				parentControlBusy: () => wakeups.compactHold.holding,
-				// An envelope is news: it reaches the parent as a custom message so
-				// the session acts on it, with the headline only — never a body.
-				onReported: (result) => {
-					refreshWidget(s.live);
-					// cp-u3o4: a Q&A job's result is an answer the operator reads on a
-					// card — not a plan they have to open. cp-6lg7: the card is already
-					// queued on disk by `CommandPost` at this point, so this drain is an
-					// attempt, not the delivery; a card it cannot show now (mid-turn, no
-					// surface yet) is shown by the widget tick or the next session.
-					surfaceAnswerCards();
-					// schedlater S1: a runner-owned scheduled run is torn down in code, no parent turn;
-					// a refused teardown makes the runner send this same envelope wake itself.
-					const runner = s.scheduleRunner?.();
-					// #444: a native scheduled pipeline's anchor is advanced in code, its gate started with no parent turn.
-					if (runner?.claimsPipeline(result)) {
-						claimedRun({ onReported: (claimed) => runner.onPipelineReported(claimed) }, result, wakeEnvelope);
-						return;
-					}
-					if (runner?.claims(result)) {
-						claimedRun(runner, result, wakeEnvelope);
-						return;
-					}
-					wakeEnvelope(result);
-				},
-				// cp-answer-doesnt-wake: an answer is already recorded and already queued
-				// when this fires; the drain is what actually wakes the session.
-				onAnswered: () => {
-					refreshWidget(s.live);
-					surfaceAnswered();
-				},
-				// A run that finished and filed nothing is the one silence the parent
-				// cannot sleep through (cp-settle-without-report): with no envelope it
-				// is never woken, which is how four merge-ready PRs sat for 14 hours.
-				// The nudge itself only refreshes the widget — if it works, the envelope
-				// is the news. A spent nudge wakes the session, headline only.
-				onDurableWakeup: () => {
-					refreshWidget(s.live);
-					surfaceDurableWakeups();
-				},
-				onHardBound: () => {
-					refreshWidget(s.live);
-				},
-				onUnreportedSettle: (jobId, outcome) => {
-					refreshWidget(s.live);
-					// A failed transition already journaled cp-death/cp-bound. cp-unreported
-					// would not survive a restart, so it must not be the announcement.
-					if (outcome.action === "recorded" && outcome.failure) return;
-					const line = formatSettleOutcome(jobId, outcome);
-					if (!line || outcome.action !== "recorded") return;
-					// cp-p6m: an unreported settle is a claim about an OPEN envelope slot.
-					// A worker that was nudged and then reported (or was promoted, or was
-					// torn down) makes that claim false, so this carries the generation it
-					// was true for and is withheld once the job has moved past it.
-					const generation = (() => {
-						try {
-							return (commandPost().fleet.get(jobId)?.supersessions ?? 0) + 1;
-						} catch {
-							return undefined;
+				sendWakeup,
+				registry: () => s.registry,
+				callbacks: {
+					asker,
+					// cp-runtime-deferred-recheck: a passing diff review is the other fact a
+					// deferred merge ask waits on (`green but unreviewed`). Awaited *before*
+					// the verdict wake-up is sent, with the verdict already on disk, so a parent
+					// that reads "review passed" finds the merge row already open whenever the
+					// re-gate finished in time — and `ReviewRuns` bounds the wait, so a hook
+					// that hangs delays neither the verdict nor the slot. The payload is
+					// handed over verbatim and parsed defensively: an irrelevant surface, a
+					// revise, or details of any other shape does nothing.
+					beforeWakeup: (wakeup) => recheckDeferredRows({ kind: "verdict", wakeup }),
+					// cp-35d0 S6: no drain starts, and none finishes drained, while the parent's compact hold is on.
+					parentControlBusy: () => wakeups.compactHold.holding,
+					// An envelope is news: it reaches the parent as a custom message so
+					// the session acts on it, with the headline only — never a body.
+					onReported: (result) => {
+						refreshWidget(s.live);
+						// cp-u3o4: a Q&A job's result is an answer the operator reads on a
+						// card — not a plan they have to open. cp-6lg7: the card is already
+						// queued on disk by `CommandPost` at this point, so this drain is an
+						// attempt, not the delivery; a card it cannot show now (mid-turn, no
+						// surface yet) is shown by the widget tick or the next session.
+						surfaceAnswerCards();
+						// schedlater S1: a runner-owned scheduled run is torn down in code, no parent turn;
+						// a refused teardown makes the runner send this same envelope wake itself.
+						const runner = s.scheduleRunner?.();
+						// #444: a native scheduled pipeline's anchor is advanced in code, its gate started with no parent turn.
+						if (runner?.claimsPipeline(result)) {
+							claimedRun({ onReported: (claimed) => runner.onPipelineReported(claimed) }, result, wakeEnvelope);
+							return;
 						}
-					})();
-					sendWakeup(
-						{
-							kind: "unreported",
-							job_id: jobId,
-							...(generation !== undefined ? { generation } : {}),
-						},
-						line,
-						{ job_id: jobId, ...outcome },
-					);
+						if (runner?.claims(result)) {
+							claimedRun(runner, result, wakeEnvelope);
+							return;
+						}
+						wakeEnvelope(result);
+					},
+					// cp-answer-doesnt-wake: an answer is already recorded and already queued
+					// when this fires; the drain is what actually wakes the session.
+					onAnswered: () => {
+						refreshWidget(s.live);
+						surfaceAnswered();
+					},
+					// A run that finished and filed nothing is the one silence the parent
+					// cannot sleep through (cp-settle-without-report): with no envelope it
+					// is never woken, which is how four merge-ready PRs sat for 14 hours.
+					// The nudge itself only refreshes the widget — if it works, the envelope
+					// is the news. A spent nudge wakes the session, headline only.
+					onDurableWakeup: () => {
+						refreshWidget(s.live);
+						surfaceDurableWakeups();
+					},
+					onHardBound: () => {
+						refreshWidget(s.live);
+					},
+					onUnreportedSettle: (jobId, outcome) => {
+						refreshWidget(s.live);
+						// A failed transition already journaled cp-death/cp-bound. cp-unreported
+						// would not survive a restart, so it must not be the announcement.
+						if (outcome.action === "recorded" && outcome.failure) return;
+						const line = formatSettleOutcome(jobId, outcome);
+						if (!line || outcome.action !== "recorded") return;
+						// cp-p6m: an unreported settle is a claim about an OPEN envelope slot.
+						// A worker that was nudged and then reported (or was promoted, or was
+						// torn down) makes that claim false, so this carries the generation it
+						// was true for and is withheld once the job has moved past it.
+						const generation = (() => {
+							try {
+								return (commandPost().fleet.get(jobId)?.supersessions ?? 0) + 1;
+							} catch {
+								return undefined;
+							}
+						})();
+						sendWakeup(
+							{
+								kind: "unreported",
+								job_id: jobId,
+								...(generation !== undefined ? { generation } : {}),
+							},
+							line,
+							{ job_id: jobId, ...outcome },
+						);
+					},
 				},
 			});
 		}
