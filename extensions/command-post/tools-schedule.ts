@@ -16,6 +16,7 @@ import { Type } from "typebox";
 import type { Delivery, JobKind } from "../../src/contracts.ts";
 import { operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
 import { DEFAULT_TOKEN_CEILING, loadMandateDefaults } from "../../src/mandate-defaults.ts";
+import { operation } from "../../src/loop-stall.ts";
 import { githubRepoFromCloneUrl } from "../../src/mandate.ts";
 import type { IntakeResult } from "../../src/intake.ts";
 import { RUNNER_DELIVERIES, ScheduleRunner } from "../../src/schedule-runner.ts";
@@ -178,10 +179,10 @@ export function registerScheduleTools(
 	// Registered after the session hooks, so the lock is already decided when this runs.
 	pi.on("session_start", async () => {
 		if (!holdsLock() || timer) return;
-		timer = setInterval(() => void tick(), schedulerTickMs());
+		timer = setInterval(() => void operation("schedule_tick", tick), schedulerTickMs());
 		timer.unref();
 		setTimeout(() => void tick(), 0).unref(); // catch-up pass, after startup returns
-		controlTimer = setInterval(() => void drain(), SCHEDULE_CONTROL_POLL_MS);
+		controlTimer = setInterval(() => void operation("schedule_control_tick", drain), SCHEDULE_CONTROL_POLL_MS);
 		controlTimer.unref();
 	});
 	pi.on("session_shutdown", async (event?: { reason?: string }) => {
