@@ -181,7 +181,7 @@ export function registerScheduleTools(
 		if (!holdsLock() || timer) return;
 		timer = setInterval(() => void operation("schedule_tick", tick), schedulerTickMs());
 		timer.unref();
-		setTimeout(() => void tick(), 0).unref(); // catch-up pass, after startup returns
+		setTimeout(() => void operation("schedule_catchup", tick), 0).unref(); // catch-up pass, after startup returns
 		controlTimer = setInterval(() => void operation("schedule_control_tick", drain), SCHEDULE_CONTROL_POLL_MS);
 		controlTimer.unref();
 	});

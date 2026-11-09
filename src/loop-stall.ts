@@ -31,7 +31,7 @@ export function operation<T>(name: string, fn: () => T): T {
 	return result;
 }
 
-/** `operation` for a span with no single function (a tool call between its start and end events); call the result once. */
+/** `operation` for a span with no single function (a tool call from start to end event); call the result once. */
 export function beginOperation(name: string): () => void {
 	const id = ++nextId;
 	active.set(id, name);
