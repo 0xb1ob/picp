@@ -161,6 +161,13 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		toolOps.get(event.toolCallId)?.();
 		toolOps.delete(event.toolCallId);
 	});
+	// A tool still running at turn end or an aborted run gets no tool_execution_end; never leave its name active.
+	const endToolOps = (): void => {
+		for (const end of toolOps.values()) end();
+		toolOps.clear();
+	};
+	pi.on("turn_end", endToolOps);
+	pi.on("agent_end", endToolOps);
 
 	pi.on("session_start", (_event, ctx) => operation("session_start", async () => {
 		s.live = ctx;
@@ -322,7 +329,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		// cp-answer-doesnt-wake: an answer given while no parent was attached (a
 		// headless /cp-authorize, a crashed session) is news to this one. Already
 		// delivered answers are on the record and are never replayed.
-		surfaceAnswered();
+		void operation("answered_catchup", surfaceAnswered);
 		surfaceDurableWakeups();
 		// cp-6lg7: same rule for an answer card. A Q&A job answered while this home
 		// had no operator surface (a crashed parent, a headless re-entry) still owes
@@ -413,7 +420,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 			s.ciWatchTimer.unref();
 			// One pass at start: a session that begins with a green PR already waiting
 			// should not have to wait a full interval to hear about it.
-			surfaceCi();
+			void operation("ci_watch_catchup", surfaceCi);
 		}
 
 		// Scaffold memory and inject both optional home-local contexts for the next turn.
@@ -454,8 +461,8 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 			}
 			const { report, intake } = await commandPost().reconcile();
 			// jje.2: startup reconciliation resumes every held PR in its project's lane; outcomes are durable notices.
-			void commandPost().continuation.resume();
-			void commandPost().armedDispatches.release(); // unload-parent PR2: blockers that landed while down
+			void operation("continuation_resume", () => commandPost().continuation.resume());
+			void operation("armed_dispatch_release", () => commandPost().armedDispatches.release()); // unload-parent PR2: blockers that landed while down
 			if (report.changed === 0 && report.needs_intake.length === 0 && report.revivable.length === 0) return;
 			const summary = [summarizeReconcile(report), ...intake.map((result) => `  ${formatIntake(result)}`)].join("\n");
 			if (ctx.hasUI) {
