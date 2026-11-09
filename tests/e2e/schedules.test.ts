@@ -401,7 +401,10 @@ test("P13 native pipeline (#444): a failed in-code advance wakes the parent once
 	routeNamed(h.home, [failedPlanner], { seed: "template" });
 	const first = await runPipeline(h, "sweep-run", { name: "failed-run", model: failedPlanner });
 	const failed = anchorOf(h, "failed-run");
-	await waitFor(() => readFleet(h.home).jobs.find((job) => job.job_id === failed)?.phase, (phase) => phase === "failed", { timeoutMs: 60_000, what: "the failed anchor" });
+	// Bounded recovery revives a crash once, so phase `failed` can last ~250 ms: a poll stalled under CI load missed it
+	// while the revived worker stayed `waiting`. The run log's crash record is the durable fact.
+	await waitFor(() => readRunEvents(h.home, failed).some((event) => event.source === "cp" && event.type === "failure"), Boolean,
+		{ timeoutMs: 60_000, what: "the failed anchor's recorded crash" });
 	const research = anchorOf(h, "sweep-run");
 	const file = join(h.home, paths.pipelineFile(research));
 	const saved = await waitFor(() => existsSync(file) ? readFileSync(file, "utf8") : undefined, Boolean, { timeoutMs: 30_000, what: "the pipeline record" }) as string;

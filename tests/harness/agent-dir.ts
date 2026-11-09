@@ -9,6 +9,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { atomicWriteJson } from "../../src/json-store.ts";
 import type { MockProvider } from "./mock-provider.ts";
 
 export interface AgentDirOptions {
@@ -37,9 +38,8 @@ export function createAgentDir(options: AgentDirOptions = {}): AgentDir {
 	};
 	writeFileSync(join(path, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
 
-	const writeModels = (provider: MockProvider): void => {
-		writeFileSync(join(path, "models.json"), `${JSON.stringify(provider.modelsJson(), null, 2)}\n`);
-	};
+	// Renamed into place: a pi still starting reads it async, and a torn read exits it `Model ... not found`.
+	const writeModels = (provider: MockProvider): void => atomicWriteJson(join(path, "models.json"), provider.modelsJson());
 	if (options.provider) writeModels(options.provider);
 
 	return {
