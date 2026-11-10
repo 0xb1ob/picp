@@ -5,6 +5,7 @@
  */
 import { execFile } from "node:child_process";
 import { parseModelList } from "../service/models.ts";
+import { isNativeModel } from "../drivers/claude.ts";
 import type { ModelList } from "./api-types.ts";
 
 export type ListRun = () => Promise<{ status: number; stdout: string }>;
@@ -42,3 +43,6 @@ export function modelLister(run: ListRun = piList, clock: () => number = Date.no
 }
 
 export const availableModels = modelLister();
+
+/** The Claude CLI's part of `list`: the claude driver's own native-model rule, so the viewer never copies it. */
+export const claudeModels = (list: ModelList): ModelList => ({ ...list, models: list.models?.filter((model) => isNativeModel(model)) ?? null });

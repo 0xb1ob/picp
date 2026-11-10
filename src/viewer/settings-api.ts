@@ -13,12 +13,11 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
-import { isNativeModel } from "../drivers/claude.ts";
 import type { ModelApplyRow, ModelList, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse } from "./api-types.ts";
 import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, mayWrite, readAllowed, tokenMatches } from "./control-api.ts";
 import { readControlConfig, readControlRecord } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
-import { availableModels } from "./model-list.ts";
+import { availableModels, claudeModels } from "./model-list.ts";
 
 export const SETTINGS_PATH = "/api/settings";
 export const SETTINGS_MODELS_PATH = "/api/settings/models";
@@ -129,7 +128,7 @@ export function handleSettingsModels(req: IncomingMessage, options: ControlRoute
 	const session = config.state === "on" && readControlRecord(options.stateDir).state === "ok" ? operatorSession(options.stateDir) : null;
 	const force = new URL(req.url ?? "/", "http://localhost").searchParams.get("refresh") === "1" && mayWrite(req);
 	const pi: ModelList = session?.running ? listModels(force) : { models: null, error: "no operator session serves Settings", loading: false, listed_at: null };
-	const claude = { ...pi, models: pi.models?.filter((model) => isNativeModel(model)) ?? null };
+	const claude = claudeModels(pi);
 	return { status: 200, body: { generated_at: now.toISOString(), pi, claude } satisfies SettingsModelsResponse };
 }
 
