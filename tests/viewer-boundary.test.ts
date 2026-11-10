@@ -8,8 +8,8 @@ import { runGit } from "../src/viewer/git-read.ts";
 import { createScratchHome, git, REPO_ROOT } from "./harness/index.ts";
 
 const VIEWER = join(REPO_ROOT, "src", "viewer");
-// operator.ts, doctor-check.ts and model-list.ts (the cp-install `pi --list-models` parser, reused rather than
-// copied) may import outside the viewer.
+// operator.ts, doctor-check.ts and model-list.ts (the cp-install `pi --list-models` parser and the claude driver's
+// native-model rule, reused rather than copied) may import outside the viewer.
 const standalone = () => readdirSync(VIEWER).filter((name) => name.endsWith(".ts") && name !== "operator.ts" && name !== "doctor-check.ts" && name !== "model-list.ts");
 
 test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images, device-store.ts writes data/devices.json, device-control.ts owns the device CLI socket", () => {

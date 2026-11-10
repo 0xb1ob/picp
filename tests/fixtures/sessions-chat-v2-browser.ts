@@ -21,7 +21,7 @@ import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
 	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status",
-	"full-match-diff", "full-match-commands", "project-sidebar", "reports-cards", "settings-cli"];
+	"full-match-diff", "full-match-commands", "project-sidebar", "reports-cards", "settings-cli", "settings-models"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -38,6 +38,14 @@ const PS = args.stage === "project-sidebar", LONG_PROJECT = "billing-and-invoice
 const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7 || S6 || PS;
 /** Reports card titles: both Reports grids with long titles, plus S3's Jobs list as the unchanged control. */
 const RC = args.stage === "reports-cards";
+/** Settings models: the pickers' own list read, loading then filled, beside a long saved model pi does not list. */
+const SM = args.stage === "settings-models", LONG_MODEL = "openrouter/vendor-preview-model-with-a-very-long-identifier-2026-11-10";
+const MODEL_IDS = ["anthropic/claude-fable-5-2", "anthropic/claude-haiku-5", "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5", "openai/gpt-5", "openai/gpt-6.1-sol"];
+const modelsBody = (ids: string[] | null) => {
+	const list = (models: string[] | null) => ({ models, error: null, loading: models === null, listed_at: models ? GENERATED : null });
+	return { generated_at: GENERATED, pi: list(ids), claude: list(ids?.filter(id => id.startsWith("anthropic/claude-")) ?? null) };
+};
+let modelsLanded = false;
 const JOB = S2 || RC ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
 /** A cp-bridge wake as the transcript carries it: first line parsed off, `paths:` resolved (one left unresolved). */
 const wake: SessionEntry = say("w1", "2026-10-15T08:03:30Z", "cp-bridge", [
@@ -308,18 +316,21 @@ try {
 	if (!routes["/api/jobs"] && !["m3-transcript", "nav-simplify", "p3-quota", "m3-shell"].includes(args.stage)) routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [] };
 	// Native routing S3: Settings as the bridge's settings_get answers it for this scratch home
 	// (the live session is the only fake).
-	if (args.stage === "p3-quota") routes["/api/settings"] = { generated_at: GENERATED, enabled: true, running: true, supported: true, writable: true, reason: null,
-		snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS, audit: [], available_models: [], models_error: null, models_loading: false };
+	if (args.stage === "p3-quota") {
+		routes["/api/settings"] = { generated_at: GENERATED, enabled: true, running: true, supported: true, writable: true, reason: null, snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS, audit: [] };
+		routes["/api/settings/models"] = modelsBody([]);
+	}
 	// CLI switches: the shipped rubric with small-ship on an openai model, so a Claude CLI draft names a row to fix.
-	if (args.stage === "settings-cli") {
+	// Settings models: the same page with a long parent model pi does not list, its list held until /fixture/models-land.
+	if (args.stage === "settings-cli" || SM) {
 		const routing = JSON.parse(readFileSync(new URL("../../defaults/routing.default.json", import.meta.url), "utf8")) as { rubric: Array<Record<string, unknown>> };
 		for (const row of routing.rubric) if (row.id === "small-ship") row.model = "openai/gpt-6.1-sol";
 		mkdirSync(join(scratch, LAYOUT.data), { recursive: true });
 		writeFileSync(join(scratch, LAYOUT.routingFile), JSON.stringify(routing));
-		writeFileSync(join(scratch, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 150000, model: "anthropic/claude-opus-5-5", thinking: "minimal" }));
+		writeFileSync(join(scratch, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 150000, model: SM ? LONG_MODEL : "anthropic/claude-opus-5-5", thinking: "minimal" }));
 		routes["/api/settings"] = { generated_at: GENERATED, enabled: true, running: true, supported: true, writable: true, reason: null, snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS,
-			audit: [], available_models: ["anthropic/claude-haiku-5", "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5", "openai/gpt-5", "openai/gpt-6.1-sol"], models_error: null,
-			models_loading: false, drivers: DRIVER_CHOICES };
+			audit: [], drivers: DRIVER_CHOICES };
+		if (!SM) routes["/api/settings/models"] = modelsBody(MODEL_IDS);
 	}
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
 	if (args.stage === "m3-composer") routes[`/api/job/${JOB}`] = { ...job, ask_reference: { kind: "job", project: "picp", job_id: JOB }, evidence_lookup: { supported: true, why: "fixture" } };
@@ -367,9 +378,11 @@ try {
 			res.write(": open\n\n"); streams.add(res); req.on("close", () => streams.delete(res));
 			return;
 		}
+		if (SM && path === "/fixture/models-land") { modelsLanded = true; return send(200, "application/json", "{}"); }
+		if (SM && path === "/api/settings/models") return send(200, "application/json", JSON.stringify(modelsBody(modelsLanded ? MODEL_IDS : null)));
 		if (path in routes) return send(200, "application/json", JSON.stringify(routes[path]));
 		// M3: every other screen reads the real viewer's APIs on this scratch home (empty state, same palette check).
-		if ((args.stage === "m3-transcript" || args.stage === "nav-simplify" || args.stage === "p3-quota" || args.stage === "m3-shell" || args.stage === "settings-cli") && path.startsWith("/api/") && !ABSENT.has(path)) {
+		if ((args.stage === "m3-transcript" || args.stage === "nav-simplify" || args.stage === "p3-quota" || args.stage === "m3-shell" || args.stage === "settings-cli" || SM) && path.startsWith("/api/") && !ABSENT.has(path)) {
 			return dispatch(req, res, { home: scratch, stateDir: join(scratch, LAYOUT.state), host: "127.0.0.1", port: (server.address() as AddressInfo).port, app });
 		}
 		if (!ABSENT.has(path) && path !== "/favicon.ico" && !path.startsWith("/manifest") && !path.endsWith(".png")) unexpected.push(path);
@@ -484,7 +497,7 @@ try {
 	const loaded = ".session-entries .session-pending";
 	const stage = args.stage!;
 	const SC = stage === "settings-cli";
-	for (const [device, width, height] of RC || SC ? [] : [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
+	for (const [device, width, height] of RC || SC || SM ? [] : [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
 		for (const theme of ["dark", "light"] as const) {
 			// Scroll only the transcript to the rollup: the card's head sits above the bottom-pinned view.
 			const toRollup: Step = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-rollup").getBoundingClientRect().top - t.getBoundingClientRect().top - 48; })()`, "true"];
@@ -500,7 +513,7 @@ try {
 		await capture("pr1-overview-light-control-1440x1000", "#overview", 1440, 1000, "light", ".shell");
 		const leak = shots.at(-1) as { background: string };
 		if (leak.background !== "#0d0d0d") throw new Error(`Overview left the dark palette (${leak.background})`);
-	} else if (stage !== "chips" && stage !== "rollup" && !RC && !SC) {
+	} else if (stage !== "chips" && stage !== "rollup" && !RC && !SC && !SM) {
 		const wakeRun = ".session-steps:has(.session-bridge)";
 		const notice = `document.querySelector("${wakeRun} .session-notice-line").click()`, pill = `document.querySelector("${wakeRun} > .session-tools").click()`;
 		// Scroll only the transcript: scrollIntoView would also pan the phone's visual viewport.
@@ -702,6 +715,19 @@ try {
 			await capture(`settings-cli-parent-${device}-dark-${width}x${height}`, "#settings", width, height, "dark", ".settings-rule", undefined, parent);
 		}
 		if (posts.length) throw new Error(`settings-cli sent ${posts.join(", ")}: drafting a CLI writes nothing`);
+	}
+	if (SM) {
+		// Loading: every other section is usable while the list is held; filled: the poll picks it up, no reload.
+		const top: Step = [`document.querySelector('.settings-section[aria-label="Model routing"]').scrollIntoView({ block: "start" })`, "true"];
+		const parent: Step = [`document.querySelector('.settings-section[aria-label="Parent and operator models"]').scrollIntoView({ block: "start" })`, "true"];
+		const land: Step = [`fetch("/fixture/models-land").then(() => true)`, `document.querySelectorAll('.settings-models[data-models=ready]').length === 2 && !!document.querySelector(".settings-rule optgroup")`];
+		for (const [device, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
+			for (const [name, steps] of [["routing-loading", [top]], ["routing-filled", [land, top]], ["parent-loading", [parent]], ["parent-filled", [land, parent]]] as [string, Step[]][]) {
+				modelsLanded = false;
+				await capture(`settings-models-${name}-${device}-dark-${width}x${height}`, "#settings", width, height, "dark", ".settings-models[data-models=loading]", undefined, steps);
+			}
+		}
+		if (posts.length) throw new Error(`settings-models sent ${posts.join(", ")}: loading the list writes nothing`);
 	}
 	if (stage === "m3-shell") {
 		// Combine: [shell rail, chat column, conversation] widths; Context open at 1440 leaves 1440 - 261 - 340.

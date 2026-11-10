@@ -120,11 +120,6 @@ export interface SettingsResponse {
 	snapshot: SettingsSnapshot | null;
 	catalog: SettingField[] | null;
 	audit: SettingsAuditRow[];
-	/** `provider/id` models pi can use here, for the pickers; null when the list is unavailable (`models_error` says why). Absent while offline. */
-	available_models?: string[] | null;
-	models_error?: string | null;
-	/** True while the first `pi --list-models` run has not landed; the page asks again shortly. */
-	models_loading?: boolean;
 	/** The last rows of `state/model-apply.jsonl`, oldest first: how a model/thinking change reached each live session. */
 	model_apply?: ModelApplyRow[];
 	/** The CLI pickers' choices (src/settings-control.ts `DRIVER_CHOICES`); null from an older session. */
@@ -132,6 +127,10 @@ export interface SettingsResponse {
 }
 /** Effort levels per CLI and the native model rule (a RegExp source over `provider/id`). */
 export interface SettingsDriverChoices { efforts: { pi: string[]; claude: string[] }; claude_model: string }
+/** pi's `provider/id` models; `loading` while a `pi --list-models` run is going; `listed_at` is when it last landed. */
+export interface ModelList { models: string[] | null; error: string | null; loading: boolean; listed_at: string | null }
+/** `GET /api/settings/models`: the picker list per CLI, pi's whole list and its anthropic/claude-* part. */
+export interface SettingsModelsResponse { generated_at: string; pi: ModelList; claude: ModelList }
 /** One `state/model-apply.jsonl` row (src/session-model-apply.ts `ModelApplyLine`). */
 export interface ModelApplyRow { v: 1; type: "model_apply"; at: string; session: "parent" | "operator"; state: "queued" | "applied" | "cancelled" | "failed"; model: string | null; thinking: string | null; reason?: string }
 /** `POST /api/settings/apply|restore`: the owner transaction's result, passed through with its status. */

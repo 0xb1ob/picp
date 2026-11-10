@@ -44,7 +44,7 @@ async function home(t: TestContext, seed: (home: string) => void = () => {}) {
 	};
 	await operatorSession(t, join(root, LAYOUT.state), () => true, ports);
 	const csrf = (readControlRecord(join(root, LAYOUT.state)) as { record: { csrf: string } }).record.csrf;
-	await until(() => view.get("/api/settings").then((reply) => reply.body.models_loading), (loading) => loading === false, "the model listing");
+	await until(() => view.get("/api/settings/models").then((reply) => (reply.body.pi as Json).loading), (loading) => loading === false, "the model listing");
 	const read = async () => (await view.get("/api/settings")).body as Json;
 	const field = async (key: string) => ((await read()).snapshot.fields as Json[]).find((row) => row.key === key);
 	const post = async (path: string, body: Json, dryRun = false) => {
@@ -60,6 +60,7 @@ async function home(t: TestContext, seed: (home: string) => void = () => {}) {
 async function settingsTab(h: Awaited<ReturnType<typeof home>>) {
 	const tab = await h.view.open("#settings");
 	await tab.find('section[aria-label="Model routing"] li.settings-rule');
+	await tab.find('.settings-models[data-models="ready"]');
 	const section = (title: string) => tab.$(`section[aria-label="${title}"]`)!;
 	const row = (id: string) => [...section("Model routing").querySelectorAll("li.settings-rule")].find((li) => li.querySelector("code")?.textContent === id)!;
 	const choose = async (select: Element, value: string) => {

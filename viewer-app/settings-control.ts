@@ -1,25 +1,27 @@
 import type { SettingField, SettingKey, SettingValue } from "../src/contracts.ts";
-import type { SettingsResponse, SettingsWriteResponse } from "../src/viewer/api-types.ts";
+import type { SettingsModelsResponse, SettingsResponse, SettingsWriteResponse } from "../src/viewer/api-types.ts";
 import { type ControlStatus, failure } from "./control.ts";
 
 /** Settings page (cp-settings-minimal): GET the snapshot, POST apply/restore through the owner-file settings API (PR 171). */
 export const SETTINGS_URL = "/api/settings";
+export const SETTINGS_MODELS_URL = "/api/settings/models";
 export const SETTINGS_APPLY_URL = "/api/settings/apply";
 export const SETTINGS_RESTORE_URL = "/api/settings/restore";
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export type SettingsStatus = SettingsResponse | {error: string};
+export type ModelsStatus = SettingsModelsResponse | {error: string};
 export type RestoreSelector = {keys: SettingKey[]} | {section: string};
 export type Cli = "pi" | "claude";
 /** A CLI's picker choices: claude keeps the models its rule matches and its efforts; null `models` is no list yet. */
 export interface CliChoices { cli: Cli | null; models: string[] | null | undefined; efforts: string[]; native: RegExp | null }
 
-/** The choices for `cli` from the session's `drivers`; an older session gets `fallback` levels, unfiltered. */
-export function cliChoices(status: SettingsResponse, cli: Cli | null, fallback: readonly string[]): CliChoices {
+/** The choices for `cli` from the session's `drivers` and the models read; an older session gets `fallback` levels. */
+export function cliChoices(status: SettingsResponse, cli: Cli | null, fallback: readonly string[], list: SettingsModelsResponse | null): CliChoices {
  const drivers = status.drivers;
- if (!drivers) return {cli, models: status.available_models, efforts: [...fallback], native: null};
+ if (!drivers) return {cli, models: list?.pi.models ?? null, efforts: [...fallback], native: null};
  const native = new RegExp(drivers.claude_model);
- if (cli !== "claude") return {cli, models: status.available_models, efforts: drivers.efforts.pi, native};
- return {cli, models: status.available_models?.filter(model => native.test(model)) ?? status.available_models, efforts: drivers.efforts.claude, native};
+ if (cli !== "claude") return {cli, models: list?.pi.models ?? null, efforts: drivers.efforts.pi, native};
+ return {cli, models: list?.claude.models ?? null, efforts: drivers.efforts.claude, native};
 }
 
 /** Why a model/effort pair cannot run on the Claude CLI (the driver's own rule), or null; pi takes any pair. */
@@ -45,6 +47,10 @@ export interface SettingsView {
  restart: boolean;
  save(changes: Drafts): Promise<boolean>;
  restore(selector: RestoreSelector): Promise<boolean>;
+ /** `/api/settings/models`, read apart from the page: null until its first answer. */
+ models: ModelsStatus | null;
+ /** Starts a fresh `pi --list-models` run; the pickers fill in when it lands. */
+ refreshModels(): void;
 }
 
 export async function readSettings(fetch: Fetch, signal?: AbortSignal): Promise<SettingsStatus> {
@@ -53,6 +59,15 @@ export async function readSettings(fetch: Fetch, signal?: AbortSignal): Promise<
   return response.ok ? await response.json() as SettingsResponse : {error: await failure(response)};
  } catch {
   return {error: "Settings unavailable"};
+ }
+}
+
+export async function readModels(fetch: Fetch, refresh: boolean, signal?: AbortSignal): Promise<ModelsStatus> {
+ try {
+  const response = await fetch(refresh ? `${SETTINGS_MODELS_URL}?refresh=1` : SETTINGS_MODELS_URL, signal ? {signal} : {});
+  return response.ok ? await response.json() as SettingsModelsResponse : {error: await failure(response)};
+ } catch {
+  return {error: "could not reach this home"};
  }
 }
 

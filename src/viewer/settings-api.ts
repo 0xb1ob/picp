@@ -13,13 +13,14 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
-import type { ModelApplyRow, SettingsResponse, SettingsWriteResponse } from "./api-types.ts";
+import type { ModelApplyRow, ModelList, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse } from "./api-types.ts";
 import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, mayWrite, readAllowed, tokenMatches } from "./control-api.ts";
 import { readControlConfig, readControlRecord } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
-import { availableModels, type ModelList } from "./model-list.ts";
+import { availableModels, claudeModels } from "./model-list.ts";
 
 export const SETTINGS_PATH = "/api/settings";
+export const SETTINGS_MODELS_PATH = "/api/settings/models";
 export const SETTINGS_APPLY_PATH = "/api/settings/apply";
 export const SETTINGS_RESTORE_PATH = "/api/settings/restore";
 
@@ -116,7 +117,22 @@ export function modelApplyTail(stateDir: string): ModelApplyRow[] {
 	}
 }
 
-export async function handleSettingsStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date(), listModels: () => ModelList = availableModels): Promise<ControlRouteResult> {
+/**
+ * `GET /api/settings/models`: never awaits pi; `?refresh=1` from a caller that may write starts a fresh run now.
+ * Like the pickers, it needs dashboard control on and a running operator session: otherwise a note and no pi run.
+ */
+export function handleSettingsModels(req: IncomingMessage, options: ControlRouteOptions, now = new Date(), listModels: (force?: boolean) => ModelList = availableModels): ControlRouteResult {
+	if (req.method !== "GET") return { status: 405, body: { error: "GET only" } };
+	if (!readAllowed(req, options)) return { status: 403, body: { error: "Settings are served only under --require-tailnet" } };
+	const config = readControlConfig(options.stateDir);
+	const session = config.state === "on" && readControlRecord(options.stateDir).state === "ok" ? operatorSession(options.stateDir) : null;
+	const force = new URL(req.url ?? "/", "http://localhost").searchParams.get("refresh") === "1" && mayWrite(req);
+	const pi: ModelList = session?.running ? listModels(force) : { models: null, error: "no operator session serves Settings", loading: false, listed_at: null };
+	const claude = claudeModels(pi);
+	return { status: 200, body: { generated_at: now.toISOString(), pi, claude } satisfies SettingsModelsResponse };
+}
+
+export async function handleSettingsStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): Promise<ControlRouteResult> {
 	if (!readAllowed(req, options)) return { status: 403, body: { error: "Settings are served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
 	if (config.state !== "on") return { status: 200, body: { ...settingsBase(now), reason: `Dashboard control is off: ${config.reason}` } };
@@ -126,7 +142,6 @@ export async function handleSettingsStatus(req: IncomingMessage, options: Contro
 		return { status: 200, body: { ...settingsBase(now), enabled: true, reason: `Operator session offline: ${session.reason}` } };
 	}
 	const reply = await controlRequest(record.record, "settings_get", {});
-	const models = listModels(); // never awaited: the cached list, or `loading` while one background run fills it
 	if (!reply.ok) {
 		if (reply.status === 400 && /^unknown op/.test(reply.error)) return { status: 200, body: { ...settingsBase(now), enabled: true, running: true, reason: SETTINGS_PREDATE } };
 		return { status: 200, body: { ...settingsBase(now), enabled: true, reason: reply.error.replace(/^session not running/, "Session not running") } };
@@ -139,7 +154,7 @@ export async function handleSettingsStatus(req: IncomingMessage, options: Contro
 			snapshot: isObject(result?.snapshot) ? (result.snapshot as SettingsResponse["snapshot"]) : null,
 			catalog: Array.isArray(result?.catalog) ? result.catalog : null,
 			audit: Array.isArray(result?.audit) ? result.audit : [],
-			available_models: models.models, models_error: models.error, models_loading: models.loading, model_apply: modelApplyTail(options.stateDir),
+			model_apply: modelApplyTail(options.stateDir),
 			drivers: isObject(result?.drivers) ? (result.drivers as SettingsResponse["drivers"]) : null,
 		} satisfies SettingsResponse,
 	};
