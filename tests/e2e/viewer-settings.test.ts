@@ -311,7 +311,7 @@ test("P20-settings-relay: the session's outcomes pass through with no viewer lin
 	assert.equal((status.body.catalog as unknown[]).length, 38);
 	const native = (status.body.catalog as { key: string; help: string }[]).find((field) => field.key === "workers.native_claude_research")?.help ?? "";
 	for (const said of [/only when a routing rule .*driver "claude" and this switch is on/, /Off stops new native jobs and refuses resumes and revives .*never move to pi/, /off then on clears a remembered sign-in, lockdown or no-reset limit block/]) assert.match(native, said);
-	assert.ok("available_models" in status.body && "models_error" in status.body, "the model list rides the read: a list or a note, never missing");
+	assert.ok(!("available_models" in status.body), "the model list has its own read, /api/settings/models");
 	for (const secret of ["secret-gateway", "/v1/secret-path", home]) assert.ok(!status.text.includes(secret), `GET leaks ${secret}`);
 	const revision = (status.body.snapshot as { revision: string }).revision;
 	const pass = async (path: string, body: unknown, rev: string | null, want: number) => {
@@ -361,15 +361,15 @@ test("P20-settings-session: an older session (`unknown op`) is 409 unsupported w
 	assert.match(String(status.body.reason), /restart the operator session to load Settings/);
 });
 
-test("P20-model-list: GET /api/settings never waits for pi --list-models; one shared run, a 5 min list, a 30 s note per failure", { timeout: 180_000 }, async (t) => {
+test("P20-model-list: GET /api/settings/models never waits for pi --list-models; one shared run, a 5 min list, a 30 s note per failure", { timeout: 180_000 }, async (t) => {
 	const { view, stub } = await settingsHome(t);
 	await session(t, view.home, view.stateDir);
 	const time = clock(view, T0);
-	const read = async () => (await view.get("/api/settings")).body;
-	const models = (body: Line) => [body.available_models, body.models_error, body.models_loading];
+	const read = async () => ((await view.get("/api/settings/models")).body.pi as Line);
+	const models = (body: Line) => [body.models, body.error, body.loading];
 	stub.hold();
 	const first = await read();
-	assert.deepEqual([...models(first), (first.catalog as unknown[]).length], [null, null, true, 38], "a listing that never returns answers loading at once");
+	assert.deepEqual([...models(first), first.listed_at], [null, null, true, null], "a listing that never returns answers loading at once");
 	assert.deepEqual(models(await read()), [null, null, true]);
 	await until(stub.calls, (n) => n === 1, "the one background run");
 	assert.equal(stub.calls(), 1, "repeat reads share the one background run");
@@ -379,18 +379,18 @@ test("P20-model-list: GET /api/settings never waits for pi --list-models; one sh
 	const landed = time.now();
 
 	time.step(landed + 290_000 - time.now());
-	assert.deepEqual((await read()).available_models, both);
+	assert.deepEqual((await read()).models, both);
 	await new Promise((done) => setTimeout(done, 1_000)); // a background run started by that read would have spawned by now
 	assert.equal(stub.calls(), 1, "a good list is fresh for 5 minutes");
 	stub.answer("provider model\nopenai gpt-6.1-sol\n");
 	stub.hold();
 	time.step(20_000);
-	assert.deepEqual((await read()).available_models, both, "the stale list answers at once");
+	assert.deepEqual((await read()).models, both, "the stale list answers at once");
 	await until(stub.calls, (n) => n === 2, "the refresh");
 	await read();
 	assert.equal(stub.calls(), 2, "one refresh, not two");
 	stub.release();
-	await until(read, (body) => JSON.stringify(body.available_models) === '["openai/gpt-6.1-sol"]', "the refreshed list");
+	await until(read, (body) => JSON.stringify(body.models) === '["openai/gpt-6.1-sol"]', "the refreshed list");
 
 	const failures: Array<[string, () => void, string]> = [
 		["No models available", () => stub.answer("No models available. Set up authentication first.\n"), "pi lists no usable models"],
@@ -401,17 +401,17 @@ test("P20-model-list: GET /api/settings never waits for pi --list-models; one sh
 	for (const [label, fail, error] of failures) {
 		fail();
 		time.step(310_000);
-		const noted = await until(read, (body) => body.models_error === error, label);
+		const noted = await until(read, (body) => body.error === error && body.loading === false, label);
 		assert.deepEqual(models(noted), [null, error, false], `${label}: a note, never an error`);
 		const calls = stub.calls();
 		time.step(20_000);
-		assert.equal((await read()).models_error, error, `${label}: a failure is cached briefly`);
+		assert.equal((await read()).error, error, `${label}: a failure is cached briefly`);
 		assert.equal(stub.calls(), calls);
 		stub.restore();
 		stub.answer(TABLE);
 		time.step(15_000);
-		assert.equal((await read()).models_error, error, `${label}: the failure is served while pi is asked again`);
-		await until(read, (body) => body.models_error === null, `${label}: asked again after 30 s`);
+		assert.equal((await read()).error, error, `${label}: the failure is served while pi is asked again`);
+		await until(read, (body) => body.error === null, `${label}: asked again after 30 s`);
 		assert.equal(stub.calls(), calls + 1);
 	}
 });
@@ -430,9 +430,11 @@ async function settingsTab(t: TestContext, { routing = true, models = MODELS, st
 	stub.answer(models, status);
 	if (pending) stub.hold();
 	const csrf = await session(t, view.home, view.stateDir, true, ports);
-	if (!pending) await until(() => view.get("/api/settings").then((reply) => reply.body.models_loading), (loading) => loading === false, "the first model listing");
+	if (!pending) await until(() => view.get("/api/settings/models").then((reply) => (reply.body.pi as Line).loading), (loading) => loading === false, "the first model listing");
 	const tab = await view.open("#settings", hold);
 	await tab.find('section[aria-label="Auto-compaction"]');
+	// The page's own list read: once it settles the pickers hold the list or its note.
+	if (!pending) await tab.find(".settings-models", (el) => el.getAttribute("data-models") !== "loading");
 	const section = (title: string) => tab.$(`section[aria-label="${title}"]`)!;
 	const press = async (scope: Element, label: string) => { tab.click([...scope.querySelectorAll("button")].find((b) => b.textContent === label)!); await settle(); };
 	const choose = async (select: Element, value: string) => {
@@ -765,7 +767,7 @@ test("P20-settings-listing: while pi's first listing runs, the current value and
 	await ui.tab.find("optgroup");
 	assert.deepEqual(optionTexts(ui.tab.$("#setting-models-parent")!), ["(unset)", "openai/gpt-5", "Custom…"], "the retry picked the list up");
 	assert.equal(status() === null, true);
-	assert.ok(ui.tab.requests.filter((r) => r.path === "/api/settings").length >= 2, "the page asked again");
+	assert.ok(ui.tab.requests.filter((r) => r.path.startsWith("/api/settings/models")).length >= 2, "the page asked again");
 });
 
 test("P20-settings-unavailable: an unavailable list keeps each current value plus Custom…, and one note", { timeout: 120_000 }, async (t) => {

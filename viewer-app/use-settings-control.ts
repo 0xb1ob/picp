@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { type ControlStatus, readControl } from "./control.ts";
-import { type Drafts, readSettings, type RestoreSelector, type SettingsStatus, type SettingsView, writeSettings } from "./settings-control.ts";
+import { type Drafts, type ModelsStatus, readModels, readSettings, type RestoreSelector, type SettingsStatus, type SettingsView, writeSettings } from "./settings-control.ts";
 import type { SettingKey } from "../src/contracts.ts";
 import type { ModelApplyRow } from "../src/viewer/api-types.ts";
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 type ApplyWatch = {after: string; since: number} | null;
-const APPLY_POLL_MS = 5_000, APPLY_POLL_CAP_MS = 600_000;
+const APPLY_POLL_MS = 5_000, APPLY_POLL_CAP_MS = 600_000, MODELS_POLL_MS = 1_000;
 /** Only the parent writes `state/model-apply.jsonl` rows today. */
 const WATCHED: SettingKey[] = ["models.parent", "models.parent_thinking"];
 
@@ -32,6 +32,8 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
  const pending = useRef(0), revision = useRef<string | undefined>(undefined), queue = useRef<Promise<unknown>>(Promise.resolve());
  const [notice, setNotice] = useState<SettingsView["notice"]>(null);
  const [generation, setGeneration] = useState(0);
+ const [models, setModels] = useState<ModelsStatus | null>(null);
+ const [modelsAsk, setModelsAsk] = useState({n: 0, refresh: true});
  // A saved parent model key, or a queued switch, re-reads until its outcome row lands (bounded).
  const watch = useRef<ApplyWatch>(null), lastAt = useRef("");
  useEffect(() => {
@@ -45,12 +47,21 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
    if (!("error" in settings)) lastAt.current = settings.model_apply?.at(-1)?.at ?? "";
    setToken("error" in control || !control.running ? null : control.token ?? null);
    setControl(control);
-   // The server answers at once while its first `pi --list-models` run is going: ask again shortly (bounded: that run ends in at most 8 s).
-   if (!("error" in settings) && settings.models_loading) retry = setTimeout(() => setGeneration(value => value + 1), 2000);
-   else if (!("error" in settings) && applyPending(settings.model_apply ?? [], watch)) retry = setTimeout(() => setGeneration(value => value + 1), APPLY_POLL_MS);
+   if (!("error" in settings) && applyPending(settings.model_apply ?? [], watch)) retry = setTimeout(() => setGeneration(value => value + 1), APPLY_POLL_MS);
   });
   return () => { controller.abort(); clearTimeout(retry); };
  }, [generation]);
+ // The model list loads on its own: opening the page asks for a fresh run, then re-reads until it lands (8 s at most).
+ useEffect(() => {
+  const controller = new AbortController();
+  let poll: ReturnType<typeof setTimeout> | undefined;
+  void readModels(fetcher, modelsAsk.refresh, controller.signal).then(list => {
+   if (controller.signal.aborted) return;
+   setModels(list);
+   if (!("error" in list) && list.pi.loading) poll = setTimeout(() => setModelsAsk(ask => ({n: ask.n + 1, refresh: false})), MODELS_POLL_MS);
+  });
+  return () => { controller.abort(); clearTimeout(poll); };
+ }, [modelsAsk]);
  // Writes run one at a time, each on the revision the previous one left,
  // so a click in another section is never dropped.
  const send = async (body: {changes: Drafts} | RestoreSelector, token: string): Promise<boolean> => {
@@ -83,5 +94,6 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
   queue.current = run.catch(() => false);
   return run;
  };
- return {status, token, busy: writes > 0, notice, control, restart, save: changes => write({changes}), restore: write};
+ const refreshModels = () => setModelsAsk(ask => ({n: ask.n + 1, refresh: true}));
+ return {status, token, busy: writes > 0, notice, control, restart, save: changes => write({changes}), restore: write, models, refreshModels};
 }

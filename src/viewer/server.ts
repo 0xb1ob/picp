@@ -53,7 +53,7 @@ import { CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleC
 import { handleSchedulePolicy, SCHEDULE_POLICY_PATH } from "./control-api.ts";
 import { handleOperatorRestart } from "./operator-restart.ts";
 import { handleOperatorQueue, OPERATOR_QUEUE_PATH } from "./operator-queue.ts";
-import { handleSettingsStatus, handleSettingsWrite, SETTINGS_APPLY_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "./settings-api.ts";
+import { handleSettingsModels, handleSettingsStatus, handleSettingsWrite, SETTINGS_APPLY_PATH, SETTINGS_MODELS_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "./settings-api.ts";
 import { handleSkillsList, SKILLS_PATH } from "./skill-catalog.ts";
 import { handleOperatorUpload, OPERATOR_UPLOAD_PATH, OPERATOR_UPLOADS_PREFIX, serveOperatorUpload } from "./operator-upload-api.ts";
 import { OPERATOR_RESTART_PATH, PARENT_RESTART_PATH } from "./restart-status.ts";
@@ -305,6 +305,11 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 					if (!res.headersSent) sendJson(res, 500, { error: "internal" });
 				});
 			return;
+		case SETTINGS_MODELS_PATH: {
+			const out = handleSettingsModels(req, options);
+			sendJson(res, out.status, out.body, out.headers);
+			return;
+		}
 		case SCHEDULE_POLICY_PATH: {
 			const out = handleSchedulePolicy(req, options);
 			sendJson(res, out.status, out.body, out.headers);

@@ -4,7 +4,7 @@ import type { RoutingRule, SettingField, SettingFieldView, SettingKey, SettingVa
 import type { ModelApplyRow, SettingsAuditRow, SettingsResponse } from "../../src/viewer/api-types.ts";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { ParentRestart } from "../components/ParentRestart.tsx";
-import { type Cli, type CliChoices, cliChoices, cliError, type Drafts, fieldError, fieldOf, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
+import { type Cli, type CliChoices, cliChoices, cliError, type Drafts, fieldError, fieldOf, type ModelsStatus, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
 import "./settings.css";
 
 /** The browser bundle takes no values from src/contracts.ts; the type pins this list to `ThinkingLevel`. */
@@ -70,6 +70,17 @@ function Section({title, help, keys, drafts, setDrafts, view, restore, restoreTe
    {unsaved > 0 && <span class="settings-unsaved">{unsaved} unsaved change{unsaved === 1 ? "" : "s"}</span>}
   </div>}
  </section>;
+}
+/** The pickers' list state per section: loading, refreshing or a failure note, and Refresh (Retry after a failure). */
+function ModelsState({status, refresh, disabled}: {status: ModelsStatus | null; refresh: () => void; disabled: boolean}) {
+ const pi = status && !("error" in status) ? status.pi : null;
+ const error = status && "error" in status ? status.error : pi?.loading ? null : pi?.error ?? null;
+ const state = !status || pi?.loading ? "loading" : error ? "error" : "ready";
+ const text = state === "loading" ? (pi?.models ? "Refreshing the model list…" : "Loading the model list…") : error ? `Model list unavailable (${error}): type a provider/model.` : null;
+ return <div class="settings-models" data-models={state}>
+  {text && <p class="settings-readonly" role="status">{text}</p>}
+  <button type="button" disabled={disabled || state === "loading"} onClick={refresh}>{error ? "Retry" : "Refresh"}</button>
+ </div>;
 }
 /** The inline note under a model input: unlisted values (free text stays allowed) or an unavailable list. */
 function ModelNote({models, values}: {models: string[] | null | undefined; values: string[]}) {
@@ -223,15 +234,16 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   if (!next.fallbacks?.length) delete next.fallbacks;
   return next;
  }) as SettingValue);
- const models = data.available_models;
+ const list = view.models && !("error" in view.models) ? view.models : null;
+ const models = list?.pi.models ?? null;
  const cliOf = (key: SettingKey): Cli | null => { const cli = valueOf(data, drafts, key); return cli === "pi" || cli === "claude" ? cli : null; };
  // Picking the saved CLI again drops the draft, so an unchanged switch never posts.
  const setCli = (key: SettingKey, cli: SettingValue) => setDrafts(current => cli === view_(key)?.value ? omit(current, [key]) : {...current, [key]: cli});
  const workersCli = cliOf("workers.driver");
- const routeChoices = cliChoices(data, workersCli, THINKING);
+ const routeChoices = cliChoices(data, workersCli, THINKING, list);
  const rowErrors = rows.map(row => cliError(routeChoices, row.model, row.thinking));
  const needNew = rows.filter((_, index) => rowErrors[index]).map(row => rowName(row.id));
- const parentChoices = cliChoices(data, cliOf("models.parent_driver"), THINKING);
+ const parentChoices = cliChoices(data, cliOf("models.parent_driver"), THINKING, list);
  const parentModel = valueOf(data, drafts, "models.parent"), parentThinking = valueOf(data, drafts, "models.parent_thinking");
  const parentErrors: Partial<Record<SettingKey, string | null>> = {
   "models.parent": cliError(parentChoices, typeof parentModel === "string" ? parentModel : null, null),
@@ -245,7 +257,7 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} error={parentErrors[key] ?? (key in drafts ? fieldError(spec, drafts[key]) ?? refused : null)} set={value => spec.type === "driver" ? setCli(key, value) : set(key, value)} disabled={editing} models={models} choices={parent ? parentChoices : undefined}/>;
  };
  const invalid = (keys: SettingKey[]) => keys.some(key => { const spec = fieldOf(data, key); return !!parentErrors[key] || (!!spec && key in drafts && fieldError(spec, drafts[key]) !== null); });
- const modelsNote = models === null ? <p class="settings-readonly" role="status">{data.models_loading ? "Loading the model list…" : `Model list unavailable${data.models_error ? ` (${data.models_error})` : ""}: type a provider/model.`}</p> : null;
+ const modelsState = <ModelsState status={view.models} refresh={view.refreshModels} disabled={disabled}/>;
  const notice = view.notice;
  const recent = [...data.audit, ...(data.model_apply ?? [])].sort((a, b) => a.at.localeCompare(b.at)).slice(-5).reverse();
  return <div class="settings-screen">
@@ -254,13 +266,14 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   {notice && <div role={notice.kind === "ok" ? "status" : "alert"} class={`settings-notice settings-${notice.kind}`}><p>{notice.text}</p>{notice.errors.length > 0 && <ul>{notice.errors.map(error => <li key={error}>{error}</li>)}</ul>}</div>}
   <Section title="Model routing" help="First matching rule wins. The workers CLI, model, fallbacks and thinking apply from the next job or review; role, scope and risk stay fixed." keys={ROUTING} drafts={drafts} setDrafts={setDrafts} view={view} restore={routingAbsent ? null : {keys: ROUTING}} restoreText="Restore the shipped model, fallbacks and thinking on every rubric row whose id matches, and pi for every worker (native switches off)? Rows you added stay." disabled={disabled} invalid={needNew.length > 0} unsavedCount={rows.filter((row, index) => rowEdited(row, original[index])).length + ("workers.driver" in drafts ? 1 : 0)}>
    {routingAbsent ? <p class="settings-readonly">No data/routing.json: every worker route is refused until it exists.</p> : <>
+    {modelsState}
     <WorkersCli field={fieldOf(data, "workers.driver")} cli={workersCli} saved={view_("workers.driver")} set={cli => setCli("workers.driver", cli)} disabled={editing}/>
     {needNew.length > 0 && <p class="settings-warn settings-cli-block" role="alert">The Claude CLI needs a new model or effort on {needNew.join(", ")}. Save stays off until each row is valid.</p>}
     <Rubric rows={rows} original={original} setRow={setRow} disabled={editing} models={models} choices={routeChoices} errors={rowErrors}/>
    </>}
-   {modelsNote}
   </Section>
   <Section title="Parent and operator models" help="Empty means unset. A model or thinking change switches the running session at its next idle point. The Parent CLI applies only when the parent restarts; nothing restarts on its own." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models and thinking, and put the parent back on pi (from its next start)?" disabled={disabled} invalid={invalid(PEOPLE_MODELS)}>
+   {modelsState}
    {PEOPLE_MODELS.map(field)}
    <ApplyStatus rows={data.model_apply ?? []}/>
    {view.restart && <div class="settings-restart"><p class="settings-meta" role="status">Parent CLI saved: the parent keeps its current CLI until it restarts. Restart it here once the fleet is drained.</p><ParentRestart status={view.control}/></div>}

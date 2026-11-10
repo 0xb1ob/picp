@@ -563,10 +563,14 @@ when the response is not `writable`. The last five audit lines sit at the foot. 
 390 px with 44 px controls (fallback chip selects and × have 44 px hit areas below 900 px) and `overflow-wrap: anywhere`; from 900 px the rubric columns are 200 px Rule / 250 px Model / flexible fallbacks / 110 px Thinking. Screenshots:
 `docs/tui-verification/settings-minimal.md`.
 
-Model pickers: `GET /api/settings` also carries `available_models` (`provider/id`, from `pi --no-extensions --list-models` through
-the cp-install parser, `src/viewer/model-list.ts`; cached 5 minutes, a failure 30 seconds) or `null` with `models_error`. The read never
-waits for pi: it answers with the cached list (stale included) or `models_loading: true` while one deduplicated background run fills it,
-and the page asks again after 2 seconds until the list lands. Every
+Model pickers: the list has its own read, `GET /api/settings/models` (`src/viewer/settings-api.ts`), so `GET /api/settings` never
+waits on or carries it. It answers `{pi, claude}`, each `{models, error, loading, listed_at}`: pi's `provider/id` list (from
+`pi --no-extensions --list-models` through the cp-install parser, `src/viewer/model-list.ts`; cached 5 minutes, a failure 30 seconds)
+and its `anthropic/claude-*` part for the Claude CLI pickers. It never waits for pi: it answers with the cached list (stale included)
+and `loading: true` while one deduplicated background run refreshes it. Opening Settings asks with `?refresh=1` (a fresh run; honoured
+for a caller that may write), then re-reads every second until the run lands; only the Model routing and Parent and operator model
+sections show "Loading the model list…" (or "Refreshing…", or "Model list unavailable … with Retry"), and each has a Refresh button.
+Without dashboard control or a running operator session it runs no pi and answers a note. Every
 model field is a `<select>` (cp-lol1): the rubric row model, one dropdown per fallback (each with a × to remove it, plus an "Add
 fallback…" dropdown that appends, up to 4), the parent and the operator model. Options are one `<optgroup>` per provider, alphabetical
 within each; parent and operator start with "(unset)" (empty is unset), rubric models have none. A current value not in the list stays

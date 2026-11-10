@@ -56,6 +56,10 @@ label > .settings-meta, legend > .settings-meta { margin-left: 6px; padding: 1px
 .settings-restart { display: grid; gap: 8px; padding: 8px 18px 14px; border-top: 1px solid var(--divider); overflow-wrap: anywhere; }
 .settings-restart p { margin: 0; }
 .settings-body > p.settings-apply { margin: 0; padding: 8px 18px; border-top: 1px solid var(--divider); color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.settings-models { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 18px; overflow-wrap: anywhere; }
+.settings-models > p { flex: 1 1 200px; min-width: 0; }
+.settings-models > button { margin-left: auto; min-height: 44px; padding: 0 14px; background: none; color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; }
+.settings-models > button:disabled { opacity: 0.5; }
 .settings-screen > .more-push { max-width: 1000px; box-sizing: border-box; }
 .devices code { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
 .devices-list { list-style: none; margin: 0; padding: 0; display: grid; }
