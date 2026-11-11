@@ -207,6 +207,9 @@ export function deriveSidebar(
 	};
 }
 
+/** A recorded session file as the viewer reads it: a native record's pi-format log beside it, else the file itself. */
+export const sessionLogFile = (file: string): string => (nativeRecord(file) ? nativeParentLogFile(file) : file);
+
 /** Whether `file` opens with the native parent's `record` line (src/drivers/claude-parent-session.ts). */
 function nativeRecord(file: string): boolean {
 	const head = Buffer.alloc(64);

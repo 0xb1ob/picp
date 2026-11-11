@@ -16,7 +16,7 @@ import { parseObject, source, timestamp } from "./overview-read.ts";
 import { modelWindows, operatorContext, parentContext, workerContext } from "./context-usage.ts";
 import { modelText } from "./model-text.ts";
 import { parseSkillLines } from "./skill-mentions.ts";
-import { jobProjects, num, obj, resolveSessionFile, sessionRoots, sidebar, str, type Json, type ViewerState } from "./sessions.ts";
+import { jobProjects, num, obj, resolveSessionFile, sessionLogFile, sessionRoots, sidebar, str, type Json, type ViewerState } from "./sessions.ts";
 import { BACKLOG_BYTES, readLines, startOffset } from "./tail.ts";
 
 const sendId = (v: unknown): v is string => typeof v === "string" && /^ps-\d{14}-[a-f0-9]{8}$/.test(v);
@@ -299,13 +299,14 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
  let truncated = false, keys = new Map<SessionEntry,string>();
  if (!selected) warnings.push(`No operator session recorded yet (${operatorSessionsFile(dir)})`);
  else {
+  const file = sessionLogFile(selected.file);
   try {
-   if (!statSync(selected.file).isFile()) throw new Error("not a file");
-   const parsed = parseTranscript(state, selected.file, SIDES.you);
+   if (!statSync(file).isFile()) throw new Error("not a file");
+   const parsed = parseTranscript(state, file, SIDES.you);
    entries = parsed.entries; truncated = parsed.truncated; keys = parsed.keys ?? keys;
   } catch (error) {
    const code = (error as NodeJS.ErrnoException).code;
-   warnings.push(`Operator transcript ${code === "ENOENT" ? "missing" : "unreadable"}: ${selected.file} (${code ?? "not a file"})`);
+   warnings.push(`Operator transcript ${code === "ENOENT" ? "missing" : "unreadable"}: ${file} (${code ?? "not a file"})`);
   }
  }
  const d = decisions(state,now), asks = d.askHistory;

@@ -175,6 +175,8 @@ const R2_ALLOWED = [
 	"scripts/install-tools.ts",
 	// N2 spike: its throwaway claude config/session dir must sit outside the worktree and the home.
 	"src/drivers/claude-spike.ts",
+	// O2 D3: the Claude CLI operator's Bash keeps the real HOME, and its guards refuse the Claude settings under it.
+	"src/drivers/claude-operator.ts",
 	// N3c: the native worker's kept scratch dir (resume key's config dir), same rule; teardown removes it.
 	"src/drivers/claude-worker.ts",
 	"src/home.ts",

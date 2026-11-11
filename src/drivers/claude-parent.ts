@@ -3,6 +3,7 @@
  * cp_* tools over an in-process MCP server, takes one SDK `query()` per turn resumed by the recorded session id, and
  * speaks the pi RPC lines and events the bridge reads (tests/fixtures/fake-parent.mjs is the protocol reference).
  */
+import "./claude-stdout-guard.ts";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { registerCommandPost } from "../../extensions/command-post/index.ts";

@@ -85,7 +85,12 @@ export function nativeTranscript(file: string, header: { id: string; cwd: string
 				names.set(id, name);
 				return [{ type: "toolCall", id, name, arguments: Buffer.byteLength(json) <= TRANSCRIPT_BLOCK_CAP ? block.input ?? {} : { input: capped(json) } }];
 			});
-			if (kept.length > 0) message("assistant", kept, {}, at);
+			if (kept.length === 0) return;
+			// The turn's usage and model, as pi logs them: the viewer's context ring reads the last reply's.
+			const { usage: u, model } = sdk.message as Partial<typeof sdk.message>;
+			const [input, output, cacheRead, cacheWrite] = [u?.input_tokens ?? 0, u?.output_tokens ?? 0, u?.cache_read_input_tokens ?? 0, u?.cache_creation_input_tokens ?? 0];
+			const usage = u ? { usage: { input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite } } : {};
+			message("assistant", kept, { ...(typeof model === "string" ? { provider: "anthropic", model } : {}), ...usage }, at);
 		},
 	};
 }

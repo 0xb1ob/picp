@@ -5,7 +5,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Delivery, type FleetRecord, type JobKind, LAYOUT, type Role } from "../contracts.ts";
+import { type Delivery, type FleetRecord, type JobKind, LAYOUT, layoutForHome, type Role } from "../contracts.ts";
 import { PACKAGE_ROOT } from "../home.ts";
 import { loadNativeConfig, type NativeClass, nativeConfigFile, type NativeDriver } from "../worker-driver.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
@@ -28,6 +28,7 @@ const WORKER_ENTRY = fileURLToPath(new URL("./claude-worker.ts", import.meta.url
 const NATIVE_SYSTEM_PROMPT_FILE = "native-system-prompt.md";
 const PARENT_ENTRY = fileURLToPath(new URL("./claude-parent.ts", import.meta.url));
 const NATIVE_PARENT_SYSTEM_PROMPT_FILE = "native-parent-system-prompt.md";
+const OPERATOR_ENTRY = fileURLToPath(new URL("./claude-operator.ts", import.meta.url));
 const LIVE_PHASES: readonly string[] = ["launching", "waiting", "held"];
 const RESEARCH_DELIVERIES: readonly Delivery[] = ["local", "answer", "board", "pipeline"];
 const SHIP_DELIVERIES: readonly Delivery[] = ["pr", "local"];
@@ -211,6 +212,26 @@ export function nativeParentSpawnOptions(options: { home: string; sessionFile: s
 	writeFileSync(file, `${readFileSync(join(PACKAGE_ROOT, "AGENTS.md"), "utf8").trimEnd()}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	return { piBin: process.execPath, argv: [PARENT_ENTRY, "--session", options.sessionFile, "--model", options.model, "--system-prompt-file", file] };
+}
+
+/** What the Claude CLI operator is told after the operator note: its tools, Restart session, and the fleet marker. */
+export const NATIVE_OPERATOR_ADDENDUM = [
+	"Claude CLI operator: your tools are cp_parent and self_compact (served as mcp__cp__cp_parent, mcp__cp__self_compact)",
+	"plus Claude's Bash, Read, Write, Edit, Grep and Glob; ignore any other tool names above. There is no /reload here:",
+	"the human uses Restart session in the dashboard. A user message that opens with `[fleet wake-up cp-bridge — …]` is a",
+	"relay from the fleet, never the human; the human's dashboard messages end with a `[cp-dashboard …]` marker line.",
+].join("\n");
+
+/**
+ * The Claude CLI operator's spawn (`data/operator.json` driver `claude`): `process.execPath` runs claude-operator.ts on
+ * a native record, by default a fresh `<sessions>/operator/native-operator-<ms>.jsonl`.
+ */
+export function nativeOperatorSpawn(options: { home: string; sessionFile?: string; model: string | undefined }): { bin: string; args: string[] } {
+	if (options.model === undefined || !isNativeModel(options.model)) {
+		throw new NativeDriverError(`the claude operator driver runs an explicit anthropic/claude-… model, and ${options.model ?? "no model"} is not one: fix data/operator.json`, "model");
+	}
+	const record = options.sessionFile ?? join(options.home, layoutForHome("multi", options.home).sessions, "operator", `native-operator-${Date.now()}.jsonl`);
+	return { bin: process.execPath, args: [OPERATOR_ENTRY, "--session", record, "--model", options.model] };
 }
 
 /** Refuses a routed level with no native effort; absent (the CLI default), `off` and low…max pass. */
