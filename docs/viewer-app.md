@@ -549,7 +549,7 @@ a desktop header row `Rule · Model · Fallbacks, in order · Thinking`: the mon
 and a thinking select whose
 blank is the profile default; with no `routing.json`, one line "No data/routing.json: every worker route is refused
 until it exists." and no controls), **Parent and operator models** (`data/parent.json` / `data/operator.json` `model`, each with
-its source, after the Parent CLI select below, then a Parent thinking / Operator thinking select of pi's levels for the same file's `thinking`, badged
+its source, after the Parent CLI / Operator CLI select below, then a Parent thinking / Operator thinking select of pi's levels for the same file's `thinking`, badged
 `from file` or `from code`; empty unsets it), **Grant defaults** (the `grants.*` fields from the catalog) and **Auto-compaction**
 (`sessions.parent_compact_at_tokens` / `sessions.operator_compact_at_tokens`, each with an "In force: N tokens, from
 <source>" line, or "Off" with the diagnostic; a number below its minimum or not whole shows the reason and blocks Save,
@@ -590,7 +590,10 @@ counts the CLI as one unsaved change, and picking the saved CLI again drops it. 
 `["models.rubric", "workers.driver"]`. *Parent and operator models* opens with **Parent CLI** (`models.parent_driver`);
 on Claude CLI the parent model and thinking selects narrow the same way, with the same inline error and blocked Save.
 A save answered `restart: "parent"` shows "Parent CLI saved: the parent keeps its current CLI until it restarts" and the
-drain-gated `ParentRestart` buttons (two taps, `POST /api/parent/restart`); nothing restarts on save. *Native workers*
+drain-gated `ParentRestart` buttons (two taps, `POST /api/parent/restart`); nothing restarts on save. **Operator CLI**
+(`models.operator_driver`) follows the operator model and thinking selects and narrows them the same way; a save that
+changes it shows "Operator CLI saved: this operator session keeps its current CLI until it restarts" and the shell's
+`RestartSession` (Restart session / Restart clean); again nothing restarts on save. *Native workers*
 says that the Workers CLI sets its switch too. An older session without `drivers` gets pi's levels and no filtering.
 Layout: the new rows reuse the existing 390 px single column and the 900 px rubric grid; a row error and the CLI note
 span the whole row, with `overflow-wrap: anywhere`.

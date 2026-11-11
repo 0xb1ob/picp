@@ -1,9 +1,11 @@
 import type { ComponentChildren } from "preact";
-import { useState } from "preact/hooks";
+import { useContext, useState } from "preact/hooks";
 import type { RoutingRule, SettingField, SettingFieldView, SettingKey, SettingValue, ThinkingLevel } from "../../src/contracts.ts";
 import type { ModelApplyRow, SettingsAuditRow, SettingsResponse } from "../../src/viewer/api-types.ts";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { ParentRestart } from "../components/ParentRestart.tsx";
+import { RestartSession } from "../components/RestartSession.tsx";
+import { ShellContext } from "../components/Shell.tsx";
 import { type Cli, type CliChoices, cliChoices, cliError, type Drafts, fieldError, fieldOf, type ModelsStatus, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
 import "./settings.css";
 
@@ -13,7 +15,7 @@ const MODEL_PATTERN = "[^\\s/]+/\\S+";
 /** The "Custom…" option's value: never a model id, which always has a slash. */
 const CUSTOM = "custom";
 const MAX_FALLBACKS = 4;
-const PEOPLE_MODELS: SettingKey[] = ["models.parent_driver", "models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"];
+const PEOPLE_MODELS: SettingKey[] = ["models.parent_driver", "models.parent", "models.parent_thinking", "models.operator_driver", "models.operator", "models.operator_thinking"];
 const ROUTING: SettingKey[] = ["models.rubric", "workers.driver"];
 const CLI_LABEL: Record<string, string> = {pi: "pi", claude: "Claude CLI"};
 /** The shipped and flip-era rubric ids in words; any other row shows its id alone. */
@@ -215,6 +217,7 @@ function Field({field, value, source, error, set, disabled, models, choices}: {f
 /** `children`: Devices and Notifications (remote dashboard PR 3), shown even while operator Settings are loading or unavailable. */
 export function Settings({view, children}: {view: SettingsView; children?: ComponentChildren}) {
  const [drafts, setDrafts] = useState<Drafts>({});
+ const shell = useContext(ShellContext);
  const status = view.status;
  const header = <header class="settings-heading"><PageHeader title="Settings" context="This machine"/></header>;
  if (!status) return <div class="settings-screen">{header}<p role="status">Loading</p>{children}</div>;
@@ -244,19 +247,23 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
  const rowErrors = rows.map(row => cliError(routeChoices, row.model, row.thinking));
  const needNew = rows.filter((_, index) => rowErrors[index]).map(row => rowName(row.id));
  const parentChoices = cliChoices(data, cliOf("models.parent_driver"), THINKING, list);
- const parentModel = valueOf(data, drafts, "models.parent"), parentThinking = valueOf(data, drafts, "models.parent_thinking");
- const parentErrors: Partial<Record<SettingKey, string | null>> = {
-  "models.parent": cliError(parentChoices, typeof parentModel === "string" ? parentModel : null, null),
-  "models.parent_thinking": cliError(parentChoices, null, typeof parentThinking === "string" ? parentThinking : null),
+ const operatorChoices = cliChoices(data, cliOf("models.operator_driver"), THINKING, list);
+ const choicesOf = (key: SettingKey): CliChoices | undefined => key === "models.parent" || key === "models.parent_thinking" ? parentChoices
+  : key === "models.operator" || key === "models.operator_thinking" ? operatorChoices : undefined;
+ const text = (key: SettingKey) => { const value = valueOf(data, drafts, key); return typeof value === "string" ? value : null; };
+ const cliErrors: Partial<Record<SettingKey, string | null>> = {
+  "models.parent": cliError(parentChoices, text("models.parent"), null),
+  "models.parent_thinking": cliError(parentChoices, null, text("models.parent_thinking")),
+  "models.operator": cliError(operatorChoices, text("models.operator"), null),
+  "models.operator_thinking": cliError(operatorChoices, null, text("models.operator_thinking")),
  };
  const field = (key: SettingKey) => {
   const spec = fieldOf(data, key);
   // A server refusal (a bad Public URL) shows under its field too, beside the notice's list.
   const refused = view.notice?.kind === "error" ? view.notice.errors.find(error => error.includes(key)) ?? null : null;
-  const parent = key === "models.parent" || key === "models.parent_thinking";
-  return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} error={parentErrors[key] ?? (key in drafts ? fieldError(spec, drafts[key]) ?? refused : null)} set={value => spec.type === "driver" ? setCli(key, value) : set(key, value)} disabled={editing} models={models} choices={parent ? parentChoices : undefined}/>;
+  return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} error={cliErrors[key] ?? (key in drafts ? fieldError(spec, drafts[key]) ?? refused : null)} set={value => spec.type === "driver" ? setCli(key, value) : set(key, value)} disabled={editing} models={models} choices={choicesOf(key)}/>;
  };
- const invalid = (keys: SettingKey[]) => keys.some(key => { const spec = fieldOf(data, key); return !!parentErrors[key] || (!!spec && key in drafts && fieldError(spec, drafts[key]) !== null); });
+ const invalid = (keys: SettingKey[]) => keys.some(key => { const spec = fieldOf(data, key); return !!cliErrors[key] || (!!spec && key in drafts && fieldError(spec, drafts[key]) !== null); });
  const modelsState = <ModelsState status={view.models} refresh={view.refreshModels} disabled={disabled}/>;
  const notice = view.notice;
  const recent = [...data.audit, ...(data.model_apply ?? [])].sort((a, b) => a.at.localeCompare(b.at)).slice(-5).reverse();
@@ -272,11 +279,12 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
     <Rubric rows={rows} original={original} setRow={setRow} disabled={editing} models={models} choices={routeChoices} errors={rowErrors}/>
    </>}
   </Section>
-  <Section title="Parent and operator models" help="Empty means unset. A model or thinking change switches the running session at its next idle point. The Parent CLI applies only when the parent restarts; nothing restarts on its own." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models and thinking, and put the parent back on pi (from its next start)?" disabled={disabled} invalid={invalid(PEOPLE_MODELS)}>
+  <Section title="Parent and operator models" help="Empty means unset. A model or thinking change switches the running session at its next idle point. The Parent CLI and Operator CLI apply only when that session restarts; nothing restarts on its own." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models and thinking, and put the parent and operator back on pi (from their next start)?" disabled={disabled} invalid={invalid(PEOPLE_MODELS)}>
    {modelsState}
    {PEOPLE_MODELS.map(field)}
    <ApplyStatus rows={data.model_apply ?? []}/>
    {view.restart && <div class="settings-restart"><p class="settings-meta" role="status">Parent CLI saved: the parent keeps its current CLI until it restarts. Restart it here once the fleet is drained.</p><ParentRestart status={view.control}/></div>}
+   {view.operatorRestart && <div class="settings-restart"><p class="settings-meta" role="status">Operator CLI saved: this operator session keeps its current CLI until it restarts. Use Restart session once it is idle.</p>{shell.control && <RestartSession control={shell.control}/>}</div>}
   </Section>
   <Section title="Grant defaults" help="What a new grant starts with (data/mandate-defaults.json); grants already issued keep theirs." keys={GRANTS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{section: "grants"}} restoreText="Restore every grant default?" disabled={disabled} invalid={invalid(GRANTS)}>
    {GRANTS.map(field)}

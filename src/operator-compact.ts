@@ -24,12 +24,19 @@ export function isToolAdditionRejection(message: unknown): boolean {
 		&& /\btool_addition\b/.test(errorMessage) && /\b400\b|invalid_request_error/.test(errorMessage);
 }
 
-/** `compact_at_tokens` from the operator settings file; absent, unreadable or invalid is the default. */
+/**
+ * U3: the Claude CLI operator's default, under the CLI's auto-compact point for `claude-opus-5-5` (967000 of a 1M
+ * window, measured) and under the 200K compaction-policy boundary the Agent SDK documents for 1M-window models.
+ */
+export const NATIVE_OPERATOR_COMPACT_DEFAULT_TOKENS = 150000;
+
+/** `compact_at_tokens` from the operator settings file; absent, unreadable or invalid is the driver's default. */
 export function operatorCompactThreshold(settingsFile: string): number {
-	try {
-		const value = JSON.parse(readFileSync(settingsFile, "utf8"))?.compact_at_tokens;
-		return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : OPERATOR_COMPACT_DEFAULT_TOKENS;
-	} catch { return OPERATOR_COMPACT_DEFAULT_TOKENS; }
+	let json: { compact_at_tokens?: unknown; driver?: unknown } | null;
+	try { json = JSON.parse(readFileSync(settingsFile, "utf8")); } catch { return OPERATOR_COMPACT_DEFAULT_TOKENS; }
+	const value = json?.compact_at_tokens;
+	if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+	return json?.driver === "claude" ? NATIVE_OPERATOR_COMPACT_DEFAULT_TOKENS : OPERATOR_COMPACT_DEFAULT_TOKENS;
 }
 
 /** The operator settings file as JSON; absent → undefined, unreadable or invalid JSON throws. */

@@ -6,7 +6,7 @@
  * bridge (src/dashboard-restart.ts) writes a 0600 marker `{version: 1, id, pid, session_file, at}` there and calls
  * pi's own `ctx.shutdown()`. When that pi exits, `superviseOperatorPi` takes the marker only when it names the exited
  * child's pid, removes it, and spawns pi again with exactly `--session <file>` (`-c` when the file is gone; no resume
- * flag at all for a `fresh: true` marker, Restart clean); at most
+ * flag at all for a `fresh: true` marker, Restart clean, or one whose `driver` is not the CLI starting now); at most
  * 3 relaunches per 10 min. No marker: the launcher exits with pi's code, as before. Nothing here signals, kills or
  * looks up any process from outside: the stop is pi's own, the relaunch is the terminal's own launcher.
  */
@@ -14,17 +14,24 @@
 import type { ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { constants } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { layoutForHome, type Mode } from "./contracts.ts";
 import type { ControlPorts } from "./dashboard-control.ts";
 import { newestOperatorHandoff } from "./operator-context.ts";
+import type { OperatorDriver } from "./operator-compact.ts";
 import { PARENT_SEND_MAX_AGE_HOURS, parentSendFile, readParentSendOutboxForRestart } from "./parent-outbox.ts";
 
 export const RELAUNCH_ENV = "CP_OPERATOR_RELAUNCH_FILE";
 export const RELAUNCH_LIMIT = { count: 3, windowMs: 10 * 60_000 };
 
-/** `fresh`: relaunch on a new session (Restart clean); a launcher that predates it ignores the field and resumes. */
-export interface RelaunchMarker { version: 1; id: string; pid: number; session_file: string; at: string; fresh?: true }
+/**
+ * `fresh`: relaunch on a new session (Restart clean); `driver`: the CLI that wrote it (absent: pi). A launcher that
+ * predates either ignores the field and resumes.
+ */
+export interface RelaunchMarker { version: 1; id: string; pid: number; session_file: string; at: string; fresh?: true; driver?: OperatorDriver }
+
+/** The CLI behind a session file: the Claude CLI operator's records are `native-operator-*.jsonl`, never pi's. */
+export const operatorDriverOf = (sessionFile: string): OperatorDriver => (basename(sessionFile).startsWith("native-operator-") ? "claude" : "pi");
 
 /** `<home>/<state>/operator/relaunch.json`: where the launcher looks, and what it tells pi. */
 export function relaunchFileFor(home: string, mode: Mode): string {
@@ -51,7 +58,7 @@ export function writeRelaunchMarker(file: string, marker: Omit<RelaunchMarker, "
 }
 
 /** The marker, removed, only when it is well-formed and names `pid`; any other marker stays where it is (inert). */
-export function takeRelaunchMarker(file: string, pid: number): { id: string; session_file: string; fresh: boolean } | undefined {
+export function takeRelaunchMarker(file: string, pid: number): { id: string; session_file: string; fresh: boolean; driver: OperatorDriver } | undefined {
 	let raw: Partial<RelaunchMarker> | null;
 	try {
 		raw = JSON.parse(readFileSync(file, "utf8")) as Partial<RelaunchMarker> | null;
@@ -61,12 +68,12 @@ export function takeRelaunchMarker(file: string, pid: number): { id: string; ses
 	if (!raw || typeof raw !== "object" || raw.version !== 1 || raw.pid !== pid || typeof raw.id !== "string") return undefined;
 	if (typeof raw.session_file !== "string" || !isAbsolute(raw.session_file) || !raw.session_file.endsWith(".jsonl")) return undefined;
 	rmSync(file, { force: true });
-	return { id: raw.id, session_file: raw.session_file, fresh: raw.fresh === true };
+	return { id: raw.id, session_file: raw.session_file, fresh: raw.fresh === true, driver: raw.driver === "claude" ? "claude" : "pi" };
 }
 
-/** No resume flag when fresh (pi starts a new session on the configured model); else the exact file, `-c` when gone. */
-export function relaunchArgs(marker: { session_file: string; fresh?: boolean }, exists: (path: string) => boolean = existsSync): string[] {
-	if (marker.fresh) return [];
+/** No resume flag when fresh or when `driver` is not the marker's (a clean start); else the file, `-c` if gone. */
+export function relaunchArgs(marker: { session_file: string; fresh?: boolean; driver?: OperatorDriver }, driver: OperatorDriver = "pi", exists: (path: string) => boolean = existsSync): string[] {
+	if (marker.fresh || (marker.driver ?? "pi") !== driver) return [];
 	return exists(marker.session_file) ? ["--session", marker.session_file] : ["-c"];
 }
 
@@ -131,6 +138,8 @@ export interface SuperviseOptions {
 	onChild?: (child: ChildProcess) => void;
 	/** True once the launcher itself was signalled: the session is ending, never relaunched. */
 	stopped?: () => boolean;
+	/** The CLI the next spawn runs (data/operator.json `driver`); absent: pi. */
+	driver?: () => OperatorDriver;
 }
 
 function exitOf(child: ChildProcess, log: (line: string) => void): Promise<number> {
@@ -166,8 +175,10 @@ export async function superviseOperatorPi(options: SuperviseOptions): Promise<nu
 			return code;
 		}
 		relaunches.push(at);
-		args = relaunchArgs(marker);
-		log(marker.fresh ? "cp-operator: restarting from the dashboard with a clean session\n"
+		const driver = options.driver?.() ?? "pi";
+		args = relaunchArgs(marker, driver);
+		log(marker.driver !== driver ? `cp-operator: driver changed (${marker.driver} → ${driver}); starting a clean session\n`
+			: marker.fresh ? "cp-operator: restarting from the dashboard with a clean session\n"
 			: args[0] === "--session" ? `cp-operator: restarting from the dashboard, resuming ${marker.session_file}\n` : `cp-operator: restarting from the dashboard; ${marker.session_file} is gone, continuing the most recent session (-c)\n`);
 	}
 }

@@ -28,6 +28,7 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
  const [token, setToken] = useState<string | null>(null);
  const [control, setControl] = useState<ControlStatus | null>(null);
  const [restart, setRestart] = useState(false);
+ const [operatorRestart, setOperatorRestart] = useState(false);
  const [writes, setWrites] = useState(0);
  const pending = useRef(0), revision = useRef<string | undefined>(undefined), queue = useRef<Promise<unknown>>(Promise.resolve());
  const [notice, setNotice] = useState<SettingsView["notice"]>(null);
@@ -79,6 +80,8 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
   if (answer.state === "applied" || answer.state === "unchanged") {
    setNotice({kind: "ok", text: answer.state === "applied" ? `Saved · ${answer.changes?.length ?? 0} change${answer.changes?.length === 1 ? "" : "s"}${answer.audit_warning ? ` · ${answer.audit_warning}` : ""}` : "Nothing to change", errors: []});
    if (answer.restart === "parent") setRestart(true);
+   // `restart` names one session; a restore can change both drivers.
+   if (answer.changes?.some(change => change.key === "models.operator_driver")) setOperatorRestart(true);
    if (answer.state === "applied" && answer.changes?.some(change => WATCHED.includes(change.key))) watch.current = {after: lastAt.current, since: Date.now()};
    setGeneration(value => value + 1);
    return true;
@@ -95,5 +98,5 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
   return run;
  };
  const refreshModels = () => setModelsAsk(ask => ({n: ask.n + 1, refresh: true}));
- return {status, token, busy: writes > 0, notice, control, restart, save: changes => write({changes}), restore: write, models, refreshModels};
+ return {status, token, busy: writes > 0, notice, control, restart, operatorRestart, save: changes => write({changes}), restore: write, models, refreshModels};
 }

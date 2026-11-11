@@ -259,3 +259,40 @@ test("Workers CLI and Parent CLI label the claude option Claude CLI and save the
 	assert.equal(h.json(`${LAYOUT.data}/parent.json`).driver, "claude");
 	assert.ok((h.json(LAYOUT.routingFile).rubric as Json[]).every((row) => row.driver === "claude"));
 });
+
+// Scenario (NO-10): Given an operator on anthropic/claude-opus-5-5, When "Claude CLI" is saved as its Operator CLI,
+//   Then operator.json says driver claude, the answer says restart operator and the page offers Restart session
+//   (never pressing it); openai/gpt-5 under the Claude CLI is a 400 with nothing written; restore puts it back on pi.
+test("NO-10 Operator CLI: labels Claude CLI, narrows the operator pickers, saves driver claude and offers Restart session", { timeout: 120_000 }, async (t) => {
+	const h = await home(t, (root) => put(join(root, LAYOUT.data, "operator.json"), JSON.stringify({ model: "anthropic/claude-opus-5-5" })));
+	const ui = await settingsTab(h);
+	const people = ui.section("Parent and operator models");
+	const cli = people.querySelector("#setting-models-operator_driver")!;
+	assert.match(people.querySelector('label[for="setting-models-operator_driver"]')?.textContent ?? "", /^Operator CLI/);
+	assert.deepEqual([...cli.querySelectorAll("option")].map((option) => [option.getAttribute("value"), option.textContent]), [["pi", "pi"], ["claude", "Claude CLI"]]);
+	assert.equal((await h.field("models.operator_driver"))?.value, "pi");
+	await ui.choose(cli, "claude");
+	assert.deepEqual(groupLabels(people.querySelector("#setting-models-operator")!), ["anthropic"], "native offers only anthropic/claude-*");
+	assert.deepEqual(optionValues(people.querySelector("#setting-models-operator_thinking")!), ["", ...CLAUDE_EFFORTS]);
+	assert.deepEqual(groupLabels(people.querySelector("#setting-models-parent")!), ["anthropic", "openai"], "the parent keeps pi's list");
+	await ui.press(people, "Save");
+	await ui.tab.find(".settings-ok");
+	assert.deepEqual(ui.posts().map((post) => [post.status, post.json.changes]), [[200, { "models.operator_driver": "claude" }]]);
+	assert.deepEqual(h.json(`${LAYOUT.data}/operator.json`), { model: "anthropic/claude-opus-5-5", driver: "claude" });
+	const restart = await ui.tab.find(".settings-restart");
+	assert.match(restart.textContent ?? "", /Operator CLI saved: this operator session keeps its current CLI until it restarts/);
+	assert.ok(ui.button(restart, "Restart session"), "the page offers Restart session");
+	assert.ok(!ui.posts().some((post) => post.path === "/api/operator/restart"), "a save never restarts the operator");
+	const dry = await h.post("/api/settings/apply", { changes: { "models.operator_driver": "pi" } }, true);
+	assert.deepEqual([dry.status, dry.body.state, dry.body.restart], [200, "planned", "operator"]);
+
+	const saved = readFileSync(join(h.root, LAYOUT.data, "operator.json"), "utf8");
+	const refused = await h.post("/api/settings/apply", { changes: { "models.operator": "openai/gpt-5" } });
+	assert.deepEqual([refused.status, refused.body.errors], [400, ['models.operator: the claude operator runs only an anthropic/claude-… model, not "openai/gpt-5"']]);
+	assert.equal(readFileSync(join(h.root, LAYOUT.data, "operator.json"), "utf8"), saved, "nothing written");
+
+	const restored = await h.post("/api/settings/restore", { keys: ["models.operator_driver"] });
+	assert.deepEqual([restored.status, restored.body.state, restored.body.restart], [200, "applied", "operator"]);
+	assert.deepEqual(h.json(`${LAYOUT.data}/operator.json`), { model: "anthropic/claude-opus-5-5" });
+	assert.equal((await h.field("models.operator_driver"))?.value, "pi");
+});

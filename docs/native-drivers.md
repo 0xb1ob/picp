@@ -676,7 +676,7 @@ never under a name the parent picks (POC gap 11).
 
 ## Claude CLI operator (O2)
 
-`data/operator.json` `driver: "claude"` (default `pi`, written by hand; no Settings switch yet) makes `runOperator`
+`data/operator.json` `driver: "claude"` (default `pi`; Settings **Operator CLI** since O3, below) makes `runOperator`
 (`src/viewer/operator.ts`) start `src/drivers/claude-operator.ts` in place of `pi`. The pair must name an explicit
 `anthropic/claude-…` model (`operatorDriverSetting`, `nativeOperatorSpawn`); anything else refuses the launch by name.
 An absent file or `driver: "pi"` keeps today's argv. A `--session` resumes only a `native-operator-*` record.
@@ -697,3 +697,28 @@ it keeps `USER`, `PI_HOME`, `CP_HOME`, `PI_CODING_AGENT_DIR`, `SSH_AUTH_SOCK`, `
 The record is `sessions/operator/native-operator-<ms>.jsonl`; its pi-format log, `native-parent-log/<record name>` beside
 it, carries each reply's usage and model. The viewer's operator transcript and context ring read that log
 (`sessionLogFile`). Tests: `tests/e2e/native-operator.test.ts` NO-1…NO-6, each guard with an allow-all negative control.
+
+## Claude CLI operator lifecycle and Settings (O3)
+
+Dashboard Settings → *Parent and operator models* → **Operator CLI** (`models.operator_driver`, options "pi" / "Claude
+CLI") writes `data/operator.json` `driver` through the audited settings path, mirroring Parent CLI: with the Claude CLI
+picked the operator model and thinking pickers narrow to Anthropic Claude models and the Claude efforts, and a write
+pairing `claude` with any other model (the file's, else `CP_OPERATOR_MODEL`) or with `minimal` is refused 400 before
+anything is written. A saved change answers `restart: "operator"`; the page then offers Restart session and never
+restarts on its own. Restore deletes the key (pi).
+
+The launcher reads `driver` on every spawn. A restart marker records the `driver` of the session it names
+(`native-operator-*` records are `claude`, anything else `pi`; a marker without the field is `pi`). When it differs from
+the driver starting now, the relaunch has no resume flag: a clean session, logged as `driver changed (… → …)`. Otherwise
+Restart session resumes the same record and claude session id, and Restart clean starts a new record.
+
+`self_compact`, threshold compaction and the N5 streak compaction call the host's `compact` port, which runs the CLI's
+own `/compact <instructions>` between turns. Settings model and thinking changes use `setModel` / `setThinking`, applied
+to the next turn's `--model` and effort; each lands in `state/model-apply.jsonl` as on pi.
+
+**U3: the compaction threshold.** With `driver: "claude"` and no valid `compact_at_tokens` the threshold defaults to
+150000 (`NATIVE_OPERATOR_COMPACT_DEFAULT_TOKENS`); pi stays at 200000. Source: a `claude` 2.1.322 run against the mock
+provider reported `getContextUsage()` `maxTokens` 1000000 and `autoCompactThreshold` 967000 for `claude-opus-5-5` (the
+pi-ai catalog's context window is 1000000 too), and the Agent SDK documents a 200K compaction-policy boundary on 1M-window
+models. 150000 sits under both, so the operator's own handoff compaction runs before the CLI's. Tests:
+`tests/e2e/native-operator.test.ts` NO-7…NO-9 and `tests/e2e/settings-drivers.test.ts` NO-10.

@@ -17,14 +17,14 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { resolveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { layoutForHome, type ThinkingLevel } from "../contracts.ts";
 import { operatorPiArgs, operatorSkillPaths } from "../cp-bridge.ts";
 import { nativeOperatorSpawn } from "../drivers/claude.ts";
 import { operatorDriverSetting, operatorModelSetting, operatorThinkingSetting } from "../operator-compact.ts";
 import { tryResolveWorkerPackages, type WorkerPackageResolution } from "../worker-packages.ts";
-import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
+import { operatorDriverOf, relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
 import { PACKAGE_ROOT } from "../home.ts";
 import { listenPlan, viewerAddress } from "./cli.ts";
 import { hostHeaderFor } from "./server.ts";
@@ -176,12 +176,13 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 		if (current && current.exitCode === null && current.signalCode === null) current.kill(signal);
 	};
 	for (const signal of OPERATOR_SIGNALS) process.on(signal, onSignal);
+	const driver = () => (home ? operatorDriverSetting(join(home, layoutForHome("multi", home).data, "operator.json")) : "pi");
 	try {
 		return await superviseOperatorPi({
 			// Each spawn re-reads data/operator.json: a launcher started days ago must not relaunch on stale flags.
 			spawnPi: (args, env) => {
 				const childEnv = { ...process.env, ...env, ...(address.local ? { CP_VIEWER_HOST: host } : {}), CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" };
-				if (home && operatorDriverSetting(join(home, layoutForHome("multi", home).data, "operator.json")) === "claude") {
+				if (home && driver() === "claude") {
 					const native = nativeOperatorSpawn({ home, model: flagValue(args, "--model") ?? configuredOperatorModel(home).model ?? process.env.CP_OPERATOR_MODEL?.trim(), sessionFile: nativeSession(args) });
 					// Headless: the dashboard is its input, so the terminal's stdin stays with the launcher.
 					return spawn(native.bin, native.args, { stdio: ["ignore", "inherit", "inherit"], env: childEnv });
@@ -193,6 +194,7 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 			...(options.relaunchLimit ? { limit: options.relaunchLimit } : {}),
 			onChild: (child) => { current = child; },
 			stopped: () => signalled,
+			driver,
 		});
 	} finally {
 		for (const signal of OPERATOR_SIGNALS) process.off(signal, onSignal);
@@ -208,7 +210,7 @@ const flagValue = (args: readonly string[], flag: string): string | undefined =>
 /** A resumed `--session` the claude operator can take: its own native record, never a pi session file. */
 const nativeSession = (args: readonly string[]): string | undefined => {
 	const file = flagValue(args, "--session");
-	return file && basename(file).startsWith("native-operator-") ? file : undefined;
+	return file && operatorDriverOf(file) === "claude" ? file : undefined;
 };
 
 /** The selected home's `state/operator/relaunch.json`; no home resolves: undefined, pi runs once. */

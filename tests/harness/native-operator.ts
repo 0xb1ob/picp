@@ -82,5 +82,12 @@ export async function nativeOperator(t: TestContext, script: ClaudeStep[], optio
 		throw new Error(`timed out waiting for ${what}; last ${path}: ${JSON.stringify(last).slice(0, 2000)}`);
 	};
 	const send = (op: string, args: Record<string, unknown>) => controlRequest(record!, op, args);
-	return { home, state, settings, provider, record, calls, seen, get, view, send, stop };
+	/** After a Restart session: adopts the relaunched operator's control record (a new pid) for `send` and teardown. */
+	const reconnect = async () => {
+		const old = record!.pid;
+		const next = await waitFor(() => readControlRecord(state), (row) => row.state === "ok" && row.record.pid !== old, { timeoutMs: 60_000, what: "the relaunched operator's dashboard control" });
+		if (next.state !== "ok") throw new Error("no dashboard control");
+		record = next.record;
+	};
+	return { home, state, settings, provider, record, calls, seen, get, view, send, reconnect, stop };
 }

@@ -29,7 +29,7 @@ import {
 	publicUrlError,
 } from "../src/contracts.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "../src/mandate-defaults.ts";
-import { operatorCompactThreshold, operatorModelSetting, operatorThinkingSetting } from "../src/operator-compact.ts";
+import { operatorCompactThreshold, operatorDriverSetting, operatorModelSetting, operatorThinkingSetting } from "../src/operator-compact.ts";
 import { parentDriverSetting, parentModelSetting, parentSettings, parentThinkingSetting } from "../src/parent-context.ts";
 import { loadCapacityConfig } from "../src/quota.ts";
 import { DEFAULT_ROUTING_CONFIG } from "../src/routing.ts";
@@ -69,10 +69,10 @@ const write = (home: string, owner: SettingFileOwner, body: unknown) =>
 const fieldOf = (key: SettingKey) => SETTING_FIELDS.find((field) => field.key === key) as SettingField;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("(a) catalog: 38 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
-	assert.equal(SETTING_KEYS.length, 38);
+test("(a) catalog: 39 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
+	assert.equal(SETTING_KEYS.length, 39);
 	assert.deepEqual(SETTING_FIELDS.map((field) => field.key), [...SETTING_KEYS]);
-	assert.equal(new Set(SETTING_KEYS).size, 38);
+	assert.equal(new Set(SETTING_KEYS).size, 39);
 	assert.ok(Object.isFrozen(SETTING_FIELDS));
 	for (const field of SETTING_FIELDS) {
 		assert.ok(field.key.startsWith(`${field.section}.`), `${field.key} sits in section ${field.section}`);
@@ -156,7 +156,9 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 				? (write(home, "parent", { compact_at_tokens: 200000, model: value }), parentModelSetting(home) === (value ?? undefined))
 				: (write(home, "parent", { compact_at_tokens: value }), parentSettings(home).compact_at_tokens === value),
 		operator: (field, value) =>
-			field.file_key === "thinking"
+			field.file_key === "driver"
+				? (write(home, "operator", { compact_at_tokens: 200000, driver: value }), accepts(() => operatorDriverSetting(ownerFile(home, "operator")), value))
+				: field.file_key === "thinking"
 				? (write(home, "operator", { compact_at_tokens: 200000, thinking: value }), operatorThinkingSetting(ownerFile(home, "operator")) === (value ?? undefined))
 				: field.file_key === "model"
 				? (write(home, "operator", { compact_at_tokens: 200000, model: value }), operatorModelSetting(ownerFile(home, "operator")) === (value ?? undefined))

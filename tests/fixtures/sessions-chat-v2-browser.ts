@@ -328,6 +328,8 @@ try {
 		mkdirSync(join(scratch, LAYOUT.data), { recursive: true });
 		writeFileSync(join(scratch, LAYOUT.routingFile), JSON.stringify(routing));
 		writeFileSync(join(scratch, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 150000, model: SM ? LONG_MODEL : "anthropic/claude-opus-5-5", thinking: "minimal" }));
+		// O3: an operator on an openai model, so an Operator CLI draft to the Claude CLI shows its inline error.
+		if (!SM) writeFileSync(join(scratch, LAYOUT.data, "operator.json"), JSON.stringify({ model: "openai/gpt-6.1-sol" }));
 		routes["/api/settings"] = { generated_at: GENERATED, enabled: true, running: true, supported: true, writable: true, reason: null, snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS,
 			audit: [], drivers: DRIVER_CHOICES };
 		if (!SM) routes["/api/settings/models"] = modelsBody(MODEL_IDS);
@@ -710,9 +712,11 @@ try {
 			[`document.querySelector(${JSON.stringify(section)}).scrollIntoView({ block: "start" })`, "true"], ["document.activeElement?.blur()", "true"]];
 		const workers = draft("#setting-workers-driver", `.settings-section[aria-label="Model routing"]`, `!!document.querySelector(".settings-cli-block")`);
 		const parent = draft("#setting-models-parent_driver", `.settings-section[aria-label="Parent and operator models"]`, `!!document.querySelector(".settings-section .settings-field .settings-warn[role=alert]")`);
+		const operator = draft("#setting-models-operator_driver", ".settings-field:has(#setting-models-operator_driver)", `!!document.querySelector(".settings-field:has(#setting-models-operator) .settings-warn[role=alert]")`);
 		for (const [device, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
 			await capture(`settings-cli-workers-${device}-dark-${width}x${height}`, "#settings", width, height, "dark", ".settings-rule", undefined, workers);
 			await capture(`settings-cli-parent-${device}-dark-${width}x${height}`, "#settings", width, height, "dark", ".settings-rule", undefined, parent);
+			await capture(`settings-cli-operator-${device}-dark-${width}x${height}`, "#settings", width, height, "dark", ".settings-rule", undefined, operator);
 		}
 		if (posts.length) throw new Error(`settings-cli sent ${posts.join(", ")}: drafting a CLI writes nothing`);
 	}

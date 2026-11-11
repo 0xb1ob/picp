@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 import type { ControlPorts } from "./dashboard-control.ts";
 import { OperatorAsks } from "./operator-asks.ts";
-import { restartBlockers, writeRelaunchMarker } from "./operator-relaunch.ts";
+import { operatorDriverOf, restartBlockers, writeRelaunchMarker } from "./operator-relaunch.ts";
 import { type ControlAuditLine, type ControlKind, readControlConfig } from "./viewer/control-files.ts";
 
 export const RESTART_UNSUPPORTED = "this session was not started by a cp-operator that relaunches it; restart it once by hand: /quit, then cp-operator -c";
@@ -71,7 +71,7 @@ export function restartRequest(input: RestartInput & { args: Record<string, unkn
 	const usable = !!file && isAbsolute(file) && file.endsWith(".jsonl");
 	// A clean restart resumes nothing, so the old file need not be on disk; the marker still names it.
 	if (!usable || (!fresh && !existsSync(file))) return refuse(409, `the session file ${file ?? "(none)"} is not on disk; nothing to resume`);
-	const written = writeRelaunchMarker(ports.relaunchFile!()!, { id, pid: process.pid, session_file: file, at: now().toISOString(), ...(fresh ? { fresh: true as const } : {}) });
+	const written = writeRelaunchMarker(ports.relaunchFile!()!, { id, pid: process.pid, session_file: file, at: now().toISOString(), ...(fresh ? { fresh: true as const } : {}), driver: operatorDriverOf(file) });
 	if (!written.ok) {
 		input.outcome(id, "restart", null, peer, "failed", `relaunch marker unwritable: ${written.error}`);
 		return { ok: false, status: 500, error: `failed: relaunch marker unwritable (${written.error})` };
