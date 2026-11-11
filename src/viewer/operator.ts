@@ -181,13 +181,12 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 			// Each spawn re-reads data/operator.json: a launcher started days ago must not relaunch on stale flags.
 			spawnPi: (args, env) => {
 				const childEnv = { ...process.env, ...env, ...(address.local ? { CP_VIEWER_HOST: host } : {}), CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" };
-				const configured = configuredOperatorModel(home);
 				if (home && operatorDriverSetting(join(home, layoutForHome("multi", home).data, "operator.json")) === "claude") {
-					const native = nativeOperatorSpawn({ home, model: flagValue(args, "--model") ?? configured.model ?? process.env.CP_OPERATOR_MODEL?.trim(), sessionFile: nativeSession(args) });
+					const native = nativeOperatorSpawn({ home, model: flagValue(args, "--model") ?? configuredOperatorModel(home).model ?? process.env.CP_OPERATOR_MODEL?.trim(), sessionFile: nativeSession(args) });
 					// Headless: the dashboard is its input, so the terminal's stdin stays with the launcher.
 					return spawn(native.bin, native.args, { stdio: ["ignore", "inherit", "inherit"], env: childEnv });
 				}
-				return spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, configured), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions], skills), { stdio: "inherit", env: childEnv });
+				return spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, configuredOperatorModel(home)), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions], skills), { stdio: "inherit", env: childEnv });
 			},
 			firstArgs: piArgs,
 			...(relaunchFile ? { relaunchFile } : {}),
