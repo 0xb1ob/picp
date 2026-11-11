@@ -22,7 +22,7 @@ import type { ContextUsage } from "./api-types.ts";
 import { fileCache } from "./file-cache.ts";
 import { parseObject, timestamp } from "./overview-read.ts";
 import { readOperatorSessions } from "./operator-sessions.ts";
-import { num, obj, readObject, resolveSessionFile, sessionRoots, str, type SessionRow, type ViewerState } from "./sessions.ts";
+import { num, obj, readObject, resolveSessionFile, sessionLogFile, sessionRoots, str, type SessionRow, type ViewerState } from "./sessions.ts";
 import { readLines, startOffset } from "./tail.ts";
 
 export const MODEL_WINDOWS_FILE = "model-windows.json";
@@ -158,8 +158,8 @@ export function parentContext(state: ViewerState, parent: SessionRow, windows = 
 	return contextUsage({ ...scan, last_compact_at: parent.last_compact_at ?? scan.last_compact_at }, control, windows);
 }
 
-/** The operator session: its newest recorded pi file (`operator-sessions.jsonl`). */
+/** The operator session: its newest recorded file (`operator-sessions.jsonl`); a native record reads its log. */
 export function operatorContext(state: ViewerState, windows = windowsFor(state)): ContextUsage {
 	const file = readOperatorSessions(sessionRoots(state)[0]!)[0]?.file;
-	return contextUsage(file ? scanSession(file) : { tokens: null, model: null, thinking: null, last_compact_at: null, reason: "no operator session recorded yet" }, null, windows);
+	return contextUsage(file ? scanSession(sessionLogFile(file)) : { tokens: null, model: null, thinking: null, last_compact_at: null, reason: "no operator session recorded yet" }, null, windows);
 }

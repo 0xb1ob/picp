@@ -11,15 +11,16 @@ import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createSdkMcpServer, type HookCallback, type Options, query, type Query, type SDKAssistantMessage, type SDKResultMessage, type SDKUserMessage, type SdkMcpToolDefinition, type SpawnOptions, tool } from "@anthropic-ai/claude-agent-sdk";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { CompactOptions, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
 import { PACKAGE_ROOT } from "../home.ts";
 import { messageText } from "../parent-outbox.ts";
 import { resolveClaude } from "./claude-cli.ts";
 import { parentLog, wakeBlock } from "./claude-parent-log.ts";
-import { type ContextUsage, type CustomMessage, type HeadlessHost, type HostPorts, ParentRecord, type SendOptions } from "./claude-parent-session.ts";
+import { type ContextUsage, type CustomMessage, type HeadlessHost, type HostModel, type HostPorts, ParentRecord, type SendOptions } from "./claude-parent-session.ts";
 import { buildChildEnv, CHILD_MANAGED_SETTINGS, nativeEffortOptions, operatorClaudeSettings } from "./claude-spike.ts";
 import { nativeModelId } from "./claude.ts";
+import type { SessionEntry } from "../worker-process.ts";
 
 const MCP_PREFIX = "mcp__cp__";
 const MAX_TURNS = 100;
@@ -37,7 +38,7 @@ export interface ClaudeSessionConfig {
 	promptSections: readonly string[];
 	systemPrompt: (sections: ReadonlyMap<string, string>) => string;
 	/** One extension instance on a fresh host: at boot, and again on `new_session`. */
-	mount: (ports: HostPorts, view: { operatorTexts: () => string[] }) => HeadlessHost;
+	mount: (ports: HostPorts, view: EngineView) => HeadlessHost;
 	/** Registered commands a `prompt` runs in the entry, never as a model turn. */
 	commands: readonly string[];
 	builtinTools: string[];
@@ -45,19 +46,40 @@ export interface ClaudeSessionConfig {
 	/** The refusal for a tool that is neither served over `cp` nor a built-in. */
 	refusal: (toolName: string) => string;
 	guard?: (toolName: string, input: unknown) => string | undefined;
-	stopHook?: HookCallback;
+	/** pi's `agent_before_settle` as the CLI's Stop hook: a handler's forced continuation becomes a `block`. */
+	settleGuard?: boolean;
+	/** No pi RPC: lines go to `write`, stdin is never read, and SIGINT/SIGHUP stop the session too. */
+	headless?: { write: (record: Record<string, unknown>) => void };
+	/** Variables the CLI child (and so its Bash) gets over `buildChildEnv`'s allow-list. */
+	childEnv?: Record<string, string>;
 }
 
-type Message = { role: "user"; content: Array<{ type: "text"; text: string }>; timestamp: number } | (CustomMessage & { role: "custom"; timestamp: number });
+/** Engine state an entry may wire into its host as the optional `HostPorts` (the parent reads only `operatorTexts`). */
+export interface EngineView {
+	operatorTexts: () => string[];
+	sendUserMessage: (content: unknown, options?: SendOptions) => void;
+	hasPendingMessages: () => boolean;
+	sessionFile: () => string;
+	branch: () => SessionEntry[];
+	model: () => HostModel;
+	/** The effort in force; `off` when none was set (the CLI's default). */
+	getThinking: () => string;
+	setThinking: (level: string) => void;
+	setModel: (model: HostModel) => Promise<boolean>;
+	compact: (options?: CompactOptions) => void;
+	shutdown: () => void;
+}
+
+type UserPart = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+type Message = { role: "user"; content: UserPart[]; timestamp: number } | (CustomMessage & { role: "custom"; timestamp: number });
+type ContentBlock = Exclude<SDKUserMessage["message"]["content"], string>[number];
 type Assistant = Record<string, unknown> & { role: "assistant"; stopReason: string };
 
-const write = (record: Record<string, unknown>): void => void process.stdout.write(`${JSON.stringify(record)}\n`);
+const rpcWrite = (record: Record<string, unknown>): void => void process.stdout.write(`${JSON.stringify(record)}\n`);
 
-/** Runs the session until stdin ends or SIGTERM; resolves once the RPC reader is listening. */
+/** Runs the session until stdin ends (headless: a signal) or SIGTERM; resolves once its input is listening. */
 export async function startClaudeSession(config: ClaudeSessionConfig): Promise<void> {
-	// stdout is the RPC channel: nothing the extension logs may land on it.
-	console.log = console.error;
-	console.info = console.error;
+	const write = config.headless?.write ?? rpcWrite;
 	const { label } = config;
 	const tag = `[claude cli ${label}]`;
 	let sessionFile = config.sessionFile;
@@ -103,8 +125,40 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 		contextTokens: () => usage.tokens,
 		entries: () => record.entries(),
 	};
-	const view = { operatorTexts: () => record.operatorTexts() };
+	/** Control steps asked for mid-turn (pi's `ctx.compact` from a settle handler): they run before the next turn. */
+	const steps: Array<() => Promise<void>> = [];
+	/** The running turn's context as pi's `agent_before_settle` reads it: its messages, then its replies so far. */
+	let turnContext: Array<Message | Assistant> = [];
+	const view: EngineView = {
+		operatorTexts: () => record.operatorTexts(),
+		sendUserMessage,
+		hasPendingMessages: () => queue.length > 0,
+		sessionFile: () => sessionFile,
+		branch: () => record.entries(),
+		model: () => ({ provider: "anthropic", id: modelId }),
+		getThinking: () => thinking ?? "off",
+		setThinking: (level) => {
+			const applied = applySetting("set_thinking_level", { level });
+			if (applied.success !== true) throw new Error(String(applied.error));
+		},
+		setModel: async (model) => applySetting("set_model", { provider: model.provider, modelId: model.id }).success === true,
+		compact: (options) => {
+			// SAFETY: pi's onComplete reads a CompactionResult; the bridge's handlers read nothing from it.
+			steps.push(() => compact(options?.customInstructions ?? "").then((result) => options?.onComplete?.(result as never), (error: unknown) => options?.onError?.(error as Error)));
+			pump();
+		},
+		shutdown: () => void shutdown(),
+	};
 	let host = config.mount(ports, view);
+
+	/** pi's `sendUserMessage`: text and image parts; a steer joins the running query, anything else queues a turn. */
+	function sendUserMessage(content: unknown, options?: SendOptions): void {
+		const parts = typeof content === "string" ? [{ type: "text" as const, text: content }] : Array.isArray(content) ? (content as UserPart[]) : [];
+		const message: Message = { role: "user", content: parts, timestamp: Date.now() };
+		if (busy && options?.deliverAs === "steer" && live?.push(message)) return;
+		queue.push(message);
+		pump();
+	}
 
 	/** pi's `sendMessage`: a digest becomes a prompt section, a quiet notice lands now, a triggering one starts a turn. */
 	function deliver(message: CustomMessage, options: SendOptions): void {
@@ -131,7 +185,18 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 	}
 
 	function pump(): void {
-		if (busy || stopping || queue.length === 0) return;
+		if (busy || stopping) return;
+		const step = steps.shift();
+		if (step) {
+			busy = true;
+			running = step().finally(() => {
+				busy = false;
+				running = undefined;
+				pump();
+			});
+			return;
+		}
+		if (queue.length === 0) return;
 		busy = true;
 		running = runTurn(queue.splice(0))
 			.catch((error: unknown) => {
@@ -147,10 +212,13 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 			});
 	}
 
-	/** What the model reads for one message: an operator text as sent, a wake-up behind its fleet marker. */
-	function blockOf(message: Message): string {
-		const text = messageText(message);
-		return message.role === "custom" ? wakeBlock(message.customType, text) : text;
+	/** What the model reads for one message: an operator's text and images as sent, a wake-up behind its fleet marker. */
+	function contentOf(message: Message): ContentBlock[] {
+		if (message.role === "custom") return [{ type: "text", text: wakeBlock(message.customType, messageText(message)) }];
+		return message.content.flatMap((part): ContentBlock[] => part.type === "image"
+			// SAFETY: the dashboard sends only the image types its resize produces (png, jpeg, gif, webp).
+			? [{ type: "image", source: { type: "base64", media_type: part.mimeType as "image/png", data: part.data } }]
+			: part.text.trim().length > 0 ? [{ type: "text", text: part.text }] : []);
 	}
 
 	/** One turn in pi's order: before_agent_start, agent_start, the landed messages, context review, query, settle. */
@@ -164,11 +232,13 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 		await host.fire("agent_start");
 		for (const message of items) await land(message);
 		const reviewed = await reviewContext([...backlog.splice(0), ...items]);
+		turnContext = [...reviewed];
 		await host.fire("before_provider_request", { payload: {} });
 		const assistants: Assistant[] = [];
 		let last: Assistant = { role: "assistant", content: [], stopReason: "stop", timestamp: Date.now() };
 		const emit = (message: Assistant): void => {
 			assistants.push(message);
+			turnContext.push(message);
 			last = message;
 			messageCount += 1;
 			// A relayed claude message is logged as it arrives; only the entry's own error stand-ins are logged here.
@@ -181,7 +251,7 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 			await host.fire("turn_end", event);
 		};
 		try {
-			const blocks = reviewed.map(blockOf).filter((text) => text.trim().length > 0);
+			const blocks = reviewed.map(contentOf).filter((content) => content.length > 0);
 			if (blocks.length > 0) await ask(blocks, emit, turnEnd);
 		} catch (error) {
 			emit(errorAssistant((error as Error).message));
@@ -210,7 +280,7 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 	 * The claude query for one turn; its events become pi's `message_end`/`turn_end` lines as they arrive. A steer joins
 	 * it at priority "next" (after the running tool batch, else as the CLI's own queued turn) and lands on its replay.
 	 */
-	async function ask(blocks: string[], emit: (message: Assistant) => void, turnEnd: (toolResults: unknown[]) => Promise<void>): Promise<void> {
+	async function ask(blocks: ContentBlock[][], emit: (message: Assistant) => void, turnEnd: (toolResults: unknown[]) => Promise<void>): Promise<void> {
 		const claude = resolveClaude(process.env);
 		const abort = new AbortController();
 		current = abort;
@@ -223,7 +293,7 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 		const inbox: SDKUserMessage[] = [];
 		let wake: () => void = () => {};
 		async function* input(): AsyncGenerator<SDKUserMessage> {
-			yield { type: "user", message: { role: "user", content: blocks.map((text) => ({ type: "text" as const, text })) }, parent_tool_use_id: null, uuid: randomUUID() };
+			yield { type: "user", message: { role: "user", content: blocks.flat() }, parent_tool_use_id: null, uuid: randomUUID() };
 			while (open) {
 				while (inbox.length > 0) yield inbox.shift()!;
 				await Promise.race([settled, new Promise<void>((done) => (wake = done))]);
@@ -235,7 +305,7 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 				if (!open || interrupted) return false;
 				const uuid = randomUUID();
 				steers.set(uuid, message);
-				inbox.push({ type: "user", message: { role: "user", content: [{ type: "text", text: blockOf(message) }] }, parent_tool_use_id: null, uuid, priority: "next" });
+				inbox.push({ type: "user", message: { role: "user", content: contentOf(message) }, parent_tool_use_id: null, uuid, priority: "next" });
 				wake();
 				return true;
 			},
@@ -354,6 +424,17 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 		return deny(reason);
 	};
 
+	/** pi's `agent_before_settle` on the CLI's Stop: a forced continuation lands its entries and blocks the stop with them. */
+	const stopHook: HookCallback = async (input) => {
+		if (input.hook_event_name !== "Stop") return {};
+		const event = { context: { contextMessages: turnContext }, outcome: "completed" };
+		const forced = (await host.fire("agent_before_settle", event)).find((each) => (each as { continue?: unknown } | undefined)?.continue === true);
+		const entries = ((forced as { entries?: CustomMessage[] } | undefined)?.entries ?? []).filter((entry) => typeof entry.content === "string");
+		if (entries.length === 0) return {};
+		for (const entry of entries) await land({ ...entry, role: "custom", timestamp: Date.now() });
+		return { decision: "block", reason: entries.map((entry) => String(entry.content)).join("\n\n") };
+	};
+
 	/** One cp tool over MCP: pi's argument validation, the extension's execute, and pi's tool_execution_* lines. */
 	function mcpTool(definition: ToolDefinition): SdkMcpToolDefinition<Record<string, z.ZodType>> {
 		const guidelines = definition.promptGuidelines?.length ? `\n${definition.promptGuidelines.map((line) => `- ${line}`).join("\n")}` : "";
@@ -432,7 +513,7 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 			},
 			// Each input message echoed as the CLI takes it: a mid-turn steer lands exactly when it joins the conversation.
 			extraArgs: { "replay-user-messages": null },
-			env: buildChildEnv(dirs, process.env),
+			env: { ...buildChildEnv(dirs, process.env), ...config.childEnv },
 			settingSources: [],
 			...(existsSync(settings) ? { settings } : {}),
 			managedSettings: CHILD_MANAGED_SETTINGS,
@@ -445,7 +526,7 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 			skills: [],
 			permissionMode: "default",
 			canUseTool: async (toolName) => ({ behavior: "deny", message: config.refusal(toolName) }),
-			hooks: { PreToolUse: [{ hooks: [preToolUse] }], ...(config.stopHook ? { Stop: [{ hooks: [config.stopHook] }] } : {}) },
+			hooks: { PreToolUse: [{ hooks: [preToolUse] }], ...(config.settleGuard ? { Stop: [{ hooks: [stopHook] }] } : {}) },
 			maxTurns: MAX_TURNS,
 			abortController: abort,
 			model: modelId,
@@ -492,11 +573,14 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 	/** pi's manual `compact`: the CLI's own `/compact <instructions>` on the recorded session, with pi's compact events. */
 	async function compact(instructions: string): Promise<{ tokensBefore?: number; estimatedTokensAfter?: number }> {
 		if (!sessionId) throw new Error(`nothing to compact: the native ${label} has no claude session yet`);
-		if (cancelled(await host.fire("session_before_compact", { reason: "manual", customInstructions: instructions }))) {
+		// pi's `preparation`: what a handler adds to the summarized input joins the CLI's instructions.
+		const preparation = { messagesToSummarize: [] as Array<{ content?: unknown }> };
+		if (cancelled(await host.fire("session_before_compact", { reason: "manual", customInstructions: instructions, preparation }))) {
 			throw new Error(`compaction cancelled by the ${label} extension`);
 		}
+		const added = preparation.messagesToSummarize.flatMap((message) => (typeof message.content === "string" ? [message.content] : []));
 		try {
-			const outcome = await runCompact(instructions);
+			const outcome = await runCompact([instructions, ...added].join("\n\n").trim());
 			log.compacted(outcome.tokensBefore);
 			await host.fire("session_compact", { reason: "manual", fromExtension: false });
 			return outcome;
@@ -655,7 +739,8 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 	process.on("SIGTERM", () => void shutdown());
 	reapOrphan();
 	await host.fire("session_start", { reason: "startup" });
-	createInterface({ input: process.stdin }).on("line", command).on("close", () => void shutdown());
+	if (config.headless) for (const signal of ["SIGINT", "SIGHUP"] as const) process.on(signal, () => void shutdown());
+	else createInterface({ input: process.stdin }).on("line", command).on("close", () => void shutdown());
 }
 
 const cancelled = (results: unknown[]): boolean => results.some((each) => (each as { cancel?: unknown } | undefined)?.cancel === true);

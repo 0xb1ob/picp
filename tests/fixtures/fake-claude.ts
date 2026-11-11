@@ -3,11 +3,13 @@
  * model call to tests/harness/claude-mock-provider.ts, so native e2e cases run where Claude Code is not installed.
  * Covers what the native parent drives: turns, cp_* tools over the SDK's MCP relay with PreToolUse hooks, `--resume`,
  * `/compact <instructions>` (as claude 2.1.318 runs it), `getContextUsage`, `interrupt`, `--replay-user-messages` and
- * a mid-turn message joining after the next tool batch (else its own queued turn). Each spawn's argv is logged.
+ * a mid-turn message joining after the next tool batch (else its own queued turn); for the operator, Bash/Read/Write,
+ * Stop hooks and image blocks. Each spawn's argv is logged.
  */
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { CLAUDE_VERSION_FLOOR } from "../../src/drivers/claude-cli.ts";
 
@@ -42,6 +44,12 @@ const model = flag("--model") ?? "claude-picp-fake";
 /** claude 2.1.318 sends `--effort` as the request's `output_config.effort`. */
 const effort = flag("--effort");
 const replay = args.includes("--replay-user-messages");
+const builtins = flag("--tools")?.split(",").filter(Boolean) ?? [];
+/** Test knob (settings env): `off` skips every SDK hook callback, PreToolUse and Stop alike (a negative control). */
+const hooksOff = env.FAKE_CLAUDE_HOOKS === "off";
+/** Stop-hook continuations one turn takes before it ends anyway (claude has no cap; this fake must never spin). */
+const MAX_STOP_BLOCKS = 3;
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const resumed = flag("--resume");
 const sessionId = resumed ?? randomUUID();
 const sessionPath = join(store, "sessions", `${sessionId}.json`);
@@ -76,6 +84,7 @@ function request(body: Record<string, unknown>): Promise<Record<string, unknown>
 }
 
 let hookIds: string[] = [];
+let stopIds: string[] = [];
 let servers: string[] = [];
 let systemPrompt = "";
 type ToolDef = { name: string; description?: string; input_schema: unknown };
@@ -128,17 +137,36 @@ const textOf = (content: Message["content"]): string => typeof content === "stri
 const failed = (status: number, body: Record<string, unknown>): string =>
 	`API Error: ${status} ${(body.error as { message?: string } | undefined)?.message ?? JSON.stringify(body)}`;
 
+/** The built-ins `--tools` names that a case drives (Bash, Read, Write), run for real; any other is not available. */
+function builtin(name: string, input: Record<string, unknown>, toolUseId: string): Block {
+	const done = (content: string, isError = false): Block => ({ type: "tool_result", tool_use_id: toolUseId, is_error: isError, content });
+	try {
+		const file = String(input.file_path ?? "");
+		if (name === "Read") return done(readFileSync(file, "utf8"));
+		if (name === "Write") {
+			mkdirSync(dirname(file), { recursive: true });
+			writeFileSync(file, String(input.content ?? ""));
+			return done(`File created successfully at: ${file}`);
+		}
+		if (name === "Bash") return done(execFileSync("sh", ["-c", String(input.command ?? "")], { encoding: "utf8" }));
+	} catch (error) {
+		return done((error as Error).message, true);
+	}
+	return done(`No such tool available: ${name}`, true);
+}
+
 /** One tool_use: the PreToolUse hooks first (a deny is the result), then the SDK server's `tools/call`. */
 async function runTool(use: Block): Promise<Block> {
 	const name = String(use.name);
 	const toolUseId = String(use.id);
-	for (const callback of hookIds) {
+	for (const callback of hooksOff ? [] : hookIds) {
 		const input = { session_id: sessionId, transcript_path: sessionPath, cwd: process.cwd(), permission_mode: "default", hook_event_name: "PreToolUse", tool_name: name, tool_input: use.input, tool_use_id: toolUseId };
 		const out = await request({ subtype: "hook_callback", callback_id: callback, input, tool_use_id: toolUseId }) as { hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string } };
 		if (out.hookSpecificOutput?.permissionDecision === "deny") {
 			return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: out.hookSpecificOutput.permissionDecisionReason ?? "denied" };
 		}
 	}
+	if (builtins.includes(name)) return builtin(name, (use.input ?? {}) as Record<string, unknown>, toolUseId);
 	// Test knob (settings env): hold the first allowed call to this tool before it runs, until an interrupt ends the turn.
 	if (env.FAKE_CLAUDE_HOLD_AFTER_ALLOW === name && !existsSync(join(store, "held"))) {
 		writeFileSync(join(store, "held"), toolUseId);
@@ -161,16 +189,37 @@ const init = (): void => send({
 	apiKeySource: "none", claude_code_version: CLAUDE_VERSION_FLOOR, output_style: "default", uuid: randomUUID(),
 });
 
+const validImage = (block: Block): boolean => {
+	const source = block.source as { type?: unknown; media_type?: unknown; data?: unknown } | undefined;
+	return source?.type === "base64" && IMAGE_TYPES.includes(String(source.media_type)) && typeof source.data === "string" && source.data.length > 0;
+};
+
+/** The Stop hooks in order; the first `decision: "block"` is the reason the turn goes on. */
+async function stopBlock(active: boolean): Promise<string | undefined> {
+	for (const callback of hooksOff ? [] : stopIds) {
+		const input = { session_id: sessionId, transcript_path: sessionPath, cwd: process.cwd(), permission_mode: "default", hook_event_name: "Stop", stop_hook_active: active };
+		const out = await request({ subtype: "hook_callback", callback_id: callback, input }) as { decision?: string; reason?: string };
+		if (out.decision === "block") return out.reason ?? "";
+	}
+	return undefined;
+}
+
 async function turn(item: Queued): Promise<void> {
 	await listTools();
 	init();
 	interrupted = false;
+	const content = take(item);
+	// The API's own check: a user image is a base64 source of a supported type, never pi's `{ data, mimeType }` shape.
+	if (Array.isArray(content) && content.some((block) => block.type === "image" && !validImage(block))) {
+		return result({ is_error: true, result: "API Error: 400 messages: an image must be a base64 source of a png, jpeg, gif or webp media_type", num_turns: 0 });
+	}
 	turnAbort = new AbortController();
-	history.push({ role: "user", content: take(item) });
+	history.push({ role: "user", content });
 	// Saved as it grows, like claude's transcript: a turn killed midway still resumes.
 	save();
 	let text = "";
 	let rounds = 0;
+	let stops = 0;
 	while (!interrupted) {
 		rounds++;
 		let reply: Awaited<ReturnType<typeof callModel>>;
@@ -196,7 +245,15 @@ async function turn(item: Queued): Promise<void> {
 		contextTokens = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.output_tokens ?? 0);
 		text = blocks.filter((block) => block.type === "text").map((block) => String(block.text)).join("\n");
 		const uses = blocks.filter((block) => block.type === "tool_use");
-		if (uses.length === 0) break;
+		if (uses.length === 0) {
+			// The Stop hooks: a block is fed back as a user turn and the model runs again, as claude does.
+			const reason = stops < MAX_STOP_BLOCKS ? await stopBlock(stops > 0) : undefined;
+			if (reason === undefined) break;
+			stops++;
+			history.push({ role: "user", content: [{ type: "text", text: `Stop hook feedback:\n${reason}` }] });
+			save();
+			continue;
+		}
 		const results: Block[] = [];
 		for (const use of uses) results.push(await runTool(use));
 		send({ type: "user", message: { role: "user", content: results }, parent_tool_use_id: null, session_id: sessionId, uuid: randomUUID() });
@@ -248,6 +305,7 @@ function control(line: { request_id: string; request: Record<string, unknown> })
 	if (body.subtype === "initialize") {
 		const hooks = (body.hooks ?? {}) as Record<string, Array<{ hookCallbackIds?: string[] }> | undefined>;
 		hookIds = (hooks.PreToolUse ?? []).flatMap((matcher) => matcher.hookCallbackIds ?? []);
+		stopIds = (hooks.Stop ?? []).flatMap((matcher) => matcher.hookCallbackIds ?? []);
 		servers = Array.isArray(body.sdkMcpServers) ? body.sdkMcpServers.map(String) : [];
 		systemPrompt = Array.isArray(body.systemPrompt) ? body.systemPrompt.join("\n\n") : String(body.systemPrompt ?? "");
 		return reply({ commands: [{ name: "compact", description: "Compact the conversation", argumentHint: "<instructions>" }], output_style: "default", available_output_styles: ["default"], models: [], account: {} });

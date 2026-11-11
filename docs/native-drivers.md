@@ -307,7 +307,7 @@ request refuses as `refused: <job> cannot run on the Claude CLI driver: <reason>
 | Condition | Refusal names |
 |---|---|
 | switch file unreadable or off | the setting and where to turn it on |
-| not research (role `planner`, delivery `local`, `answer`, `board` or `pipeline`; a pipeline's planner runs native, [D2](#routing-level-driver-s1)) | the job's kind/role/delivery; ship implementers run native since [N4f](#native-ship-jobs-n4f); review, plan, parent and operator roles never do |
+| not research (role `planner`, delivery `local`, `answer`, `board` or `pipeline`; a pipeline's planner runs native, [D2](#routing-level-driver-s1)) | the job's kind/role/delivery; ship implementers run native since [N4f](#native-ship-jobs-n4f); review and plan roles never do. The parent and the operator are not jobs: each picks its CLI in its own file ([S1c](#native-parent-entry-s1c), [O2](#claude-cli-operator-o2)) |
 | the home's native slots are full (fleet records with `worker.driver`, no observed exit, the job's own excluded) | `max_concurrent` and the live jobs ([N4i](#native-concurrency-and-the-flip-n4i)) |
 | `claude` missing or below the pinned floor `CLAUDE_VERSION_FLOOR` | `claude update` / install remedy |
 
@@ -667,8 +667,33 @@ assistant text, thinking, tool calls with their results, entry-side errors and c
 viewer switches to it only when the control file's `sessionFile` opens with the native `record` line; `get_entries`
 and a relaunch still read the record. A record with no log yet imports its claude sessions once from the CLI's
 `native-parent-claude/config/projects/*/<session_id>.jsonl`; a rotation starts a new record and so a new log.
-Not yet on native (Stage 2): `compact`, `new_session`, `set_model`, `set_thinking_level` and the slash diagnostics. Each
-one is refused by name, and `get_commands` lists none.
+`compact`, `new_session`, `set_model` and `set_thinking_level` run between turns (a `/compact` with the extension's
+instructions, a new record, the next turn's `--model` or effort); `get_commands` lists the registered commands the
+entry runs. Any other RPC command is refused by name.
 
 Ledger ids are generated (`cp-xxxx`), on this parent as on pi: a job is dispatched by the id `cp_job create` returned,
 never under a name the parent picks (POC gap 11).
+
+## Claude CLI operator (O2)
+
+`data/operator.json` `driver: "claude"` (default `pi`, written by hand; no Settings switch yet) makes `runOperator`
+(`src/viewer/operator.ts`) start `src/drivers/claude-operator.ts` in place of `pi`. The pair must name an explicit
+`anthropic/claude-…` model (`operatorDriverSetting`, `nativeOperatorSpawn`); anything else refuses the launch by name.
+An absent file or `driver: "pi"` keeps today's argv. A `--session` resumes only a `native-operator-*` record.
+
+The entry mounts `extensions/cp-bridge` on the same headless host and turn engine as the native parent, so the
+dashboard control, relay outbox, ask and header guards, `cp_parent` (with `model_pick`) and image sends are the pi
+operator's own code. The bridge's tools reach the model as `mcp__cp__*`; its built-ins are Bash, Read, Write, Edit, Grep
+and Glob, and Agent, Task, WebFetch and WebSearch are disallowed. Each built-in passes `operatorToolRefusal` (the pi
+operator's write scope, CI-wait and sleep-loop refusals), then a secret-path refusal for the Claude settings file, the
+record's `native-operator-claude/` config dir, `/proc` and `/dev/fd`. Bash checks literal paths and lexed words (best
+effort past `$`). The engine registers a Stop hook that runs `agent_before_settle`, so a prose question with no
+`cp_parent ask` gets one continuation, then a card. Headless, the bridge's notices go to stderr, never an RPC stdout.
+
+The Bash child keeps the real `HOME` (D3): one strace'd `claude` run with a picp `CLAUDE_CONFIG_DIR` opened nothing
+under `~/.claude` except a missing `state/unattended-serving-consent.json` (ENOENT). Beside the allow-listed child env
+it keeps `USER`, `PI_HOME`, `CP_HOME`, `PI_CODING_AGENT_DIR`, `SSH_AUTH_SOCK`, `GH_CONFIG_DIR` and `GIT_CONFIG_GLOBAL`.
+
+The record is `sessions/operator/native-operator-<ms>.jsonl`; its pi-format log, `native-parent-log/<record name>` beside
+it, carries each reply's usage and model. The viewer's operator transcript and context ring read that log
+(`sessionLogFile`). Tests: `tests/e2e/native-operator.test.ts` NO-1…NO-6, each guard with an allow-all negative control.

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { layoutForHome, type Mode, ReviewerModelSchema, type ThinkingLevel, ThinkingLevelSchema, validate } from "./contracts.ts";
+import { isNativeModel } from "./drivers/claude.ts";
 import { atomicWriteText } from "./json-store.ts";
 import { relayIdsOfMessage } from "./operator-outbox.ts";
 
@@ -56,6 +57,23 @@ export function operatorModelSetting(settingsFile: string): string | undefined {
 export function operatorThinkingSetting(settingsFile: string): ThinkingLevel | undefined {
 	const thinking = operatorSettingsJson(settingsFile)?.thinking;
 	return validate(ThinkingLevelSchema, thinking).ok ? (thinking as ThinkingLevel) : undefined;
+}
+
+export type OperatorDriver = "pi" | "claude";
+
+/**
+ * `driver` from the operator settings file: absent or unreadable = `pi` (today's operator). A value other than
+ * pi/claude, or `claude` beside a `model` that is not `anthropic/claude-*`, throws naming the file.
+ */
+export function operatorDriverSetting(settingsFile: string): OperatorDriver {
+	let value: { driver?: unknown; model?: unknown } | null;
+	try { value = JSON.parse(readFileSync(settingsFile, "utf8")); } catch { return "pi"; }
+	const driver = value?.driver ?? "pi";
+	if (driver !== "pi" && driver !== "claude") throw new Error(`${settingsFile} driver must be "pi" or "claude", not ${JSON.stringify(driver)}`);
+	if (driver === "claude" && value?.model !== undefined && !(typeof value.model === "string" && isNativeModel(value.model))) {
+		throw new Error(`${settingsFile} driver claude runs an explicit anthropic/claude-… model, not ${JSON.stringify(value.model)}`);
+	}
+	return driver;
 }
 
 export type OperatorCompactControl = {

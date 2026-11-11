@@ -17,11 +17,12 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { resolveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { layoutForHome, type ThinkingLevel } from "../contracts.ts";
 import { operatorPiArgs, operatorSkillPaths } from "../cp-bridge.ts";
-import { operatorModelSetting, operatorThinkingSetting } from "../operator-compact.ts";
+import { nativeOperatorSpawn } from "../drivers/claude.ts";
+import { operatorDriverSetting, operatorModelSetting, operatorThinkingSetting } from "../operator-compact.ts";
 import { tryResolveWorkerPackages, type WorkerPackageResolution } from "../worker-packages.ts";
 import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
 import { PACKAGE_ROOT } from "../home.ts";
@@ -178,10 +179,15 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 	try {
 		return await superviseOperatorPi({
 			// Each spawn re-reads data/operator.json: a launcher started days ago must not relaunch on stale flags.
-			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, configuredOperatorModel(home)), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions], skills), {
-				stdio: "inherit",
-				env: { ...process.env, ...env, ...(address.local ? { CP_VIEWER_HOST: host } : {}), CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" },
-			}),
+			spawnPi: (args, env) => {
+				const childEnv = { ...process.env, ...env, ...(address.local ? { CP_VIEWER_HOST: host } : {}), CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" };
+				if (home && operatorDriverSetting(join(home, layoutForHome("multi", home).data, "operator.json")) === "claude") {
+					const native = nativeOperatorSpawn({ home, model: flagValue(args, "--model") ?? configuredOperatorModel(home).model ?? process.env.CP_OPERATOR_MODEL?.trim(), sessionFile: nativeSession(args) });
+					// Headless: the dashboard is its input, so the terminal's stdin stays with the launcher.
+					return spawn(native.bin, native.args, { stdio: ["ignore", "inherit", "inherit"], env: childEnv });
+				}
+				return spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, configuredOperatorModel(home)), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions], skills), { stdio: "inherit", env: childEnv });
+			},
 			firstArgs: piArgs,
 			...(relaunchFile ? { relaunchFile } : {}),
 			...(options.relaunchLimit ? { limit: options.relaunchLimit } : {}),
@@ -194,6 +200,16 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 		viewer.stop();
 	}
 }
+
+const flagValue = (args: readonly string[], flag: string): string | undefined => {
+	const at = args.findIndex((arg) => arg === flag || arg.startsWith(`${flag}=`));
+	return at === -1 ? undefined : args[at]!.includes("=") ? args[at]!.slice(flag.length + 1) : args[at + 1];
+};
+/** A resumed `--session` the claude operator can take: its own native record, never a pi session file. */
+const nativeSession = (args: readonly string[]): string | undefined => {
+	const file = flagValue(args, "--session");
+	return file && basename(file).startsWith("native-operator-") ? file : undefined;
+};
 
 /** The selected home's `state/operator/relaunch.json`; no home resolves: undefined, pi runs once. */
 function defaultRelaunchFile(): string | undefined {
