@@ -653,7 +653,9 @@ A write pairing `claude` with any other model, or with `minimal`, is refused 400
 `NativeDriverError` rule). The switch applies at the next parent start: the answer carries `restart: "parent"`, and the
 page offers the drain-gated parent restart (`POST /api/parent/restart`). Saving never restarts the parent on its own.
 The bridge, its outboxes and the pi RPC lines are unchanged. The entry runs `extensions/command-post` on a headless host
-(`claude-parent-session.ts`), so startup, shutdown, wake-ups and the `tool_call` guards are the pi parent's own code. It
+(`claude-parent-session.ts`), so startup, shutdown, wake-ups and the `tool_call` guards are the pi parent's own code.
+The entry keeps its argv, prompt and mount. The turn engine (queue, steer, compact, rotate, RPC commands) is
+`startClaudeSession` in `claude-session-engine.ts`, and the host's optional ports are for the Claude CLI operator. It
 serves the 22 `cp_*` tools from an in-process MCP server `cp`, prefixed `mcp__cp__` for the model and unprefixed in
 events. Each turn is one Agent SDK `query()` that resumes the claude session id kept in the session record. The record
 (`sessions/cp-parent.jsonl`) also logs every operator text as it enters the model's input, and that log is what

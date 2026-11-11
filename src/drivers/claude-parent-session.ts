@@ -6,8 +6,9 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { CompactOptions, ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { SessionEntry } from "../worker-process.ts";
+import { isNativeModel } from "./claude.ts";
 
 type RecordLine =
 	| { type: "record"; driver: "claude"; created_at: string }
@@ -120,6 +121,9 @@ type Handler = (event: Record<string, unknown>, ctx: ExtensionContext) => unknow
 export type CustomMessage = { customType: string; content: unknown; display?: boolean; details?: unknown };
 export type SendOptions = { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" };
 
+/** A model as pi's `ctx.model` and `modelRegistry.find` give it to an extension. */
+export type HostModel = { provider: string; id: string };
+
 /** What the host needs from the entry: stdout lines, pi's `sendMessage`, and the live state a ctx reads. */
 export interface HostPorts {
 	write: (record: Record<string, unknown>) => void;
@@ -129,6 +133,17 @@ export interface HostPorts {
 	sessionId: () => string;
 	contextTokens: () => number | null;
 	entries: () => SessionEntry[];
+	/** Optional: each one given adds its pi API or ctx member; an omitted one keeps the parent's value. */
+	sendUserMessage?: (content: unknown, options?: SendOptions) => void;
+	hasPendingMessages?: () => boolean;
+	sessionFile?: () => string | undefined;
+	branch?: () => SessionEntry[];
+	model?: () => HostModel | undefined;
+	getThinking?: () => string;
+	setThinking?: (level: string) => void;
+	setModel?: (model: HostModel) => Promise<boolean>;
+	compact?: (options?: CompactOptions) => void;
+	shutdown?: () => void;
 }
 
 /** The calls extensions/command-post makes on pi, recorded or forwarded; `fire` runs one event's handlers in order. */
@@ -145,7 +160,12 @@ export class HeadlessHost {
 	}
 
 	api(): ExtensionAPI {
+		const { sendUserMessage, getThinking, setThinking, setModel } = this.ports;
 		const api = {
+			...(sendUserMessage ? { sendUserMessage } : {}),
+			...(getThinking ? { getThinkingLevel: getThinking } : {}),
+			...(setThinking ? { setThinkingLevel: setThinking } : {}),
+			...(setModel ? { setModel } : {}),
 			on: (event: string, handler: Handler) => void this.#handlers.set(event, [...(this.#handlers.get(event) ?? []), handler]),
 			registerTool: (tool: ToolDefinition) => void this.tools.push(tool),
 			registerCommand: (name: string, options: unknown) => void this.commands.set(name, options),
@@ -195,12 +215,23 @@ function headlessContext(ports: HostPorts, cwd: string): ExtensionContext {
 		mode: "rpc",
 		hasUI: true,
 		cwd,
-		modelRegistry: undefined,
-		model: undefined,
+		// Only a Claude model resolves, so a Settings switch to another provider is refused as "not in the registry".
+		modelRegistry: ports.setModel ? { find: (provider: string, id: string): HostModel | undefined => (isNativeModel(`${provider}/${id}`) ? { provider, id } : undefined) } : undefined,
+		get model() {
+			return ports.model?.();
+		},
 		isIdle: ports.isIdle,
 		abort: ports.abort,
+		...(ports.hasPendingMessages ? { hasPendingMessages: ports.hasPendingMessages } : {}),
+		...(ports.shutdown ? { shutdown: ports.shutdown } : {}),
+		...(ports.compact ? { compact: ports.compact } : {}),
 		getContextUsage: () => ({ tokens: ports.contextTokens() }),
-		sessionManager: { getSessionId: ports.sessionId, getEntries: ports.entries, getBranch: () => [] },
+		sessionManager: {
+			getSessionId: ports.sessionId,
+			getEntries: ports.entries,
+			getBranch: ports.branch ?? (() => []),
+			...(ports.sessionFile ? { getSessionFile: ports.sessionFile } : {}),
+		},
 	};
 	// SAFETY: the extension reads only these ctx members on a headless parent (grep `ctx\.` in extensions/command-post).
 	return ctx as unknown as ExtensionContext;
