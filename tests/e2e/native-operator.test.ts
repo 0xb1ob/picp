@@ -1,6 +1,9 @@
-/** O2: the Claude CLI operator (data/operator.json driver `claude`) through `runOperator`, its dashboard control and a real viewer. */
+/**
+ * O2: the Claude CLI operator (data/operator.json driver `claude`) through `runOperator`, its dashboard control and a
+ * real viewer.
+ */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -190,4 +193,25 @@ test("NO-6: send_images reaches the Claude CLI operator's model as an image bloc
 	const result = out.split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type: string; is_error?: boolean; result?: string }).find((line) => line.type === "result");
 	assert.equal(result?.is_error, true, out);
 	assert.match(result?.result ?? "", /^API Error: 400 messages: an image must be a base64 source/);
+});
+
+// Scenario: Given a module that calls console.log while each Claude CLI entry loads (before startClaudeSession), When
+// the entry runs, Then the line lands on stderr and never on stdout (the parent's RPC channel, the operator's terminal).
+// Negative control: with claude-stdout-guard.ts loaded empty, the same line reaches stdout.
+test("stdout guard: a console.log before the engine starts never reaches either entry's stdout", { timeout: 60_000 }, () => {
+	const preload = (dropGuard: boolean) => `data:text/javascript,${encodeURIComponent(`import { registerHooks } from "node:module";
+registerHooks({ load(url, context, next) {
+	const out = next(url, context);
+	if (url.endsWith("/src/drivers/claude.ts")) return { ...out, source: 'console.log("GUARD-SENTINEL");\\n' + String(out.source) };
+	if (${dropGuard} && url.endsWith("/src/drivers/claude-stdout-guard.ts")) return { ...out, source: "" };
+	return out;
+} });`)}`;
+	for (const entry of ["claude-parent.ts", "claude-operator.ts"]) {
+		const run = (dropGuard: boolean) => spawnSync(process.execPath, ["--import", preload(dropGuard), join(import.meta.dirname, "../../src/drivers", entry)], { encoding: "utf8", timeout: 30_000 });
+		const guarded = run(false);
+		assert.equal(guarded.status, 2, `${entry} should refuse to start without its arguments: ${guarded.stderr}`);
+		assert.match(guarded.stderr, /GUARD-SENTINEL/, entry);
+		assert.doesNotMatch(guarded.stdout, /GUARD-SENTINEL/, entry);
+		assert.match(run(true).stdout, /GUARD-SENTINEL/, `${entry} negative control`);
+	}
 });
