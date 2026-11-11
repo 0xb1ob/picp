@@ -2144,7 +2144,9 @@ allowlist, the guard and the package's SSRF protection; `fetch_content` covers i
 **MCP (cp-fl8b).** The operator session loads pi's built-in MCP with
 `-e builtin:mcp -e builtin:codemode -e builtin:tool-search`
 (`OPERATOR_BUILTIN_EXTENSIONS`, `src/viewer/operator.ts`; `--no-extensions` turns built-ins off, and
-pi-web-access registers none of `/mcp`, `codemode` or `tool_search`). **Every worker profile**
+pi-web-access registers none of `/mcp`, `codemode` or `tool_search`). A Claude CLI operator (`data/operator.json`
+`driver: "claude"`) passes the same file's servers to the CLI instead, with no codemode (`docs/native-drivers.md`, O4).
+**Every worker profile**
 (`planner`, `qa`, `ops`, `implementer` and ship workers, `gate-reviewer` and the diff and quality
 reviewers that load it; cp-z402) gets **every** enabled server of the operator's `<agent dir>/mcp.json`,
 read in place through the agent dir they inherit; nothing is copied, OAuth tokens stay in

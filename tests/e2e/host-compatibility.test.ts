@@ -319,6 +319,7 @@ async function mcpParent(t: TestContext) {
 	};
 	answer("");
 	return {
+		home,
 		answer,
 		servers: (servers: Record<string, unknown> | string | undefined) => {
 			const file = join(agentDir.path, "mcp.json");
@@ -350,6 +351,13 @@ test("P24 MCP access: /doctor --json in a real parent reports mcp.operator and m
 		assert.deepEqual([operator?.severity, workers?.what], ["ok", "workers: no MCP servers configured"]);
 	}
 	assert.deepEqual(p.calls(), [], "pi mcp list never runs without an enabled server");
+	// O4: with the Operator CLI on the Claude CLI the operator line names that path: the same file, no codemode.
+	const operatorFile = join(p.home, LAYOUT.data, "operator.json");
+	mkdirSync(join(p.home, LAYOUT.data), { recursive: true });
+	writeFileSync(operatorFile, JSON.stringify({ driver: "claude", model: "anthropic/claude-opus-5-5" }));
+	assert.match(String(mcp(await p.doctor())[0]?.detail), /^operator session: driver claude: servers from \S+\/mcp\.json, no codemode$/);
+	rmSync(operatorFile);
+	assert.match(String(mcp(await p.doctor())[0]?.detail), /^operator session: builtin:mcp, codemode, tool-search; servers from /);
 
 	const secret = "sk-live-0123456789abcdefghij";
 	p.servers({ docs: { url: "https://mcp.internal.example/mcp", headers: { Authorization: `Bearer ${secret}` } }, local: { command: "/opt/secret-tool", args: ["--token", secret] } });

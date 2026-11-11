@@ -42,6 +42,7 @@ import { isNativeModel, NATIVE_EFFORTS } from "./drivers/claude.ts";
 import { PACKAGE_ROOT } from "./home.ts";
 import { atomicWriteText, durableAppend } from "./json-store.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
+import { operatorCompactDefault } from "./operator-compact.ts";
 import { deniedFor, isAllowed } from "./routing.ts";
 import { readSettings } from "./settings.ts";
 import { acquireSettingsLock } from "./settings-lock.ts";
@@ -373,6 +374,8 @@ function refuseNative(role: "parent" | "operator", doc: Record<string, unknown>,
 	if (doc.driver !== "claude") return;
 	const model = doc.model !== undefined ? doc.model : env[role === "parent" ? "CP_PARENT_MODEL" : "CP_OPERATOR_MODEL"]?.trim() || undefined;
 	const errors: string[] = [];
+	// No operator model at all would start nothing on Restart session (nativeOperatorSpawn refuses it).
+	if (model === undefined && role === "operator") errors.push("models.operator: the claude operator needs an anthropic/claude-… model; none is set in data/operator.json or CP_OPERATOR_MODEL");
 	if (model !== undefined && !(typeof model === "string" && isNativeModel(model))) errors.push(`models.${role}: the claude ${role} runs only an anthropic/claude-… model, not ${JSON.stringify(model)}`);
 	if (doc.thinking !== undefined && !(typeof doc.thinking === "string" && CLAUDE_EFFORTS.includes(doc.thinking))) errors.push(`models.${role}_thinking: ${JSON.stringify(doc.thinking)} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);
 	if (errors.length) throw new Refusal(400, `the Claude CLI ${role} needs an anthropic/claude-… model and a Claude effort`, errors);
@@ -489,6 +492,8 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 				changes.push({ key: "workers.driver", file_key: NATIVE_SWITCHES.join(", "), action: driver === "claude" ? "set" : "delete", old: view?.value ?? null, old_source: view?.source ?? "none", new: driver, expected: driver });
 			}
 		}
+		// The operator's threshold default follows the driver the written file names (`operatorCompactThreshold`).
+		for (const change of changes) if (change.key === "sessions.operator_compact_at_tokens" && change.action === "delete") change.new = change.expected = operatorCompactDefault(doc.driver);
 		const schema = OWNER_SCHEMA[owner];
 		if (schema !== undefined) {
 			const checked = validate(schema, owner === "routing" ? normalizeLegacyRoles(clone(doc)) : doc);

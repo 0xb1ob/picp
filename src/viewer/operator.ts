@@ -183,7 +183,7 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 			spawnPi: (args, env) => {
 				const childEnv = { ...process.env, ...env, ...(address.local ? { CP_VIEWER_HOST: host } : {}), CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" };
 				if (home && driver() === "claude") {
-					const native = nativeOperatorSpawn({ home, model: flagValue(args, "--model") ?? configuredOperatorModel(home).model ?? process.env.CP_OPERATOR_MODEL?.trim(), sessionFile: nativeSession(args) });
+					const native = nativeOperatorSpawn({ home, model: flagValue(args, "--model") ?? configuredOperatorModel(home).model ?? process.env.CP_OPERATOR_MODEL?.trim(), sessionFile: nativeSession(args), skills });
 					// Headless: the dashboard is its input, so the terminal's stdin stays with the launcher.
 					return spawn(native.bin, native.args, { stdio: ["ignore", "inherit", "inherit"], env: childEnv });
 				}

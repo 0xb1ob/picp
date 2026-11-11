@@ -9,13 +9,14 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
-import { createSdkMcpServer, type HookCallback, type Options, query, type Query, type SDKAssistantMessage, type SDKResultMessage, type SDKUserMessage, type SdkMcpToolDefinition, type SpawnOptions, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, type HookCallback, type McpServerConfig, type Options, query, type Query, type SDKAssistantMessage, type SDKResultMessage, type SDKUserMessage, type SdkMcpToolDefinition, type SpawnOptions, tool } from "@anthropic-ai/claude-agent-sdk";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import type { CompactOptions, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
 import { PACKAGE_ROOT } from "../home.ts";
 import { messageText } from "../parent-outbox.ts";
 import { resolveClaude } from "./claude-cli.ts";
+import { checkSurface, mcpToolPrefix } from "./claude-lockdown.ts";
 import { parentLog, wakeBlock } from "./claude-parent-log.ts";
 import { type ContextUsage, type CustomMessage, type HeadlessHost, type HostModel, type HostPorts, ParentRecord, type SendOptions } from "./claude-parent-session.ts";
 import { buildChildEnv, CHILD_MANAGED_SETTINGS, nativeEffortOptions, operatorClaudeSettings } from "./claude-spike.ts";
@@ -52,6 +53,10 @@ export interface ClaudeSessionConfig {
 	headless?: { write: (record: Record<string, unknown>) => void };
 	/** Variables the CLI child (and so its Bash) gets over `buildChildEnv`'s allow-list. */
 	childEnv?: Record<string, string>;
+	/** Servers beside `cp` (the user's MCP servers); their tools pass through `guard`. */
+	mcpServers?: Record<string, McpServerConfig>;
+	/** The loaded-surface lockdown on each query's init, which every tool call waits on; `optionalTools` may be absent. */
+	lockdown?: { optionalTools: readonly string[] };
 }
 
 /** Engine state an entry may wire into its host as the optional `HostPorts` (the parent reads only `operatorTexts`). */
@@ -101,6 +106,8 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 	/** pi's thinking level, applied to the next query as the native effort (`nativeEffortOptions`). */
 	let thinking = record.thinking();
 	let busy = false;
+	/** pi is idle while its `agent_settled` handlers run (a queued Settings apply lands there); the next turn waits. */
+	let settling = false;
 	let stopping = false;
 	let messageCount = 0;
 	let turnIndex = 0;
@@ -115,11 +122,15 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 	let running: Promise<void> | undefined;
 	/** The turn's live query while it still takes input: a steer joins it, an abort interrupts it. */
 	let live: { push: (message: Message) => boolean; interrupt: () => Promise<void> } | undefined;
+	/** The running query's lockdown verdict: a refusal, or undefined once its surface passed. */
+	let surface: Promise<string | undefined> | undefined;
+	const userServers = (): string[] => Object.keys(config.mcpServers ?? {});
+	const userTool = (name: string): boolean => userServers().some((server) => name.startsWith(mcpToolPrefix(server)));
 
 	const ports: HostPorts = {
 		write,
 		sendMessage: deliver,
-		isIdle: () => !busy,
+		isIdle: () => !busy || settling,
 		abort: () => void abortTurn(),
 		sessionId: () => sessionId ?? sessionFile,
 		contextTokens: () => usage.tokens,
@@ -262,7 +273,8 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 		write({ type: "agent_end", messages: assistants });
 		await host.fire("agent_end", { messages: assistants });
 		write({ type: "agent_settled" });
-		await host.fire("agent_settled");
+		settling = true;
+		await host.fire("agent_settled").finally(() => (settling = false));
 	}
 
 	/** pi's delivery-time `context` review: a handler may withhold a stale wake-up or replace it with a stand-in. */
@@ -315,13 +327,25 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 			},
 		};
 		let result: SDKResultMessage | undefined;
+		let refusal: string | undefined;
+		let checking: Promise<void> | undefined;
+		let release: (why: string | undefined) => void = () => {};
+		surface = config.lockdown && new Promise((done) => (release = done));
 		try {
 			q = query({ prompt: input(), options: sdkOptions(claude.path, abort) });
 			for await (const message of q) {
 				log.relay(message);
-				if (message.type === "system" && message.subtype === "init" && message.session_id !== sessionId) {
-					sessionId = message.session_id;
-					record.setSessionId(message.session_id);
+				if (message.type === "system" && message.subtype === "init") {
+					if (message.session_id !== sessionId) record.setSessionId((sessionId = message.session_id));
+					const optionalTools = config.lockdown?.optionalTools ?? [];
+					const expected = [...config.builtinTools.filter((name) => !optionalTools.includes(name)), ...(served ?? []).map((each) => MCP_PREFIX + each.name)];
+					if (config.lockdown) checking ??= checkSurface(q, message, expected, { server: "cp", optionalTools, optionalServers: userServers() }).then((verdict) => {
+						refusal = verdict.refusal;
+						release(refusal);
+						if (refusal === undefined) return;
+						process.stderr.write(`${tag} ${refusal}\n`);
+						abort.abort();
+					});
 				} else if (message.type === "assistant" && message.parent_tool_use_id === null) {
 					emit(piAssistant(message));
 				} else if (message.type === "user" && "isReplay" in message && message.isReplay) {
@@ -342,13 +366,16 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 			if (!interrupted && !abort.signal.aborted) throw error;
 		} finally {
 			settle();
+			release("Refused: the turn ended before the Claude CLI lockdown check.");
 			live = undefined;
 			toolCallIds.clear();
 			if (current === abort) current = undefined;
 		}
 		// Steers the CLI never took never landed: they go first in line for the next run.
 		queue.unshift(...steers.values());
-		if (abort.signal.aborted || interrupted) emit({ ...errorAssistant("aborted"), stopReason: "aborted" });
+		await checking;
+		if (refusal !== undefined) emit(errorAssistant(refusal));
+		else if (abort.signal.aborted || interrupted) emit({ ...errorAssistant("aborted"), stopReason: "aborted" });
 		else if (!result) emit(errorAssistant("the claude query ended without a result"));
 		else if (result.is_error || result.subtype !== "success") emit(errorAssistant(resultError(result)));
 	}
@@ -405,12 +432,12 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 	const preToolUse: HookCallback = async (input) => {
 		if (input.hook_event_name !== "PreToolUse") return {};
 		const name = input.tool_name.replace(MCP_PREFIX, "");
-		let reason: string | undefined;
-		if (config.builtinTools.includes(input.tool_name)) {
+		let reason: string | undefined = await surface;
+		if (reason === undefined && (config.builtinTools.includes(input.tool_name) || userTool(input.tool_name))) {
 			reason = config.guard?.(input.tool_name, input.tool_input);
-		} else if (!input.tool_name.startsWith(MCP_PREFIX) || !host.tools.some((each) => each.name === name)) {
+		} else if (reason === undefined && (!input.tool_name.startsWith(MCP_PREFIX) || !host.tools.some((each) => each.name === name))) {
 			reason = config.refusal(input.tool_name);
-		} else {
+		} else if (reason === undefined) {
 			const results = await host.fire("tool_call", { toolCallId: input.tool_use_id, toolName: name, input: input.tool_input });
 			const blocked = results.find((each) => (each as { block?: unknown } | undefined)?.block === true) as { reason?: string } | undefined;
 			if (blocked) reason = blocked.reason ?? `${name} was refused by the ${label}'s guard`;
@@ -518,7 +545,7 @@ export async function startClaudeSession(config: ClaudeSessionConfig): Promise<v
 			...(existsSync(settings) ? { settings } : {}),
 			managedSettings: CHILD_MANAGED_SETTINGS,
 			strictMcpConfig: true,
-			mcpServers: { cp: createSdkMcpServer({ name: "cp", version: "0.0.0", tools: served }) },
+			mcpServers: { ...config.mcpServers, cp: createSdkMcpServer({ name: "cp", version: "0.0.0", tools: served }) },
 			tools: config.builtinTools,
 			disallowedTools: config.disallowedTools,
 			agents: {},

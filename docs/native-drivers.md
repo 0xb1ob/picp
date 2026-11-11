@@ -684,7 +684,7 @@ An absent file or `driver: "pi"` keeps today's argv. A `--session` resumes only 
 The entry mounts `extensions/cp-bridge` on the same headless host and turn engine as the native parent, so the
 dashboard control, relay outbox, ask and header guards, `cp_parent` (with `model_pick`) and image sends are the pi
 operator's own code. The bridge's tools reach the model as `mcp__cp__*`; its built-ins are Bash, Read, Write, Edit, Grep
-and Glob, and Agent, Task, WebFetch and WebSearch are disallowed. Each built-in passes `operatorToolRefusal` (the pi
+and Glob (plus web and the user's MCP servers since O4, below), and Agent and Task are disallowed. Each built-in passes `operatorToolRefusal` (the pi
 operator's write scope, CI-wait and sleep-loop refusals), then a secret-path refusal for the Claude settings file, the
 record's `native-operator-claude/` config dir, `/proc` and `/dev/fd`. Bash checks literal paths and lexed words (best
 effort past `$`). The engine registers a Stop hook that runs `agent_before_settle`, so a prose question with no
@@ -703,9 +703,10 @@ it, carries each reply's usage and model. The viewer's operator transcript and c
 Dashboard Settings → *Parent and operator models* → **Operator CLI** (`models.operator_driver`, options "pi" / "Claude
 CLI") writes `data/operator.json` `driver` through the audited settings path, mirroring Parent CLI: with the Claude CLI
 picked the operator model and thinking pickers narrow to Anthropic Claude models and the Claude efforts, and a write
-pairing `claude` with any other model (the file's, else `CP_OPERATOR_MODEL`) or with `minimal` is refused 400 before
-anything is written. A saved change answers `restart: "operator"`; the page then offers Restart session and never
-restarts on its own. Restore deletes the key (pi).
+pairing `claude` with any other model (the file's, else `CP_OPERATOR_MODEL`), with no model at all, or with `minimal`
+is refused 400 before anything is written, so Restart session never starts an operator that cannot launch; the snapshot
+reads such a file as refused. A saved change answers `restart: "operator"`; the page then offers Restart session and
+never restarts on its own. Restore deletes the key (pi).
 
 The launcher reads `driver` on every spawn. A restart marker records the `driver` of the session it names
 (`native-operator-*` records are `claude`, anything else `pi`; a marker without the field is `pi`). When it differs from
@@ -720,5 +721,41 @@ to the next turn's `--model` and effort; each lands in `state/model-apply.jsonl`
 150000 (`NATIVE_OPERATOR_COMPACT_DEFAULT_TOKENS`); pi stays at 200000. Source: a `claude` 2.1.322 run against the mock
 provider reported `getContextUsage()` `maxTokens` 1000000 and `autoCompactThreshold` 967000 for `claude-opus-5-5` (the
 pi-ai catalog's context window is 1000000 too), and the Agent SDK documents a 200K compaction-policy boundary on 1M-window
-models. 150000 sits under both, so the operator's own handoff compaction runs before the CLI's. Tests:
-`tests/e2e/native-operator.test.ts` NO-7…NO-9 and `tests/e2e/settings-drivers.test.ts` NO-10.
+models. 150000 sits under both, so the operator's own handoff compaction runs before the CLI's. Restoring the key under
+the Claude CLI plans and reads back 150000. Tests: `tests/e2e/native-operator.test.ts` NO-7…NO-9 and
+`tests/e2e/settings-drivers.test.ts` NO-10 and the two Operator CLI cases after it.
+
+The engine reports idle while `agent_settled` handlers run, as pi does, so a Settings change that arrived mid-turn
+applies at that settle (before O4 it was queued and never applied: every settle still read busy).
+
+## Claude CLI operator tool parity (O4)
+
+- **MCP servers.** The entry reads `<agent dir>/mcp.json` (`readUserMcpServers`, the file pi's builtin:mcp reads) and
+  passes each enabled stdio or HTTP server as an SDK `mcpServers` entry beside `cp` (`claudeMcpServers`,
+  `src/worker-mcp.ts`). Values in `env` and `headers` resolve `$NAME` / `${NAME}` from the launcher's env as pi does,
+  because the CLI child gets only the allow-listed env. pi-only keys (`exposure`, `toolExposure`, `enabled`,
+  `description`, `timeout`, `oauth`) are dropped. Skipped, one stderr line each: `enabled: false`, server-wide `hidden`,
+  a server named `cp`, `cwd` or `auth` (no Claude CLI equivalent), a `!command` value, an unset variable. A tool that
+  pi's `toolExposure` hides stays listed but its call is refused. With a server loaded, ToolSearch,
+  ListMcpResourcesTool and ReadMcpResourceTool join the built-ins (pi's tool search and resource tools). Codemode has
+  no equivalent. The system prompt lists the servers with their `description`.
+- **Web (D4).** WebSearch and WebFetch are built-ins with no guard, as pi-web-access has none on the operator. Not
+  covered: `get_search_content` (stored full results), `source_check`, `fetch_content`'s modes and video/repo
+  handling, and the provider choice in `web-search.json`.
+- **Skills.** The launcher passes `operatorSkillPaths` as `--skill`. The entry formats them with pi's own `loadSkills`
+  / `formatSkillsForPrompt` (name, description, `SKILL.md` path) into the system prompt, and the model Reads one on
+  demand, as pi's progressive disclosure does.
+- **Lockdown.** Every query's `system/init` goes through `lockdownVerdict` (`checkSurface`, shared with the workers),
+  with `cp` as picp's server, the user's servers and their `mcp__<server>__*` tools allowed, and the web, ToolSearch
+  and resource tools allowed to be absent. Every PreToolUse waits on the verdict. A refusal (counts only) denies every
+  call, aborts the query and ends the turn on that text.
+- **Doctor.** `mcp.operator` says `operator session: driver claude: servers from <path>, no codemode` when
+  `data/operator.json` runs the Claude CLI.
+- **MCP OAuth.** pi keeps MCP OAuth tokens in `<agent dir>/mcp-auth.json`. The Claude CLI keeps its own under
+  `CLAUDE_CONFIG_DIR`: here `sessions/operator/native-operator-claude/config`, which the operator's guards refuse to
+  touch. An HTTP server that signs in with OAuth (no `Authorization` header) has to be signed in again there. A headless
+  session has no `/mcp` login, so until that is done the server shows as needing auth and its tools are absent.
+
+Tests: `tests/e2e/native-operator.test.ts` NO-11 (stdio server offered as `mcp__probe__*`, `enabled: false` never
+started, a hidden tool refused) and NO-12 (an extra init plugin refused, with a negative control). fake-claude runs
+`--mcp-config` stdio servers and answers the hook listing.
