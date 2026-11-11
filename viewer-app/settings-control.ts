@@ -45,6 +45,8 @@ export interface SettingsView {
  control: ControlStatus | null;
  /** True once a saved Parent CLI change waits for a parent restart. */
  restart: boolean;
+ /** True once a saved Operator CLI change waits for Restart session. */
+ operatorRestart: boolean;
  save(changes: Drafts): Promise<boolean>;
  restore(selector: RestoreSelector): Promise<boolean>;
  /** `/api/settings/models`, read apart from the page: null until its first answer. */

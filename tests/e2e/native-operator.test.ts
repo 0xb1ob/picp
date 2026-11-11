@@ -1,10 +1,10 @@
 /**
- * O2: the Claude CLI operator (data/operator.json driver `claude`) through `runOperator`, its dashboard control and a
- * real viewer.
+ * O2/O3: the Claude CLI operator (data/operator.json driver `claude`) through `runOperator`, its dashboard control and
+ * a real viewer: input, guards, restart across drivers, compaction and Settings apply.
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -13,13 +13,15 @@ import { layoutForHome } from "../../src/contracts.ts";
 import type { BridgeRelay } from "../../src/cp-bridge.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
+import { modelApplyFile } from "../../src/session-model-apply.ts";
+import { OPERATOR_BUILTIN_EXTENSIONS, runOperator } from "../../src/viewer/operator.ts";
 import { readOperatorSessions } from "../../src/viewer/operator-sessions.ts";
 import { newUploadId, writeUpload } from "../../src/viewer/uploads.ts";
-import { type ClaudeStep, FAKE_CLAUDE_CLI, toolResults } from "../harness/claude-mock-provider.ts";
+import { type ClaudeStep, FAKE_CLAUDE_CLI, FAKE_NATIVE_MODEL, toolResults } from "../harness/claude-mock-provider.ts";
 import { syntheticPng } from "../harness/images.ts";
-import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
+import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
 import { type NativeOperator, nativeOperator } from "../harness/native-operator.ts";
-import { userTexts } from "../harness/native-parent.ts";
+import { userTexts, withEnv } from "../harness/native-parent.ts";
 
 const DC_MARKER = /\[cp-dashboard dc-\d{14}-[0-9a-f]{8} — from the dashboard(; images=[^\]]+)?\]$/;
 const HOOKS_OFF = { FAKE_CLAUDE_HOOKS: "off" };
@@ -193,6 +195,128 @@ test("NO-6: send_images reaches the Claude CLI operator's model as an image bloc
 	const result = out.split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type: string; is_error?: boolean; result?: string }).find((line) => line.type === "result");
 	assert.equal(result?.is_error, true, out);
 	assert.match(result?.result ?? "", /^API Error: 400 messages: an image must be a base64 source/);
+});
+
+/** The claude session ids a native operator record names, in order. */
+const sessionIds = (file: string): string[] => readFileSync(file, "utf8").split("\n").filter(Boolean)
+	.map((line) => JSON.parse(line) as { type?: string; session_id?: string }).filter((line) => line.type === "session").map((line) => line.session_id!);
+const records = (state: string): string[] => readOperatorSessions(join(state, "sessions")).map((row) => row.file);
+/** Restart session (clean when `fresh`) once the operator is idle: only a "not now" refusal is retried. */
+async function restart(op: NativeOperator, fresh: boolean): Promise<void> {
+	for (const deadline = Date.now() + 30_000; ; await new Promise((done) => setTimeout(done, 200))) {
+		const reply = await op.send("restart", fresh ? { fresh: true } : {});
+		if (reply.ok) return op.reconnect();
+		if (!/not now/.test(JSON.stringify(reply)) || Date.now() > deadline) assert.fail(`restart refused: ${JSON.stringify(reply)}`);
+	}
+}
+
+// Scenario: Given a Claude CLI operator after one exchange, When the dashboard asks Restart session, Then the relaunch
+// resumes the same record and claude session (the next call carries the first message); Restart clean then starts a
+// new record on a new claude session whose first call carries neither earlier message.
+test("NO-7: Restart session resumes the same claude session; Restart clean starts a new record", { timeout: 240_000 }, async (t) => {
+	const op = await nativeOperator(t, [{ kind: "text", text: "NO7 one" }, { kind: "text", text: "NO7 two" }, { kind: "text", text: "NO7 three" }]);
+	const reply = (text: string) => op.view("/api/sessions?view=you&transcript=1", (view) => JSON.stringify(view.entries).includes(text), text);
+	assert.equal((await op.send("send", { kind: "message", text: "NO7-ONE" })).ok, true);
+	await reply("NO7 one");
+	const [first] = records(op.state);
+	await restart(op, false);
+	assert.equal((await op.send("send", { kind: "message", text: "NO7-TWO" })).ok, true);
+	assert.ok(userTexts(await op.seen("NO7-TWO")).some((text) => text.includes("NO7-ONE")), "the resumed call carries the first message");
+	await reply("NO7 two");
+	assert.deepEqual(records(op.state), [first], "Restart session keeps the record");
+	assert.equal(sessionIds(first!).length, 1, "one claude session across the restart");
+
+	await restart(op, true);
+	assert.equal((await op.send("send", { kind: "message", text: "NO7-THREE" })).ok, true);
+	assert.ok(!userTexts(await op.seen("NO7-THREE")).some((text) => /NO7-(ONE|TWO)/.test(text)), "a clean session carries no history");
+	await reply("NO7 three");
+	const [latest, earlier] = records(op.state);
+	assert.equal(earlier, first);
+	assert.match(latest!, /native-operator-\d+\.jsonl$/);
+	assert.notEqual(latest, first);
+	assert.notEqual(sessionIds(latest!)[0], sessionIds(first!)[0], "a new claude session");
+});
+
+// Scenario: Given a restart marker the Claude CLI operator wrote for its native record, When the launcher relaunches
+// with data/operator.json back on pi, Then pi starts clean on the configured model with no --session.
+// Negative control: the same marker with no `driver` (a pre-O3 marker) resumes that file as before.
+test("NO-7: a marker the Claude CLI operator wrote relaunches pi with no --session once the driver is pi", async (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-no7-driver-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const home = join(dir, "home");
+	const data = join(home, layoutForHome("multi", home).data);
+	mkdirSync(data, { recursive: true });
+	writeFileSync(join(data, "operator.json"), JSON.stringify({ driver: "pi" }));
+	const session = join(dir, "native-operator-1.jsonl");
+	writeFileSync(session, "");
+	withEnv(t, { PI_CODING_AGENT_DIR: dir, CP_OPERATOR_VIEWER: "service", CP_OPERATOR_WEB: "0", CP_OPERATOR_MODEL: "test-model",
+		FAKE_RELAUNCH_MODE: "once", FAKE_RELAUNCH_SESSION: session, FAKE_RELAUNCH_LOG: "", FAKE_RELAUNCH_DRIVER: "" });
+	const builtins = OPERATOR_BUILTIN_EXTENSIONS.flatMap((entry) => ["-e", entry]);
+	const lines: string[] = [];
+	const stderr = process.stderr.write;
+	process.stderr.write = ((chunk: string | Uint8Array) => { lines.push(String(chunk)); return true; }) as typeof stderr;
+	t.after(() => { process.stderr.write = stderr; });
+	for (const [driver, relaunched] of [["claude", ["--model", "test-model"]], ["", ["--session", session]]] as const) {
+		const log = join(dir, `argv-${driver || "none"}.log`);
+		Object.assign(process.env, { FAKE_RELAUNCH_LOG: log, FAKE_RELAUNCH_DRIVER: driver });
+		await runOperator([], { piBin: join(REPO_ROOT, "tests/fixtures/fake-relaunch-pi.mjs"), viewer: { home, host: "127.0.0.1", port: 1 }, relaunchFile: join(dir, "relaunch.json") });
+		const runs = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+		assert.deepEqual(runs, [[...builtins, "--model", "test-model"], [...builtins, ...relaunched]], driver || "no driver");
+	}
+	assert.ok(lines.includes("cp-operator: driver changed (claude → pi); starting a clean session\n"), lines.join(""));
+});
+
+const NO8_NOTE = `NO8-HANDOFF ${"keep the in-flight jobs, open decisions, held PRs and next steps. ".repeat(4)}handoff: state/operator/no8.md`;
+
+// Scenario: Given a Claude CLI operator whose compact_at_tokens the first turn crosses, When the threshold request
+// makes its model call self_compact, Then the run's settle runs the CLI's /compact with instructions carrying the
+// newest state/operator/compact-*.md text.
+test("NO-8: self_compact over the threshold runs /compact with the newest handoff file's text", { timeout: 180_000 }, async (t) => {
+	const op = await nativeOperator(t, [
+		{ kind: "text", text: "NO8 warm" },
+		{ kind: "tool_use", calls: [{ name: "mcp__cp__self_compact", input: { instructions: NO8_NOTE } }] },
+		{ kind: "text", text: "NO8 queued" },
+		{ kind: "text", text: "NO8 SUMMARY" },
+	], { seed: (home) => writeFileSync(join(home, layoutForHome("multi", home).data, "operator.json"), JSON.stringify({ driver: "claude", model: FAKE_NATIVE_MODEL, compact_at_tokens: 15 })) });
+	assert.equal((await op.send("send", { kind: "message", text: "NO8-GO" })).ok, true);
+	const summary = await waitFor(() => op.calls().find((call) => userTexts(call).at(-1)?.startsWith("Your task is to create a detailed summary")), Boolean, { timeoutMs: 90_000, what: "the /compact summary call" });
+	const directory = join(op.state, "operator");
+	const newest = readdirSync(directory).filter((name) => /^compact-.*\.md$/.test(name)).sort().at(-1);
+	assert.ok(newest, "self_compact wrote a handoff");
+	const handoff = readFileSync(join(directory, newest), "utf8");
+	assert.match(handoff, /^NO8-HANDOFF /);
+	assert.ok(userTexts(summary).at(-1)!.includes(handoff.trim()), "the /compact instructions carry the handoff text");
+	assert.ok(op.calls().some((call) => userTexts(call).some((text) => text.includes("over the 15 threshold"))), "the threshold asked first");
+});
+
+const NEXT_MODEL = "anthropic/claude-picp-next";
+
+// Scenario: Given a Claude CLI operator, When Settings saves a new operator model through the session's settings op
+// (the frame the viewer forwards), Then the next turn's model call names it; a non-Claude model under the Claude CLI
+// is refused 400 and data/operator.json is left as it was.
+test("NO-9: a Settings model change applies on the next turn; a non-Claude model is refused and nothing is written", { timeout: 180_000 }, async (t) => {
+	const op = await nativeOperator(t, [{ kind: "text", text: "NO9 before" }, { kind: "text", text: "NO9 after" }]);
+	assert.equal((await op.send("send", { kind: "message", text: "NO9-BEFORE" })).ok, true);
+	assert.equal((await op.seen("NO9-BEFORE")).body.model, "claude-picp-fake");
+	await op.view("/api/sessions?view=you&transcript=1", (view) => JSON.stringify(view.entries).includes("NO9 before"), "the first reply");
+	let n = 0;
+	const apply = async (changes: Record<string, unknown>): Promise<Record<string, any>> => {
+		const read = await op.send("settings_get", {}) as Record<string, any>;
+		const frame = { mode: "set", changes, expected_revision: read.result.snapshot.revision, dry_run: false, request_id: `no9-apply-${++n}`, peer: null };
+		return (await op.send("settings_apply", frame) as Record<string, any>).result;
+	};
+	const file = join(op.home, layoutForHome("multi", op.home).data, "operator.json");
+	const before = readFileSync(file, "utf8");
+	const refused = await apply({ "models.operator": "openai/gpt-5" });
+	assert.deepEqual([refused.status, refused.errors], [400, ['models.operator: the claude operator runs only an anthropic/claude-… model, not "openai/gpt-5"']]);
+	assert.equal(readFileSync(file, "utf8"), before, "nothing written");
+
+	const applied = await apply({ "models.operator": NEXT_MODEL });
+	assert.equal(applied.status, 200, JSON.stringify(applied));
+	const rows = () => existsSync(modelApplyFile(op.home)) ? readFileSync(modelApplyFile(op.home), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { session: string; state: string }) : [];
+	await waitFor(rows, (seen) => seen.some((row) => row.session === "operator" && row.state === "applied"), { timeoutMs: 30_000, what: "the operator's model apply" });
+	assert.equal((await op.send("send", { kind: "message", text: "NO9-AFTER" })).ok, true);
+	assert.equal((await op.seen("NO9-AFTER")).body.model, "claude-picp-next");
 });
 
 // Scenario: Given a module that calls console.log while each Claude CLI entry loads (before startClaudeSession), When

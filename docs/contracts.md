@@ -1438,7 +1438,7 @@ or ending and reporting decisions already made. This is prompt guidance,
 not a runtime abort or a change to the compaction threshold; workers do not
 receive it through `AGENTS.md`.
 
-**Operator compaction.** `self_compact` queues the operator's handoff instructions until `agent_settled`, after all model/tool rounds and automatic continuations finish. Threshold requests use the same settled boundary; the threshold is `data/operator.json` `compact_at_tokens`, default 200000 when absent or invalid. A second request is refused while compaction is pending or running; `turn_end` must not start compaction because it would abort the remaining run. A provider `400` naming `tool_addition` (N5) compacts once per failure streak at `agent_settled`, ahead of the threshold request; a non-error assistant reply ends the streak; a failed streak compaction is not retried in the streak; at most 3 per process, then a notice only; after a streak compaction completes, one follow-up names the bridge relays the failed turns never answered. Pi's `Nothing to compact` and `Already compacted` refusals (thrown or via `onError`) are skips, not failures: one notice with pi's reason, waiters released, no failure count, no `last self-compact` stamp, no nudge and no immediate retry; a later settle over the threshold stays eligible, and a skipped streak compaction still spends the streak's one attempt.
+**Operator compaction.** `self_compact` queues the operator's handoff instructions until `agent_settled`, after all model/tool rounds and automatic continuations finish. Threshold requests use the same settled boundary; the threshold is `data/operator.json` `compact_at_tokens`, default 200000 when absent or invalid (150000 when its `driver` is `claude`: under the Claude CLI's own auto-compact point, U3 in `docs/native-drivers.md`). A second request is refused while compaction is pending or running; `turn_end` must not start compaction because it would abort the remaining run. A provider `400` naming `tool_addition` (N5) compacts once per failure streak at `agent_settled`, ahead of the threshold request; a non-error assistant reply ends the streak; a failed streak compaction is not retried in the streak; at most 3 per process, then a notice only; after a streak compaction completes, one follow-up names the bridge relays the failed turns never answered. Pi's `Nothing to compact` and `Already compacted` refusals (thrown or via `onError`) are skips, not failures: one notice with pi's reason, waiters released, no failure count, no `last self-compact` stamp, no nudge and no immediate retry; a later settle over the threshold stays eligible, and a skipped streak compaction still spends the streak's one attempt.
 
 **Durable sends** (`src/parent-outbox.ts`, driven by `src/parent-delivery.ts`). Every send is written to
 `parentSendFile(<session file>)` — `state/sessions/cp-parent.sends.json`,
@@ -9720,7 +9720,7 @@ reports `config.budget.<profile>`.
 ## Settings catalog
 
 `src/contracts/settings.ts` is the single list of the home's per-machine settings:
-`SETTING_KEYS` and `SETTING_FIELDS` (38 fields, frozen). Each field names its section,
+`SETTING_KEYS` and `SETTING_FIELDS` (39 fields, frozen). Each field names its section,
 its owner file (or env var), its type and range, its code default, when it applies,
 what the consumer does with an invalid value (`on_invalid`), whether a later writer may
 edit it, and a label and help line. `validateSettingValue(key, value)` checks one value
@@ -9762,10 +9762,13 @@ reports only what this process sees. An unset `model` keeps today's behaviour ex
 `max`; absent or null means unset). They have no env pin: the source is `file` for a valid key, else `code` with value
 null; an invalid key is `fallback` ("invalid thinking level; ignored"). Null in a write deletes the key.
 
-**CLI keys (cp-settings-cli-model-effort).** Both have type `driver` (`pi` or `claude`, default `pi`; null is not a value).
+**CLI keys (cp-settings-cli-model-effort).** All three have type `driver` (`pi` or `claude`, default `pi`; null is not a value).
 `models.parent_driver` is `data/parent.json` `driver`, read as `parentDriverSetting` reads it: absent, null or an
 unparsable file is `pi` from `code`. An unknown value, or `claude` beside a `model` that is not an Anthropic Claude
 model (provider `anthropic`, id `claude-…`), is `refused` with the reason. It applies at the next parent start.
+`models.operator_driver` ("Operator CLI") is `data/operator.json` `driver`, read the same way as
+`operatorDriverSetting` reads it; it applies at the next operator start (Restart session, which starts a clean session
+when the CLI changed).
 `workers.driver` has no key of its own: it is the one `driver` every `data/routing.json` rubric row names (absent is
 `pi`). Its source is `file` when any row names one. When rows disagree the value is null, with a diagnostic naming
 both sides. A `claude` value also names any `data/native.json` switch its rows' roles need that is off. An invalid
@@ -9837,7 +9840,7 @@ and all restores skip non-editable fields. A restore never creates an absent own
 `models.parent`, `models.operator`, `models.parent_thinking` and `models.operator_thinking` delete the key. `models.rubric` (`shipped_rubric`) puts
 back the shipped `defaults/routing.default.json` model, fallbacks and thinking on every row
 whose `id` the template has; a hand-added row and every other row field stay. An unreadable
-template is 409 and restores nothing. `models.parent_driver` deletes the key (pi). `workers.driver` restores `pi`, as
+template is 409 and restores nothing. `models.parent_driver` and `models.operator_driver` delete the key (pi). `workers.driver` restores `pi`, as
 below.
 
 **Rubric writes.** A `models.rubric` set sends the snapshot's rows with only `model`,
@@ -9854,8 +9857,11 @@ then refused 400, with one error per row, when a `claude` row's `model` is not a
 matches its role's `deny_by_role`. Fallbacks are never checked or dropped. `claude` with no rubric rows is 409. A `set`
 naming both `workers.driver` and `workers.native_claude_research` is 400. A parent write touching `models.parent_driver`,
 `models.parent` or `models.parent_thinking` is refused 400 when the result pairs `driver: "claude"` with a model
-(the file's, else `CP_PARENT_MODEL`) that is not an Anthropic Claude model, or with `minimal`. A planned or applied
-`models.parent_driver` change answers `restart: "parent"`: the running parent keeps its CLI until it restarts.
+(the file's, else `CP_PARENT_MODEL`) that is not an Anthropic Claude model, or with `minimal`. An operator write touching
+`models.operator_driver`, `models.operator` or `models.operator_thinking` is refused the same way (the model falls back
+to `CP_OPERATOR_MODEL`). A planned or applied `models.parent_driver` change answers `restart: "parent"`, a
+`models.operator_driver` change `restart: "operator"` (both: `parent`): the running session keeps its CLI until it
+restarts (the operator through Restart session); nothing restarts on its own.
 
 **Absent-file bases.** A `set` on an absent owner builds on what that owner means when absent:
 the scaffold for `mandate-defaults.json`, `DEFAULT_BUDGET_CONFIG` for `budgets.json`,

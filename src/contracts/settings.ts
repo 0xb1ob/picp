@@ -97,6 +97,7 @@ export const SETTING_KEYS = [
 	"models.parent_thinking",
 	"models.operator_thinking",
 	"models.parent_driver",
+	"models.operator_driver",
 	"review.timeout_ms",
 	"review.quality_verify",
 	"review.quality_completeness",
@@ -157,7 +158,7 @@ function deepFreeze<T>(value: T): T {
 
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
 
-/** The 38 fields, in `SETTING_KEYS` order. */
+/** The 39 fields, in `SETTING_KEYS` order. */
 export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("grants", "mandate-defaults", { applies: "next_grant", on_invalid: "refuse" }, {
 		expiry_hours: { file_key: "expiry_hours", type: "number", minimum: 0.1, maximum: 720, default: 8, label: "Grant expiry (hours)", help: "How long a new grant stands before it must be re-issued." },
@@ -186,7 +187,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		parent_compact_at_tokens: { file_key: "compact_at_tokens", type: "integer", minimum: 1, maximum: SAFE_MAX, default: 150000, label: "Parent compaction threshold (tokens)", help: "Context size at which the parent compacts; an invalid file disables it." },
 	}),
 	...group("sessions", "operator", { applies: "next_compaction_check", on_invalid: "default" }, {
-		operator_compact_at_tokens: { file_key: "compact_at_tokens", type: "integer", minimum: 1, maximum: SAFE_MAX, default: 200000, label: "Operator compaction threshold (tokens)", help: "Context size at which the operator session compacts; an invalid value keeps the default." },
+		operator_compact_at_tokens: { file_key: "compact_at_tokens", type: "integer", minimum: 1, maximum: SAFE_MAX, default: 200000, label: "Operator compaction threshold (tokens)", help: "Context size at which the operator session compacts; an invalid value keeps the default, 150000 when the Operator CLI is the Claude CLI." },
 	}),
 	...group("models", "routing", { applies: "next_dispatch", on_invalid: "refuse" }, {
 		allow: { file_key: "allow", type: "string_list", max_items: 64, default: ["*/*"], editable: false, label: "Allowed models", help: "Model patterns routing may pick; absent routing.json allows every model." },
@@ -206,6 +207,9 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	}),
 	...group("models", "parent", { applies: "next_parent_start", on_invalid: "refuse" }, {
 		parent_driver: { file_key: "driver", type: "driver", enum: [...ROUTING_DRIVERS], default: "pi", label: "Parent CLI", help: "pi, or the Claude CLI (claude), for the CP parent. Applies at the next parent start: restart the parent to switch. The Claude CLI runs only an Anthropic Claude model (provider anthropic, id claude-…) and the Claude effort levels; a write pairing claude with any other model is refused." },
+	}),
+	...group("models", "operator", { applies: "next_operator_launch", on_invalid: "refuse" }, {
+		operator_driver: { file_key: "driver", type: "driver", enum: [...ROUTING_DRIVERS], default: "pi", label: "Operator CLI", help: "pi, or the Claude CLI (claude), for the operator session. Applies at the next operator start: use Restart session. The Claude CLI runs only an Anthropic Claude model and the Claude effort levels." },
 	}),
 	...group("review", "gate", { applies: "next_review_attempt", on_invalid: "refuse" }, {
 		timeout_ms: { file_key: "review_timeout_ms", type: "integer", minimum: GATE_REVIEW_TIMEOUT_MIN_MS, maximum: GATE_REVIEW_TIMEOUT_MAX_MS, default: 300_000, label: "Review timeout (ms)", help: "How long one review attempt may take before it counts as operational." },

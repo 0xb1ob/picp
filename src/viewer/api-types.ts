@@ -144,8 +144,8 @@ export interface SettingsWriteResponse {
 	changes?: Array<{ key: SettingKey; file_key: string; action: "set" | "delete"; old: SettingValue; old_source: string; new: SettingValue }>;
 	audit_warning?: string;
 	audit?: string;
-	/** A Parent CLI change: it applies only when the parent restarts. */
-	restart?: "parent";
+	/** A Parent CLI or Operator CLI change: it applies only when that session restarts. */
+	restart?: "parent" | "operator";
 }
 /** `POST /api/operator/message` accepted: 202 (`held` while the operator session is offline). */
 export interface ControlSendResponse {
