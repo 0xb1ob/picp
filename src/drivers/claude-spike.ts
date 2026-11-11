@@ -12,7 +12,6 @@ import {
 	type HookCallback,
 	type HookJSONOutput,
 	type Options,
-	type Query,
 	query,
 	type SDKMessage,
 	type SDKResultMessage,
@@ -64,7 +63,7 @@ import { forgeTools } from "./claude-forge-tools.ts";
 import { FORGE_TOOL_NAMES, nativeRole, RESEARCH_TOOLS, reviewerReadGuard, roleMcpTools, roleTools, writeScopeGuard } from "./claude-roles.ts";
 import { VERDICT_TOOL, type VerdictState, verdictServer } from "./claude-verdict.ts";
 import { shipBashRefusal } from "./claude-ship-policy.ts";
-import { type HooksListing, type Lockdown, lockdownVerdict } from "./claude-lockdown.ts";
+import { checkSurface, type Lockdown } from "./claude-lockdown.ts";
 import { assertNativeEffort } from "./claude.ts";
 
 export { CLAUDE_VERSION_FLOOR, ClaudeSpikeError, claudeVersionRefusal, parseClaudeVersion, resolveClaude } from "./claude-cli.ts";
@@ -408,19 +407,6 @@ export async function runClaudeSpike(options: SpikeRunOptions): Promise<SpikeRes
 		return await runInScratch(options, claude, hostEnv, scratch);
 	} finally {
 		if (options.scratchDir === undefined) rmSync(scratch, { recursive: true, force: true });
-	}
-}
-
-/** Runs the lockdown on one init with the CLI's commands, agents and hook listing, read over the control channel. */
-async function checkSurface(q: Query, init: Parameters<typeof lockdownVerdict>[0], expectedTools: readonly string[]): Promise<Lockdown> {
-	const started = Date.now();
-	try {
-		// SAFETY: getHooksListing exists only on newer SDKs; it is optional here and its absence is handled below.
-		const listing = (q as unknown as { getHooksListing?: () => Promise<HooksListing> }).getHooksListing;
-		const [initialized, hooks] = await Promise.all([q.initializationResult(), listing === undefined ? undefined : listing.call(q)]);
-		return { ...lockdownVerdict(init, expectedTools, initialized.commands, initialized.agents ?? [], hooks), checkMs: Date.now() - started };
-	} catch (err) {
-		return { verdict: "refused", refusal: `Refused: the Claude CLI lockdown check failed (${(err as Error).message}).`, checkMs: Date.now() - started };
 	}
 }
 

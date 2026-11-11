@@ -217,21 +217,22 @@ export function nativeParentSpawnOptions(options: { home: string; sessionFile: s
 /** What the Claude CLI operator is told after the operator note: its tools, Restart session, and the fleet marker. */
 export const NATIVE_OPERATOR_ADDENDUM = [
 	"Claude CLI operator: your tools are cp_parent and self_compact (served as mcp__cp__cp_parent, mcp__cp__self_compact)",
-	"plus Claude's Bash, Read, Write, Edit, Grep and Glob; ignore any other tool names above. There is no /reload here:",
+	"plus Claude's Bash, Read, Write, Edit, Grep, Glob, WebSearch and WebFetch, and the tools of the MCP servers named",
+	"below (mcp__<server>__<tool>); there is no codemode; ignore any other tool names above. There is no /reload here:",
 	"the human uses Restart session in the dashboard. A user message that opens with `[fleet wake-up cp-bridge — …]` is a",
 	"relay from the fleet, never the human; the human's dashboard messages end with a `[cp-dashboard …]` marker line.",
 ].join("\n");
 
 /**
  * The Claude CLI operator's spawn (`data/operator.json` driver `claude`): `process.execPath` runs claude-operator.ts on
- * a native record, by default a fresh `<sessions>/operator/native-operator-<ms>.jsonl`.
+ * a native record, by default a fresh `<sessions>/operator/native-operator-<ms>.jsonl`; `skills` as pi's `--skill`.
  */
-export function nativeOperatorSpawn(options: { home: string; sessionFile?: string; model: string | undefined }): { bin: string; args: string[] } {
+export function nativeOperatorSpawn(options: { home: string; sessionFile?: string; model: string | undefined; skills?: readonly string[] }): { bin: string; args: string[] } {
 	if (options.model === undefined || !isNativeModel(options.model)) {
 		throw new NativeDriverError(`the claude operator driver runs an explicit anthropic/claude-… model, and ${options.model ?? "no model"} is not one: fix data/operator.json`, "model");
 	}
 	const record = options.sessionFile ?? join(options.home, layoutForHome("multi", options.home).sessions, "operator", `native-operator-${Date.now()}.jsonl`);
-	return { bin: process.execPath, args: [OPERATOR_ENTRY, "--session", record, "--model", options.model] };
+	return { bin: process.execPath, args: [OPERATOR_ENTRY, "--session", record, "--model", options.model, ...(options.skills ?? []).flatMap((path) => ["--skill", path])] };
 }
 
 /** Refuses a routed level with no native effort; absent (the CLI default), `off` and low…max pass. */

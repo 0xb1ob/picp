@@ -1,14 +1,18 @@
 /**
  * The Claude CLI operator's process (`data/operator.json` driver `claude`): extensions/cp-bridge on a headless host, its
- * tools over MCP beside Claude's Bash/Read/Write/Edit/Grep/Glob under the operator's guards. The dashboard is its input.
+ * tools over MCP beside Claude's file, shell and web tools and the user's MCP servers, under the operator's guards and
+ * the loaded-surface lockdown. Its skills are an index in the system prompt. The dashboard is its input.
  */
 import "./claude-stdout-guard.ts";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
+import { formatSkillsForPrompt, loadSkills } from "@earendil-works/pi-coding-agent";
 import registerCpBridge, { operatorToolRefusal, resolveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { OPERATOR_NOTE } from "../operator-note.ts";
+import { agentDirOf, claudeMcpServers, readUserMcpServers } from "../worker-mcp.ts";
 import { lex, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
+import { mcpToolPrefix } from "./claude-lockdown.ts";
 import { HeadlessHost, type HostPorts } from "./claude-parent-session.ts";
 import { type EngineView, startClaudeSession } from "./claude-session-engine.ts";
 import { normalizeToolCall, operatorClaudeSettings } from "./claude-spike.ts";
@@ -25,16 +29,34 @@ const fail = (message: string): never => {
 
 let sessionFile = "";
 let modelId = "";
+let skillPaths: string[] = [];
 try {
-	const { values } = parseArgs({ options: { session: { type: "string" }, model: { type: "string" } }, strict: true });
+	const { values } = parseArgs({ options: { session: { type: "string" }, model: { type: "string" }, skill: { type: "string", multiple: true } }, strict: true });
 	if (!values.session || !values.model) throw new Error("--session and --model are required");
 	sessionFile = values.session;
 	modelId = nativeModelId(values.model);
+	skillPaths = values.skill ?? [];
 } catch (error) {
 	fail((error as Error).message);
 }
 
 const cwd = process.cwd();
+const agentDir = agentDirOf(process.env);
+// D4: the CLI's own web tools stand in for pi-web-access.
+const WEB_TOOLS = ["WebSearch", "WebFetch"];
+const user = readUserMcpServers(agentDir);
+const mcp = claudeMcpServers(user, process.env);
+for (const line of mcp.skipped) process.stderr.write(`cp-operator: ${line}\n`);
+const userServers = Object.keys(mcp.servers);
+/** pi's builtin:mcp beside the servers: deferred tools load through ToolSearch, resources through the two resource tools. */
+const MCP_TOOLS = userServers.length > 0 ? ["ToolSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"] : [];
+const described = (name: string): string => {
+	const description = (user.servers[name] as { description?: unknown }).description;
+	return typeof description === "string" ? `${name}: ${description}` : name;
+};
+const serversSection = userServers.length === 0 ? ""
+	: `\n\nMCP servers (from ${mcp.path}; tools mcp__<server>__<tool>, deferred ones found with ToolSearch):\n${userServers.map((name) => `- ${described(name)}`).join("\n")}`;
+const skillsIndex = formatSkillsForPrompt(loadSkills({ cwd, agentDir, skillPaths, includeDefaults: false }).skills, "read").replace("the read tool", "Read");
 // The CLI's own dir beside the record holds its config and transcripts: as secret as ~/.claude.
 const secrets = [...secretPaths(operatorClaudeSettings(), [homedir(), userInfo().homedir]), join(dirname(sessionFile), `${RECORD_PREFIX}-claude`)];
 const refused = (what: string, hit: string): string => `Refused: the operator's ${what} never touches the Claude settings, its config, /proc or /dev/fd (${hit}).`;
@@ -49,8 +71,11 @@ function bashSecret(command: string): string | undefined {
 	return words.find((word) => /^[.~]|\//.test(word) && secretPathIn(word.replace(/^~(?=$|\/)/, homedir()), cwd, secrets));
 }
 
-/** D2: a built-in passes today's operator guards (`operatorToolRefusal`), then the secret-path refusals. */
+/** D2: a built-in passes today's operator guards (`operatorToolRefusal`), then the secret-path refusals; web and MCP pass. */
 function guard(toolName: string, input: unknown): string | undefined {
+	if (WEB_TOOLS.includes(toolName) || MCP_TOOLS.includes(toolName)) return undefined;
+	const server = userServers.find((name) => toolName.startsWith(mcpToolPrefix(name)));
+	if (server !== undefined) return mcp.hidden(server, toolName.slice(mcpToolPrefix(server).length)) ? `Refused: ${toolName} is hidden in ${mcp.path}.` : undefined;
 	const call = normalizeToolCall(toolName, input);
 	if (!call) return `Refused: ${toolName} is not one of the operator's tools.`;
 	const scoped = operatorToolRefusal(call.name, call.input, cwd, () => resolveOperatorTarget());
@@ -84,14 +109,17 @@ await startClaudeSession({
 	label: "operator",
 	recordPrefix: RECORD_PREFIX,
 	promptSections: [],
-	systemPrompt: () => `${OPERATOR_NOTE.trimEnd()}\n\n${NATIVE_OPERATOR_ADDENDUM}`,
+	systemPrompt: () => `${OPERATOR_NOTE.trimEnd()}\n\n${NATIVE_OPERATOR_ADDENDUM}${serversSection}${skillsIndex}`,
 	mount,
 	commands: [],
-	builtinTools: ["Bash", "Read", "Write", "Edit", "Grep", "Glob"],
-	disallowedTools: ["Agent", "Task", "WebFetch", "WebSearch"],
+	builtinTools: ["Bash", "Read", "Write", "Edit", "Grep", "Glob", ...WEB_TOOLS, ...MCP_TOOLS],
+	disallowedTools: ["Agent", "Task"],
 	refusal: (toolName) => `Refused: ${toolName} is not one of the operator's tools.`,
 	guard,
 	settleGuard: true,
 	headless: { write },
 	childEnv: { HOME: homedir(), ...Object.fromEntries(PASSED_ENV.flatMap((name) => (process.env[name] ? [[name, process.env[name]]] : []))) },
+	mcpServers: mcp.servers,
+	// The CLI may leave these out (web where its provider lacks it, ToolSearch with nothing deferred).
+	lockdown: { optionalTools: [...WEB_TOOLS, ...MCP_TOOLS] },
 });

@@ -4,9 +4,9 @@
  * Covers what the native parent drives: turns, cp_* tools over the SDK's MCP relay with PreToolUse hooks, `--resume`,
  * `/compact <instructions>` (as claude 2.1.318 runs it), `getContextUsage`, `interrupt`, `--replay-user-messages` and
  * a mid-turn message joining after the next tool batch (else its own queued turn); for the operator, Bash/Read/Write,
- * Stop hooks and image blocks. Each spawn's argv is logged.
+ * Stop hooks, image blocks, `--mcp-config` stdio servers and the lockdown's hook listing. Each spawn's argv is logged.
  */
-import { execFileSync } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -50,6 +50,13 @@ const hooksOff = env.FAKE_CLAUDE_HOOKS === "off";
 /** Stop-hook continuations one turn takes before it ends anyway (claude has no cap; this fake must never spin). */
 const MAX_STOP_BLOCKS = 3;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+/** `--managed-settings`: claude binds `disableAllHooks` as the managed-only hook lock its hook listing reports. */
+const managedOnly = (JSON.parse(flag("--managed-settings") ?? "{}") as { disableAllHooks?: unknown }).disableAllHooks === true;
+/** `--mcp-config` stdio servers, spawned on first use; an http entry is listed as failed (this fake has no client). */
+const configured = (JSON.parse(flag("--mcp-config") ?? "{}") as { mcpServers?: Record<string, { type?: string; command?: string; args?: string[]; env?: Record<string, string> }> }).mcpServers ?? {};
+const external = Object.entries(configured).filter(([, server]) => server.type !== "sdk");
+/** Test knob (settings env): JSON merged into every `system/init`, a surface picp never passed (the lockdown's case). */
+const initExtra = JSON.parse(env.FAKE_CLAUDE_INIT_EXTRA ?? "{}") as Record<string, unknown>;
 const resumed = flag("--resume");
 const sessionId = resumed ?? randomUUID();
 const sessionPath = join(store, "sessions", `${sessionId}.json`);
@@ -99,20 +106,46 @@ function take(item: Queued): Message["content"] {
 	return item.message.content;
 }
 
+type Rpc = { result?: Record<string, unknown>; error?: { message?: string } };
+const stdioNames = external.filter(([, server]) => typeof server.command === "string").map(([name]) => name);
+const stdio = new Map<string, { child: ChildProcessWithoutNullStreams; waiting: Map<number, (rpc: Rpc) => void> }>();
+/** A `--mcp-config` stdio server over newline-delimited JSON-RPC, started on first use. */
+function stdioServer(name: string): { child: ChildProcessWithoutNullStreams; waiting: Map<number, (rpc: Rpc) => void> } {
+	const running = stdio.get(name);
+	if (running) return running;
+	const config = configured[name]!;
+	const child = spawn(config.command!, config.args ?? [], { env: { ...process.env, ...config.env }, stdio: "pipe" });
+	child.stderr.resume();
+	const waiting = new Map<number, (rpc: Rpc) => void>();
+	createInterface({ input: child.stdout }).on("line", (line) => {
+		const message = JSON.parse(line) as Rpc & { id?: number };
+		if (message.id !== undefined) waiting.get(message.id)?.(message);
+	});
+	stdio.set(name, { child, waiting });
+	return { child, waiting };
+}
+
 async function mcp(server: string, method: string, params?: unknown): Promise<Record<string, unknown>> {
-	const answer = await request({ subtype: "mcp_message", server_name: server, message: { jsonrpc: "2.0", id: ++ids, method, ...(params === undefined ? {} : { params }) } });
-	const response = answer.mcp_response as { result?: Record<string, unknown>; error?: { message?: string } };
+	const id = ++ids;
+	const message = { jsonrpc: "2.0", ...(method.startsWith("notifications/") ? {} : { id }), method, ...(params === undefined ? {} : { params }) };
+	let response: Rpc;
+	if (stdioNames.includes(server)) {
+		const { child, waiting } = stdioServer(server);
+		child.stdin.write(`${JSON.stringify(message)}\n`);
+		if (!("id" in message)) return {};
+		response = await new Promise<Rpc>((done) => waiting.set(id, done));
+	} else response = ((await request({ subtype: "mcp_message", server_name: server, message })).mcp_response ?? {}) as Rpc;
 	if (response.error) throw new Error(`${server} ${method}: ${response.error.message ?? "error"}`);
 	return response.result ?? {};
 }
 
-/** The SDK servers' tools as the CLI names them (`mcp__<server>__<tool>`), listed once per process. */
+/** The SDK and stdio servers' tools as the CLI names them (`mcp__<server>__<tool>`), listed once per process. */
 async function listTools(): Promise<ToolDef[]> {
 	if (tools) return tools;
 	const listed: ToolDef[] = [];
-	for (const server of servers) {
+	for (const server of [...servers, ...stdioNames]) {
 		await mcp(server, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake-claude", version: CLAUDE_VERSION_FLOOR } });
-		await request({ subtype: "mcp_message", server_name: server, message: { jsonrpc: "2.0", method: "notifications/initialized" } });
+		await mcp(server, "notifications/initialized");
 		const { tools: found = [] } = await mcp(server, "tools/list") as { tools?: Array<{ name: string; description?: string; inputSchema: unknown }> };
 		for (const each of found) listed.push({ name: `mcp__${server}__${each.name}`, description: each.description, input_schema: each.inputSchema });
 	}
@@ -174,7 +207,7 @@ async function runTool(use: Block): Promise<Block> {
 		if (signal && !signal.aborted) await new Promise((done) => signal.addEventListener("abort", done, { once: true }));
 		return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: "Interrupted before the tool ran" };
 	}
-	const server = servers.find((each) => name.startsWith(`mcp__${each}__`));
+	const server = [...servers, ...stdioNames].find((each) => name.startsWith(`mcp__${each}__`));
 	if (!server) return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: `No such tool available: ${name}` };
 	// Test knob: FAKE_CLAUDE_NO_TOOL_META=1 sends no tool_use id with tools/call, as a CLI without the meta would.
 	const meta = env.FAKE_CLAUDE_NO_TOOL_META === "1" ? {} : { _meta: { "claudecode/toolUseId": toolUseId } };
@@ -184,9 +217,10 @@ async function runTool(use: Block): Promise<Block> {
 }
 
 const init = (): void => send({
-	type: "system", subtype: "init", session_id: sessionId, model, cwd: process.cwd(), tools: (tools ?? []).map((each) => each.name),
-	mcp_servers: servers.map((name) => ({ name, status: "connected" })), permissionMode: "default", slash_commands: ["compact"],
-	apiKeySource: "none", claude_code_version: CLAUDE_VERSION_FLOOR, output_style: "default", uuid: randomUUID(),
+	type: "system", subtype: "init", session_id: sessionId, model, cwd: process.cwd(), tools: [...builtins, ...(tools ?? []).map((each) => each.name)],
+	mcp_servers: [...servers, ...external.map(([name]) => name)].map((name) => ({ name, status: servers.includes(name) || stdioNames.includes(name) ? "connected" : "failed" })),
+	permissionMode: "default", slash_commands: ["compact"], apiKeySource: "none", claude_code_version: CLAUDE_VERSION_FLOOR, output_style: "default", uuid: randomUUID(),
+	...initExtra,
 });
 
 const validImage = (block: Block): boolean => {
@@ -308,8 +342,9 @@ function control(line: { request_id: string; request: Record<string, unknown> })
 		stopIds = (hooks.Stop ?? []).flatMap((matcher) => matcher.hookCallbackIds ?? []);
 		servers = Array.isArray(body.sdkMcpServers) ? body.sdkMcpServers.map(String) : [];
 		systemPrompt = Array.isArray(body.systemPrompt) ? body.systemPrompt.join("\n\n") : String(body.systemPrompt ?? "");
-		return reply({ commands: [{ name: "compact", description: "Compact the conversation", argumentHint: "<instructions>" }], output_style: "default", available_output_styles: ["default"], models: [], account: {} });
+		return reply({ commands: [{ name: "compact", description: "Compact the conversation", argumentHint: "<instructions>", builtin: true }], output_style: "default", available_output_styles: ["default"], models: [], account: {} });
 	}
+	if (body.subtype === "get_hooks_listing") return reply({ hooks: [], policy: { managedOnly, policyHookCount: 0 } });
 	if (body.subtype === "get_context_usage") {
 		return reply({ totalTokens: contextTokens, maxTokens: MAX_TOKENS, rawMaxTokens: MAX_TOKENS, percentage: (contextTokens / MAX_TOKENS) * 100, categories: [], model, memoryFiles: [], mcpTools: [], agents: [] });
 	}

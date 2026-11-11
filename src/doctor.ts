@@ -303,7 +303,7 @@ export class Doctor {
 			...(await this.#hostTools()),
 			...this.#piLensTools(),
 			...(await webAccessFindings({ packageRoot: this.#options.packageRoot, ...(this.#options.env ? { env: this.#options.env } : {}) })),
-			...mcpFindings({ packageRoot: this.#options.packageRoot, run: this.#run, ...(this.#options.env ? { env: this.#options.env } : {}) }),
+			...mcpFindings({ packageRoot: this.#options.packageRoot, run: this.#run, home: this.#options.home, ...(this.#options.env ? { env: this.#options.env } : {}) }),
 			...this.#sessionTools(),
 			...this.#ledger(),
 			...this.#packageResources(),

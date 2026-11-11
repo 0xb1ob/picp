@@ -296,3 +296,37 @@ test("NO-10 Operator CLI: labels Claude CLI, narrows the operator pickers, saves
 	assert.deepEqual(h.json(`${LAYOUT.data}/operator.json`), { model: "anthropic/claude-opus-5-5" });
 	assert.equal((await h.field("models.operator_driver"))?.value, "pi");
 });
+
+// Scenario: Given data/operator.json with no model and no CP_OPERATOR_MODEL, When the Claude CLI is saved as the
+//   Operator CLI, or a claude operator's model is restored away, Then each is a 400 before any write (Restart session
+//   would start nothing). Negative control: the same switch beside an anthropic/claude-* model in the request saves.
+test("Operator CLI: the Claude CLI with no operator model resolving is refused before any write; beside a Claude model it saves", { timeout: 120_000 }, async (t) => {
+	const h = await home(t, (root) => put(join(root, LAYOUT.data, "operator.json"), JSON.stringify({ compact_at_tokens: 175000 })));
+	const file = join(h.root, LAYOUT.data, "operator.json");
+	const before = readFileSync(file, "utf8");
+	const refused = await h.post("/api/settings/apply", { changes: { "models.operator_driver": "claude" } });
+	assert.deepEqual([refused.status, refused.body.errors], [400, ["models.operator: the claude operator needs an anthropic/claude-… model; none is set in data/operator.json or CP_OPERATOR_MODEL"]]);
+	assert.equal(readFileSync(file, "utf8"), before, "nothing written");
+	const saved = await h.post("/api/settings/apply", { changes: { "models.operator_driver": "claude", "models.operator": "anthropic/claude-opus-5-5" } });
+	assert.deepEqual([saved.status, saved.body.state], [200, "applied"], JSON.stringify(saved.body));
+	assert.deepEqual(h.json(`${LAYOUT.data}/operator.json`), { compact_at_tokens: 175000, driver: "claude", model: "anthropic/claude-opus-5-5" });
+	const unset = await h.post("/api/settings/restore", { keys: ["models.operator"] });
+	assert.equal(unset.status, 400, JSON.stringify(unset.body));
+	assert.equal(h.json(`${LAYOUT.data}/operator.json`).model, "anthropic/claude-opus-5-5", "the model stays");
+});
+
+// Scenario: Given the Operator CLI on the Claude CLI with compact_at_tokens 175000, When Auto-compaction is restored,
+//   Then the key goes, the read-back passes and In force says 150000 from code; on pi the same absent key says 200000.
+//   Regression: the restore expected the catalog's 200000, so its read-back failed and the file rolled back.
+test("Operator CLI: with compact_at_tokens absent the operator threshold in force is 150000 on the Claude CLI and 200000 on pi", { timeout: 120_000 }, async (t) => {
+	const model = "anthropic/claude-opus-5-5";
+	const h = await home(t, (root) => put(join(root, LAYOUT.data, "operator.json"), JSON.stringify({ driver: "claude", model, compact_at_tokens: 175000 })));
+	const restored = await h.post("/api/settings/restore", { keys: ["sessions.operator_compact_at_tokens"] });
+	assert.deepEqual([restored.status, restored.body.state], [200, "applied"], JSON.stringify(restored.body));
+	assert.deepEqual(h.json(`${LAYOUT.data}/operator.json`), { driver: "claude", model });
+	const inForce = async () => [...(await settingsTab(h)).section("Auto-compaction").querySelectorAll(".settings-effective")].map((p) => p.textContent)[1];
+	assert.equal(await inForce(), "In force: 150000 tokens, from code");
+	assert.equal((await h.post("/api/settings/apply", { changes: { "models.operator_driver": "pi" } })).status, 200);
+	assert.deepEqual(h.json(`${LAYOUT.data}/operator.json`), { driver: "pi", model });
+	assert.equal(await inForce(), "In force: 200000 tokens, from code");
+});

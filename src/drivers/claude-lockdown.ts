@@ -3,7 +3,17 @@
  * only what picp passed plus the CLI's own built-ins; any extra refuses the run before a tool executes. Counts only.
  */
 import { createHash } from "node:crypto";
-import type { AgentInfo, SDKSystemMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
+import type { AgentInfo, Query, SDKSystemMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
+
+/** The CLI's tool-name prefix for an MCP server: `mcp__<name>__`, any character outside `[A-Za-z0-9_-]` as `_`. */
+export const mcpToolPrefix = (server: string): string => `mcp__${server.replace(/[^A-Za-z0-9_-]/g, "_")}__`;
+
+/** Beyond the expected tools: picp's own server (default `picp`), tools that may be absent, servers whose tools pass. */
+export interface SurfaceOptions {
+	server?: string;
+	optionalTools?: readonly string[];
+	optionalServers?: readonly string[];
+}
 
 /** The CLI's own subagents at the version floor, pinned by `agentDigest`, so a same-named loaded agent is an extra. */
 export const CLI_BUILTIN_AGENTS: Readonly<Record<string, string>> = {
@@ -53,7 +63,10 @@ export function lockdownVerdict(
 	commands: readonly SlashCommand[],
 	agents: readonly AgentInfo[],
 	listing: HooksListing | undefined,
+	surface: SurfaceOptions = {},
 ): Lockdown {
+	const { server = "picp", optionalTools = [], optionalServers = [] } = surface;
+	const open = (name: string) => optionalTools.includes(name) || optionalServers.some((each) => name.startsWith(mcpToolPrefix(each)));
 	const pinned = (name: string) => {
 		const infos = agents.filter((agent) => agent.name === name);
 		return infos.length === 1 && infos[0] !== undefined && CLI_BUILTIN_AGENTS[name] === agentDigest(infos[0]);
@@ -76,8 +89,8 @@ export function lockdownVerdict(
 		managedHooks: listing?.policy?.policyHookCount ?? 0,
 	};
 	const extra = {
-		tools: tools.filter((name) => !expectedTools.includes(name)).length + expectedTools.filter((name) => !tools.includes(name)).length,
-		mcpServers: servers.filter((server) => server.name !== "picp").length + (servers.some((server) => server.name === "picp") ? 0 : 1),
+		tools: tools.filter((name) => !expectedTools.includes(name) && !open(name)).length + expectedTools.filter((name) => !tools.includes(name)).length,
+		mcpServers: servers.filter((each) => each.name !== server && !optionalServers.includes(each.name)).length + (servers.some((each) => each.name === server) ? 0 : 1),
 		skills: (init.skills ?? []).filter(notBuiltin).length,
 		plugins: (init.plugins ?? []).filter((plugin) => plugin.path !== "builtin").length,
 		agents: [...agentNames].filter((name) => !pinned(name)).length,
@@ -93,4 +106,17 @@ export function lockdownVerdict(
 	];
 	if (reasons.length === 0) return { verdict: "ok", seen, extra };
 	return { verdict: "refused", seen, extra, refusal: `Refused: the Claude CLI lockdown failed: ${reasons.join("; ")}. The run was stopped before any tool ran.` };
+}
+
+/** Runs the lockdown on one init with the CLI's commands, agents and hook listing, read over the control channel. */
+export async function checkSurface(q: Query, init: InitSurface, expectedTools: readonly string[], surface: SurfaceOptions = {}): Promise<Lockdown> {
+	const started = Date.now();
+	try {
+		// SAFETY: getHooksListing exists only on newer SDKs; it is optional here and its absence is handled below.
+		const listing = (q as unknown as { getHooksListing?: () => Promise<HooksListing> }).getHooksListing;
+		const [initialized, hooks] = await Promise.all([q.initializationResult(), listing === undefined ? undefined : listing.call(q)]);
+		return { ...lockdownVerdict(init, expectedTools, initialized.commands, initialized.agents ?? [], hooks, surface), checkMs: Date.now() - started };
+	} catch (err) {
+		return { verdict: "refused", refusal: `Refused: the Claude CLI lockdown check failed (${(err as Error).message}).`, checkMs: Date.now() - started };
+	}
 }

@@ -291,13 +291,14 @@ test("NO-8: self_compact over the threshold runs /compact with the newest handof
 
 const NEXT_MODEL = "anthropic/claude-picp-next";
 
-// Scenario: Given a Claude CLI operator, When Settings saves a new operator model through the session's settings op
-// (the frame the viewer forwards), Then the next turn's model call names it; a non-Claude model under the Claude CLI
-// is refused 400 and data/operator.json is left as it was.
-test("NO-9: a Settings model change applies on the next turn; a non-Claude model is refused and nothing is written", { timeout: 180_000 }, async (t) => {
-	const op = await nativeOperator(t, [{ kind: "text", text: "NO9 before" }, { kind: "text", text: "NO9 after" }]);
+// Scenario: Given a Claude CLI operator, When Settings saves a new operator model, then a new thinking level, through
+// the session's settings op (the frame the viewer forwards), Then each next turn's call names the model, then carries
+// the effort (none before); a non-Claude model under the Claude CLI is refused 400 and nothing is written.
+test("NO-9: a Settings model or thinking change applies on the next turn; a non-Claude model is refused and nothing is written", { timeout: 180_000 }, async (t) => {
+	const op = await nativeOperator(t, [{ kind: "text", text: "NO9 before" }, { kind: "text", text: "NO9 after" }, { kind: "text", text: "NO9 effort" }]);
 	assert.equal((await op.send("send", { kind: "message", text: "NO9-BEFORE" })).ok, true);
-	assert.equal((await op.seen("NO9-BEFORE")).body.model, "claude-picp-fake");
+	const first = await op.seen("NO9-BEFORE");
+	assert.deepEqual([first.body.model, first.body.output_config], ["claude-picp-fake", undefined]);
 	await op.view("/api/sessions?view=you&transcript=1", (view) => JSON.stringify(view.entries).includes("NO9 before"), "the first reply");
 	let n = 0;
 	const apply = async (changes: Record<string, unknown>): Promise<Record<string, any>> => {
@@ -313,10 +314,76 @@ test("NO-9: a Settings model change applies on the next turn; a non-Claude model
 
 	const applied = await apply({ "models.operator": NEXT_MODEL });
 	assert.equal(applied.status, 200, JSON.stringify(applied));
-	const rows = () => existsSync(modelApplyFile(op.home)) ? readFileSync(modelApplyFile(op.home), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { session: string; state: string }) : [];
+	const rows = () => existsSync(modelApplyFile(op.home)) ? readFileSync(modelApplyFile(op.home), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { session: string; state: string; thinking?: string | null }) : [];
 	await waitFor(rows, (seen) => seen.some((row) => row.session === "operator" && row.state === "applied"), { timeoutMs: 30_000, what: "the operator's model apply" });
 	assert.equal((await op.send("send", { kind: "message", text: "NO9-AFTER" })).ok, true);
 	assert.equal((await op.seen("NO9-AFTER")).body.model, "claude-picp-next");
+	await op.view("/api/sessions?view=you&transcript=1", (view) => JSON.stringify(view.entries).includes("NO9 after"), "the second reply");
+
+	assert.equal((await apply({ "models.operator_thinking": "low" })).status, 200);
+	await waitFor(rows, (seen) => seen.some((row) => row.session === "operator" && row.state === "applied" && row.thinking === "low"), { timeoutMs: 30_000, what: "the operator's thinking apply" });
+	assert.equal((await op.send("send", { kind: "message", text: "NO9-EFFORT" })).ok, true);
+	const effort = await op.seen("NO9-EFFORT");
+	assert.deepEqual([effort.body.model, effort.body.output_config], ["claude-picp-next", { effort: "low" }]);
+});
+
+const PROBE_SERVER = join(REPO_ROOT, "tests/fixtures/mcp-probe-server.mjs");
+const PROBE_TOOLS = ["delete_thing", "odd_thing", "plain", "read_thing", "write_thing"];
+
+// Scenario: Given the agent dir's mcp.json with a stdio server (one tool hidden by toolExposure) and one set
+// enabled: false, When the Claude CLI operator's model is called, Then it is offered every mcp__probe__* tool and no
+// mcp__off__*, a probe tool runs on the server and the hidden one is refused. Negative control: `off` never starts.
+test("NO-11: a stdio MCP server from the agent dir's mcp.json is listed as mcp__probe__*; enabled: false is not", { timeout: 180_000 }, async (t) => {
+	const agentDir = mkdtempSync(join(tmpdir(), "cp-no11-agent-"));
+	t.after(() => rmSync(agentDir, { recursive: true, force: true }));
+	const log = join(agentDir, "mcp.log");
+	const server = (label: string) => ({ command: process.execPath, args: [PROBE_SERVER, label, log] });
+	writeFileSync(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { probe: { ...server("probe"), toolExposure: { "delete_*": "hidden" } }, off: { ...server("off"), enabled: false } } }));
+	const op = await nativeOperator(t, [
+		{ kind: "tool_use", calls: [{ name: "mcp__probe__read_thing", input: {} }, { name: "mcp__probe__delete_thing", input: {} }] },
+		{ kind: "text", text: "NO11 done" },
+	], { env: { PI_CODING_AGENT_DIR: agentDir } });
+	assert.equal((await op.send("send", { kind: "message", text: "NO11-GO" })).ok, true);
+	const first = await op.seen("NO11-GO");
+	const offered = ((first.body.tools ?? []) as Array<{ name: string }>).map((each) => each.name);
+	assert.deepEqual(offered.filter((name) => name.startsWith("mcp__probe__")).sort(), PROBE_TOOLS.map((name) => `mcp__probe__${name}`));
+	assert.deepEqual(offered.filter((name) => name.startsWith("mcp__off__")), []);
+	const [ran, hidden] = await waitFor(() => toolResults(op.provider.requests), (seen) => seen.length >= 2, { timeoutMs: 60_000, what: "both MCP calls answered" });
+	assert.equal(ran, "ok:read_thing");
+	assert.match(hidden!, /^\[error\] Refused: mcp__probe__delete_thing is hidden in \S+mcp\.json\.$/);
+	const lines = readFileSync(log, "utf8").trim().split("\n");
+	assert.ok(lines.includes("call probe read_thing") && !lines.includes("call probe delete_thing"), lines.join("; "));
+	assert.ok(!lines.some((line) => line.endsWith(" off")), "a disabled server never starts");
+	t.diagnostic(`first model request with one MCP server: ${offered.length} tools, ${Buffer.byteLength(JSON.stringify(first.body))} bytes`);
+});
+
+/** NO-12: a Write under the operator workspace, on a CLI whose init carries `extra` (none for the control). */
+async function lockedDown(t: TestContext, extra?: Record<string, unknown>) {
+	const paths = { workspace: "" };
+	const script: ClaudeStep[] = [{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(paths.workspace, "no12.md"), content: "NO12-NOTE" }) }] }, { kind: "text", text: "NO12 done" }];
+	const op = await nativeOperator(t, script, { settingsEnv: extra ? { FAKE_CLAUDE_INIT_EXTRA: JSON.stringify(extra) } : {} });
+	paths.workspace = join(op.home, layoutForHome("multi", op.home).operatorWorkspace);
+	assert.equal((await op.send("send", { kind: "message", text: "NO12-GO" })).ok, true);
+	return { op, note: join(paths.workspace, "no12.md") };
+}
+
+// Scenario: Given a Claude CLI whose init lists a plugin picp never passed, When the operator's model calls Write,
+// Then the lockdown refuses the surface by kind (plugins 1), the Write never runs and the turn ends on that refusal.
+test("NO-12: the lockdown refuses an extra loaded surface by name before any tool runs", { timeout: 180_000 }, async (t) => {
+	const { op, note } = await lockedDown(t, { plugins: [{ name: "stray", path: "/opt/stray-plugin" }] });
+	const view = await op.view("/api/sessions?view=you&transcript=1", (seen) => JSON.stringify(seen.entries).includes("lockdown failed"), "the lockdown refusal");
+	assert.match(JSON.stringify(view.entries), /Refused: the Claude CLI lockdown failed: it loaded a surface picp did not pass \(plugins 1\)/);
+	assert.doesNotMatch(JSON.stringify(view.entries), /stray/, "counts only, never a name or path");
+	assert.equal(existsSync(note), false, "the Write never ran");
+	assert.ok(!toolResults(op.provider.requests).some((result) => !result.startsWith("[error]")), "no tool ran");
+});
+
+// Negative control: the same CLI with no extra surface passes the lockdown, so the same Write runs.
+test("NO-12 negative control: with no extra surface the lockdown passes and the Write runs", { timeout: 180_000 }, async (t) => {
+	const { op, note } = await lockedDown(t);
+	await waitFor(() => existsSync(note), Boolean, { timeoutMs: 60_000, what: "the workspace Write" });
+	assert.equal(readFileSync(note, "utf8"), "NO12-NOTE");
+	await op.view("/api/sessions?view=you&transcript=1", (seen) => JSON.stringify(seen.entries).includes("NO12 done"), "the reply");
 });
 
 // Scenario: Given a module that calls console.log while each Claude CLI entry loads (before startClaudeSession), When

@@ -6,8 +6,9 @@
  * every config value and every secret shape first. Kept out of doctor.ts, which sits at its ceiling.
  */
 import { join } from "node:path";
-import type { DoctorFinding } from "./contracts.ts";
+import { type DoctorFinding, LAYOUT } from "./contracts.ts";
 import type { CommandRunner } from "./doctor.ts";
+import { operatorDriverSetting } from "./operator-compact.ts";
 import { listProfiles } from "./profiles.ts";
 import { SECRET_PATTERNS } from "./secret-patterns.ts";
 import { agentDirOf, enabledServers, MCP_CALL_TOOL, readUserMcpServers } from "./worker-mcp.ts";
@@ -16,6 +17,17 @@ export interface McpAccessOptions {
 	packageRoot: string;
 	env?: NodeJS.ProcessEnv;
 	run: CommandRunner;
+	/** The home whose `data/operator.json` driver names the operator session's MCP path. */
+	home?: string;
+}
+
+/** Whether the home's operator runs on the Claude CLI; an unreadable or refused driver is pi's line. */
+function claudeOperator(home: string | undefined): boolean {
+	try {
+		return home !== undefined && operatorDriverSetting(join(home, LAYOUT.data, "operator.json")) === "claude";
+	} catch {
+		return false;
+	}
 }
 
 interface ListedServer {
@@ -47,6 +59,8 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 	const enabled = enabledServers(user.servers);
 	const total = Object.keys(user.servers).length;
 	const workerProfiles = listProfiles(join(o.packageRoot, "profiles")).map((p) => p.frontmatter.name);
+	const claude = claudeOperator(o.home);
+	const session = claude ? `operator session: driver claude: servers from ${user.path}, no codemode` : "operator session: builtin:mcp, codemode, tool-search";
 	const by = `every worker profile (${workerProfiles.join(", ")}; implementer/ship workers and the gate, diff and quality reviewers included) via ${MCP_CALL_TOOL}, all exposed tools, no annotation filter (servers read in place from ${user.path}); the CP parent: unchanged`;
 	const finding = (check: string, severity: DoctorFinding["severity"], what: string, fix?: string, detail?: string): DoctorFinding => ({
 		check,
@@ -65,7 +79,7 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 	if (enabled.length === 0) {
 		const what = total === 0 ? "MCP: no servers configured (optional)" : `MCP: ${total} configured, none enabled`;
 		return [
-			finding("mcp.operator", "ok", what, undefined, `operator session: builtin:mcp, codemode, tool-search; servers from ${user.path}`),
+			finding("mcp.operator", "ok", what, undefined, claude ? session : `${session}; servers from ${user.path}`),
 			finding("mcp.workers", "ok", "workers: no MCP servers configured", undefined, by),
 		];
 	}
@@ -91,6 +105,6 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 	});
 	const what = `MCP: ${total} configured, ${enabled.length} enabled; connected ${connected.length}/${live.length}; tools ${tools}`;
 	return problems.length === 0
-		? [finding("mcp.operator", "ok", what, undefined, "operator session: builtin:mcp, codemode, tool-search"), workers]
-		: [finding("mcp.operator", "warn", what, "run `pi mcp list` (or /mcp in the operator session) for the full error", problems.join("\n")), workers];
+		? [finding("mcp.operator", "ok", what, undefined, session), workers]
+		: [finding("mcp.operator", "warn", what, "run `pi mcp list` (or /mcp in the operator session) for the full error", [...problems, ...(claude ? [session] : [])].join("\n")), workers];
 }

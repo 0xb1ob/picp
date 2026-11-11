@@ -185,14 +185,18 @@ function thinkingView(read: OwnerRead<unknown>): View {
 	return raw === undefined ? { value: null, source: "code", status: "ok" } : { value: null, source: "code", status: "fallback", diagnostic: "invalid thinking level; ignored" };
 }
 
-/** `models.<role>_driver` as `parentDriverSetting` / `operatorDriverSetting` read it: absent, null or bad JSON is pi. */
-function driverView(read: OwnerRead<unknown>, role: "parent" | "operator"): View {
+/**
+ * `models.<role>_driver` as `parentDriverSetting` / `operatorDriverSetting` read it: absent, null or bad JSON is pi.
+ * A claude operator also needs a model to resolve (the file's, else `CP_OPERATOR_MODEL`), as its launch does.
+ */
+function driverView(read: OwnerRead<unknown>, role: "parent" | "operator", env: NodeJS.ProcessEnv): View {
 	const raw = parsed(read.text);
 	const driver = at(raw, "driver");
 	if (driver === undefined || driver.json === null) return { value: "pi", source: "code", status: "ok" };
 	if (driver.json !== "pi" && driver.json !== "claude") return { value: null, source: "none", status: "refused", diagnostic: `driver must be "pi" or "claude"; the ${role} refuses to start` };
-	const model = at(raw, "model");
-	if (driver.json === "claude" && model !== undefined && !(typeof model.json === "string" && isNativeModel(model.json))) {
+	const file = at(raw, "model");
+	const model = file ?? (role === "operator" && env.CP_OPERATOR_MODEL?.trim() ? { json: env.CP_OPERATOR_MODEL.trim() } : undefined);
+	if (driver.json === "claude" && (model !== undefined || role === "operator") && !(typeof model?.json === "string" && isNativeModel(model.json))) {
 		return { value: null, source: "none", status: "refused", diagnostic: `driver claude runs only an anthropic/claude-… model; the ${role} refuses to start` };
 	}
 	return { value: driver.json, source: "file", status: "ok" };
@@ -274,7 +278,7 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 			const out = settle("parent", read, (limit: number) => ({ "sessions.parent_compact_at_tokens": limit }));
 			out.views["models.parent"] = modelView("models.parent", read, env);
 			out.views["models.parent_thinking"] = thinkingView(read);
-			out.views["models.parent_driver"] = driverView(read, "parent");
+			out.views["models.parent_driver"] = driverView(read, "parent", env);
 			return out;
 		},
 	},
@@ -292,7 +296,7 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 			if (read.state === "invalid" && read.result !== undefined) out.views["sessions.operator_compact_at_tokens"] = { value: read.result, source: "code", status: "fallback" };
 			out.views["models.operator"] = modelView("models.operator", read, env);
 			out.views["models.operator_thinking"] = thinkingView(read);
-			out.views["models.operator_driver"] = driverView(read, "operator");
+			out.views["models.operator_driver"] = driverView(read, "operator", env);
 			return out;
 		},
 	},

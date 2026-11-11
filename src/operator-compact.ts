@@ -30,13 +30,16 @@ export function isToolAdditionRejection(message: unknown): boolean {
  */
 export const NATIVE_OPERATOR_COMPACT_DEFAULT_TOKENS = 150000;
 
+/** The operator threshold with no valid `compact_at_tokens`: the Claude CLI's under driver `claude`, else pi's. */
+export const operatorCompactDefault = (driver: unknown): number => (driver === "claude" ? NATIVE_OPERATOR_COMPACT_DEFAULT_TOKENS : OPERATOR_COMPACT_DEFAULT_TOKENS);
+
 /** `compact_at_tokens` from the operator settings file; absent, unreadable or invalid is the driver's default. */
 export function operatorCompactThreshold(settingsFile: string): number {
 	let json: { compact_at_tokens?: unknown; driver?: unknown } | null;
 	try { json = JSON.parse(readFileSync(settingsFile, "utf8")); } catch { return OPERATOR_COMPACT_DEFAULT_TOKENS; }
 	const value = json?.compact_at_tokens;
 	if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
-	return json?.driver === "claude" ? NATIVE_OPERATOR_COMPACT_DEFAULT_TOKENS : OPERATOR_COMPACT_DEFAULT_TOKENS;
+	return operatorCompactDefault(json?.driver);
 }
 
 /** The operator settings file as JSON; absent → undefined, unreadable or invalid JSON throws. */
