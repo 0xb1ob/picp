@@ -1,7 +1,7 @@
 import type { ContextUsage } from "../../src/viewer/api-types.ts";
 import { time } from "../format.ts";
 
-const tokens = (n: number): string => Intl.NumberFormat("en",{notation:"compact",maximumFractionDigits:n >= 1e6 ? 1 : 0}).format(n);
+export const tokens = (n: number): string => Intl.NumberFormat("en",{notation:"compact",maximumFractionDigits:n >= 1e6 ? 1 : 0}).format(n);
 /** `ctx 84K / 272K · 31%`, or `context n/a` when tokens or the window are unknown — never 0. */
 export function contextText(usage: ContextUsage): string {
  return usage.tokens !== null && usage.window !== null && usage.percent !== null ? `ctx ${tokens(usage.tokens)} / ${tokens(usage.window)} · ${Math.round(usage.percent)}%` : "context n/a";

@@ -17,7 +17,8 @@
  */
 
 import { statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { operatorCompactThreshold } from "../operator-compact.ts";
 import type { ContextUsage } from "./api-types.ts";
 import { fileCache } from "./file-cache.ts";
 import { parseObject, timestamp } from "./overview-read.ts";
@@ -155,11 +156,12 @@ export function parentContext(state: ViewerState, parent: SessionRow, windows = 
 	const control = str(readObject(join(state.stateDir, "sessions", "cp-parent-control.json"))?.model);
 	const recorded = num(parent.context_tokens);
 	const scan = recorded !== undefined && recorded > 0 ? { ...read, tokens: recorded, reason: null } : read;
-	return contextUsage({ ...scan, last_compact_at: parent.last_compact_at ?? scan.last_compact_at }, control, windows);
+	return { ...contextUsage({ ...scan, last_compact_at: parent.last_compact_at ?? scan.last_compact_at }, control, windows), compact_at: parent.compact_at_tokens ?? null };
 }
 
 /** The operator session: its newest recorded file (`operator-sessions.jsonl`); a native record reads its log. */
 export function operatorContext(state: ViewerState, windows = windowsFor(state)): ContextUsage {
 	const file = readOperatorSessions(sessionRoots(state)[0]!)[0]?.file;
-	return contextUsage(file ? scanSession(sessionLogFile(file)) : { tokens: null, model: null, thinking: null, last_compact_at: null, reason: "no operator session recorded yet" }, null, windows);
+	const usage = contextUsage(file ? scanSession(sessionLogFile(file)) : { tokens: null, model: null, thinking: null, last_compact_at: null, reason: "no operator session recorded yet" }, null, windows);
+	return { ...usage, compact_at: operatorCompactThreshold(join(dirname(state.stateDir), "data", "operator.json")) };
 }
