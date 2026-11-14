@@ -1,6 +1,6 @@
 /**
- * N4d: a native implementer's network as in-process picp MCP tools. They run in the claude-worker process, which
- * holds the inherited worker env, so no credential enters the CLI child. Every output is token-redacted and capped.
+ * N4d/WP1: a native implementer's network (a planner's: gh_read) as in-process picp MCP tools. They run in the
+ * claude-worker process, which holds the worker env, so no credential enters the CLI child. Output is redacted, capped.
  */
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
@@ -64,6 +64,32 @@ function recordPr(runDir: string, pr: RecordedPr): void {
 	mkdirSync(runDir, { recursive: true });
 	writeFileSync(join(runDir, `${FORGE_PR_FILE}.tmp`), `${JSON.stringify(pr)}\n`);
 	renameSync(join(runDir, `${FORGE_PR_FILE}.tmp`), join(runDir, FORGE_PR_FILE));
+}
+
+const GH_READ_VERBS = [
+	"pr view", "pr list", "pr diff", "pr checks", "issue view", "issue list", "run view", "run list", "release view", "release list", "repo view", "api",
+] as const;
+const GH_ARG_MAX = 200;
+const GH_ARGS_MAX = 20;
+// A method, a body, a header, another host or repo, the browser, or a blocking watch: never a plain GET read here.
+const GH_REFUSED_LONG = ["--method", "--field", "--raw-field", "--input", "--header", "--hostname", "--repo", "--web", "--watch"];
+const GH_REFUSED_SHORT = new Set(["X", "f", "F", "H", "R", "w"]);
+
+/** Why `gh_read` refuses `args` (and an `api` `path`) before gh runs; undefined when the read may run. */
+function ghReadRefusal(verb: string, args: readonly string[], path: string | undefined): string | undefined {
+	const remedy = "gh_read only reads this job's repo with GET; forge writes are not available to a native worker";
+	if (path !== undefined && verb !== "api") return `gh_read takes a path only with \`api\`, not \`${verb}\`.`;
+	if (path !== undefined && (/^\/?graphql(?:[/?#]|$)/i.test(path) || /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("-"))) {
+		return `gh_read \`api\` never reads ${path} (graphql, a URL or a flag); ${remedy}.`;
+	}
+	for (const arg of args) {
+		const long = arg.startsWith("--") ? GH_REFUSED_LONG.find((flag) => arg === flag || arg.startsWith(`${flag}=`)) : undefined;
+		// pflag bundles short letters (`-iXPOST`), so any refused letter in the leading run counts.
+		const short = !arg.startsWith("--") && arg.startsWith("-") ? [.../^-([A-Za-z]*)/.exec(arg)?.[1] ?? ""].find((c) => GH_REFUSED_SHORT.has(c)) : undefined;
+		const flag = long ?? (short === undefined ? undefined : `-${short}`);
+		if (flag !== undefined) return `gh_read never passes \`${flag}\` (in \`${arg}\`); ${remedy}.`;
+	}
+	return undefined;
 }
 
 /** `git_push`, `git_fetch`, `pr_create`, `pr_edit` and `gh_read` for `job`; `env` is the worker's own (credentials). */
@@ -146,19 +172,38 @@ export function forgeTools(job: ForgeJob, env: NodeJS.ProcessEnv = process.env, 
 
 	const ghRead = tool(
 		"gh_read",
-		"One read: `pr view`/`pr checks` of this job's PR, or `run view` of a run in this repo (log_failed for its failure log). One CI status snapshot per worker; never poll.",
-		{ verb: z.enum(["pr view", "pr checks", "run view"]), pr: z.number().int().optional(), run_id: z.string().regex(/^\d+$/).optional(), log_failed: z.boolean().optional() },
+		"One GitHub read in this job's repo: any issue, PR (`pr view|checks|diff` default to this job's PR), run, release or the repo; " +
+			"`api` is a GET of `path` (no graphql). `args` add read flags; write, host, repo and browser flags are refused. " +
+			"One CI status snapshot per worker; never poll.",
+		{
+			verb: z.enum(GH_READ_VERBS),
+			number: z.number().int().positive().optional(),
+			run_id: z.string().regex(/^\d+$/).optional(),
+			log_failed: z.boolean().optional(),
+			path: z.string().min(1).max(GH_ARG_MAX).optional(),
+			args: z.array(z.string().max(GH_ARG_MAX)).max(GH_ARGS_MAX).optional(),
+		},
 		async (args) => {
+			const extra = args.args ?? [];
+			const why = ghReadRefusal(args.verb, extra, args.path);
+			if (why !== undefined) return refuse(why);
 			let argv: string[];
 			if (args.verb === "run view") {
 				if (args.run_id === undefined || !/^\d+$/.test(args.run_id)) return refuse("gh_read `run view` needs a numeric run_id.");
 				argv = ["run", "view", args.run_id, ...(args.log_failed === true ? ["--log-failed"] : [])];
+			} else if (args.verb === "api") {
+				if (args.path === undefined) return refuse("gh_read `api` needs a path, such as repos/<owner>/<repo>/pulls/<n>/comments.");
+				argv = ["api", args.path];
+			} else if (args.verb === "issue view") {
+				if (args.number === undefined) return refuse("gh_read `issue view` needs the issue number.");
+				argv = ["issue", "view", String(args.number)];
+			} else if (args.verb === "pr view" || args.verb === "pr checks" || args.verb === "pr diff") {
+				argv = [...args.verb.split(" "), args.number === undefined ? (recordedPr(job.runDir)?.url ?? branch) : String(args.number)];
 			} else {
-				const pr = thisPr(args.pr, "gh_read");
-				if (typeof pr === "string") return refuse(pr);
-				argv = [...args.verb.split(" "), pr?.url ?? branch];
+				argv = args.verb.split(" ");
 			}
-			const status = args.verb === "pr checks" || (args.verb === "run view" && args.log_failed !== true);
+			argv.push(...extra);
+			const status = args.verb === "pr checks" || args.verb === "run list" || (args.verb === "run view" && args.log_failed !== true && !extra.includes("--log"));
 			if (status && state.statusQueries++ >= 1) return refuse(`${ciStatusRepeatRefusal().replace(/^Refused: /, "")}\nWith gh_read that log is \`run view\` with log_failed.`);
 			const read = await gh(argv);
 			return reply(read.out || `gh ${argv.slice(0, 2).join(" ")} printed nothing`, !read.ok);

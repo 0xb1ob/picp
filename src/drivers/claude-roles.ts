@@ -44,8 +44,10 @@ export function reviewerReadGuard(job: SpikeJob): SpikeGuard {
 
 /** N4d: the implementer's picp MCP tools beside `report_result` (claude-forge-tools.ts), in the lockdown's surface. */
 export const FORGE_TOOL_NAMES = ["git_push", "git_fetch", "pr_create", "pr_edit", "gh_read"] as const;
-export const roleMcpTools = (role: Role): readonly string[] =>
-	nativeRole(role) === "implementer" ? FORGE_TOOL_NAMES.map((name) => `mcp__picp__${name}`) : [];
+/** WP1: a planner reads GitHub through gh_read alone; forge writes stay off (U1). */
+export const roleForgeTools = (role: Role): readonly string[] =>
+	({ implementer: FORGE_TOOL_NAMES, research: ["gh_read"], reviewer: [] })[nativeRole(role)];
+export const roleMcpTools = (role: Role): readonly string[] => roleForgeTools(role).map((name) => `mcp__picp__${name}`);
 
 /** The home's `exclude_paths` and every live grant's exclusions, read by the worker process, never the CLI child. */
 export function implementerExclusions(home: string): string[] {

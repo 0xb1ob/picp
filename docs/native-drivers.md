@@ -557,7 +557,7 @@ non-fast-forward push is refused by name too, never retried forced. `git_fetch` 
 refuses any other `cwd`, the canonical clone included. `pr_create` opens a draft from the job branch (to
 `CP_BASE_BRANCH` when set, else the repository's default) and records it in the run dir; a second call returns that
 URL. `pr_edit` edits the title and/or body of that PR and refuses any other number. `gh_read` runs `pr view|checks`
-on that PR or `run view <id> [--log-failed]` in this repo; `pr checks` and a status `run view` share one snapshot per
+on that PR or `run view <id> [--log-failed]` in this repo (widened in [WP1](#wp1-forge-reads)); `pr checks` and a status `run view` share one snapshot per
 worker process, then the ci-wait repeat refusal answers. Every output passes `redactGithubTokens` and is capped at 20,000
 characters. The worker also reads `user.name`/`user.email` from the worktree's git config and passes them as
 `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, so `git commit` works under the scratch HOME; no token, HOME or credential helper is
@@ -776,3 +776,16 @@ requires before it sends the prompt of a query whose hook is `onFailure: "block"
 changed. `tests/e2e/native-worker-parity.test.ts` NP-0a…NP-0e pin the guards every later step must keep: secret
 paths and env dumps, writes outside the worktree or into `.git`, `exclude_paths` on Edit/Write, and pushes outside
 `refs/heads/<job>`.
+
+### WP1 forge reads
+
+`gh_read` (`src/drivers/claude-forge-tools.ts`) now takes `verb` `pr view|list|diff|checks`, `issue view|list`,
+`run view|list`, `release view|list`, `repo view` or `api`, with `number`, `run_id`, `log_failed`, `path` (`api`
+only) and up to 20 read `args`. It always runs in the job's worktree, so it reads the job's origin; `pr view|checks|diff`
+without a number still read this job's PR or branch. Refused before `gh` runs, by name: `-X`/`--method`, `-f`/`-F`/
+`--field`/`--raw-field`, `--input`, `-H`/`--header`, `--hostname`, `-R`/`--repo`, `-w`/`--web`, `--watch` (short
+letters also inside a bundle such as `-iXPOST`), and an `api` path that is graphql, a URL or a flag. Output stays
+token-redacted and capped, and `pr checks`, `run list` and a status `run view` share the one CI status snapshot.
+Planners now get `gh_read` too (`roleForgeTools`; the lockdown expects it); no other forge tool, so forge writes stay
+off (U1). Bash `gh` is refused for both roles with a remedy naming `gh_read`. `tests/e2e/native-worker-parity.test.ts`
+NP-1a (reads reach a planner and an implementer) and NP-1b (every write shape refused, the gh log empty) pin it.

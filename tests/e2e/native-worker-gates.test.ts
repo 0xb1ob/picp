@@ -151,7 +151,7 @@ test("G3: synthetic settings and worktree .claude config never load; a surface p
 		// R2: the model is offered picp's tools only (plus the CLI's never-called deferred-loading placeholder), and no
 		// built-in skill or agent listing reaches its prompt: those exist in init only, with no Skill, Agent or Task tool.
 		const first = provider.requests.find((request) => request.path.startsWith("/v1/messages"))?.body as { tools?: Array<{ name: string }>; system?: unknown; messages?: unknown };
-		assert.deepEqual(first.tools?.map((tool) => tool.name).filter((name) => name !== "DeferredToolPlaceholder").sort(), [...SPIKE_TOOLS, REPORT_TOOL].sort());
+		assert.deepEqual(first.tools?.map((tool) => tool.name).filter((name) => name !== "DeferredToolPlaceholder").sort(), [...SPIKE_TOOLS, REPORT_TOOL, ...roleMcpTools("planner")].sort());
 		const prompt = JSON.stringify({ system: first.system, messages: first.messages });
 		assert.equal(/skill/i.test(prompt), false);
 		for (const agent of Object.keys(CLI_BUILTIN_AGENTS).filter((name) => name !== "claude")) assert.equal(new RegExp(`\\b${agent}\\b`).test(prompt), false, agent);

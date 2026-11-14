@@ -60,7 +60,7 @@ import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
 import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
 import { forgeTools } from "./claude-forge-tools.ts";
-import { FORGE_TOOL_NAMES, nativeRole, RESEARCH_TOOLS, reviewerReadGuard, roleMcpTools, roleTools, writeScopeGuard } from "./claude-roles.ts";
+import { FORGE_TOOL_NAMES, nativeRole, RESEARCH_TOOLS, reviewerReadGuard, roleForgeTools, roleMcpTools, roleTools, writeScopeGuard } from "./claude-roles.ts";
 import { VERDICT_TOOL, type VerdictState, verdictServer } from "./claude-verdict.ts";
 import { shipBashRefusal } from "./claude-ship-policy.ts";
 import { checkSurface, type Lockdown } from "./claude-lockdown.ts";
@@ -426,7 +426,7 @@ async function runInScratch(
 	const native = nativeRole(options.job.role);
 	// The lockdown expects the role's MCP surface: a reviewer's server holds report_verdict alone.
 	const mcpTools = native === "reviewer" ? [VERDICT_TOOL] : [REPORT_TOOL, ...roleMcpTools(options.job.role)];
-	const forge = native === "implementer" ? forgeTools(options.job, hostEnv) : [];
+	const forge = native === "reviewer" ? [] : forgeTools(options.job, hostEnv).filter((t) => roleForgeTools(options.job.role).includes(t.name));
 	const denials: SpikeResult["denials"] = [];
 	const models = new Set<string>();
 	let child: ChildProcess | undefined;

@@ -5,7 +5,7 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { hitsNeedle } from "../mandate.ts";
-import { lex, type Options, own, segmentRefusal, unlistedOption, wordsRefusal } from "./claude-bash-policy.ts";
+import { GH_BASH, lex, type Options, own, segmentRefusal, unlistedOption, wordsRefusal } from "./claude-bash-policy.ts";
 
 const DENIED = new Set(["gh", "cd", "curl", "wget", "ssh", "scp", "nc", "env", "printenv", "export", "sudo"]);
 const GIT_DENIED = new Set(["push", "fetch", "pull", "remote", "config", "worktree"]);
@@ -94,6 +94,7 @@ function segmentShipRefusal(words: readonly string[], worktree: string, secrets:
 	const shared = wordsRefusal(words, worktree, secrets);
 	if (shared !== undefined) return shared;
 	const [name = "", ...args] = words;
+	if (name === "gh") return GH_BASH;
 	if (DENIED.has(name)) return `\`${name}\` (denied to an implementer)`;
 	if (name === "git") return gitRefusal(args, worktree, secrets, branch, excluded);
 	if (name === "npm") return npmRefusal(args, worktree, excluded);
