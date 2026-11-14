@@ -759,3 +759,20 @@ applies at that settle (before O4 it was queued and never applied: every settle 
 Tests: `tests/e2e/native-operator.test.ts` NO-11 (stdio server offered as `mcp__probe__*`, `enabled: false` never
 started, a hidden tool refused) and NO-12 (an extra init plugin refused, with a negative control). fake-claude runs
 `--mcp-config` stdio servers and answers the hook listing.
+
+## Worker tool parity (WP0–WP7)
+
+The Claude CLI workers are moving to the pi workers' tools, role by role, under pi's worker guards and the operator's
+floors (secret paths, worktree write scope, `exclude_paths`, no push outside the job branch). Recovery for any step:
+switch `claude_ship` / `claude_research` off (new jobs route to pi at once), or revert the PR.
+
+### WP0 harness and guard baseline
+
+Native workers now run in CI without an installed `claude`. `tests/harness/native-worker.ts` dispatches through the
+real `cp_dispatch` of a pi parent on the mock model, with `tests/fixtures/fake-claude.ts` as `claude`
+(`CP_E2E_REAL_CLAUDE=1` uses the installed CLI). fake-claude now also runs Edit, Grep and Glob, logs each spawn's env
+key names (never values) in `spawns.jsonl`, and answers `initialize` with `hook_on_failure_supported`, which the SDK
+requires before it sends the prompt of a query whose hook is `onFailure: "block"` (the workers'). No production code
+changed. `tests/e2e/native-worker-parity.test.ts` NP-0a…NP-0e pin the guards every later step must keep: secret
+paths and env dumps, writes outside the worktree or into `.git`, `exclude_paths` on Edit/Write, and pushes outside
+`refs/heads/<job>`.
