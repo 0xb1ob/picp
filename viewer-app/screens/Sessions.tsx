@@ -3,7 +3,7 @@ import { type ComponentChild, createContext } from "preact";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { matchesSelection, type ProjectSelection, selectionHash, selectionValue } from "../project-filter.ts";
 import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
-import { contextText } from "../components/ContextChip.tsx";
+import { contextText, tokens } from "../components/ContextChip.tsx";
 import { modelText } from "../../src/viewer/model-text.ts";
 import { elapsed, jobSuffix, stamp, time } from "../format.ts";
 import { jobHref, jobTranscriptHref, sessionHref } from "../routes.ts";
@@ -49,11 +49,26 @@ function pickRow(e: MouseEvent, value: string): void {
 type Worker = SessionsResponse["workers"][number];
 /** Live the way the Overview's `health()` counts it: an in-flight job whose run has not exited, held-idle included. */
 export const countedLive = (w: Worker): boolean => ["waiting","held","launching"].includes(w.phase ?? "") && ["starting","working","idle"].includes(w.run_phase ?? "");
-/** The context percent alone (`16%`, or `ctx 16%` with `label`): the full figures sit in its title. */
+const full = (n: number): string => n.toLocaleString("en");
+/** The share of the compaction threshold reached, or null when the tokens or the threshold are unknown. */
+const compactPct = (u: ContextUsage): number | null => u.tokens !== null && u.compact_at ? Math.round((u.tokens / u.compact_at) * 100) : null;
+/** Absolute figures for the title: tokens used, the compaction threshold and the model's window, each when known. */
+function ctxTitle(u: ContextUsage): string {
+ if (u.tokens === null) return contextText(u);
+ const c = compactPct(u);
+ return [`${full(u.tokens)} tokens used`, c !== null ? `compaction at ${full(u.compact_at!)} (${c}%)` : null,
+  u.window !== null && u.percent !== null ? `model max ${full(u.window)} (${Math.round(u.percent)}%)` : u.reason].filter(Boolean).join(" · ");
+}
+/**
+ * The context percent alone (`16%`), or with `label` the header's `ctx 4% of compact · 3% of 200K`; full figures
+ * sit in its title.
+ */
 function CtxPct({usage,label=false}: {usage:ContextUsage | null | undefined;label?:boolean}) {
  if (!usage) return null;
- const text = usage.percent === null ? "ctx n/a" : `${label ? "ctx " : ""}${Math.round(usage.percent)}%`;
- return <span class={`session-ctx ctx-${usage.level ?? "unknown"}`} title={contextText(usage)}>{text}</span>;
+ const c = label ? compactPct(usage) : null;
+ const parts = [c !== null ? `${c}% of compact` : null, usage.percent !== null ? `${Math.round(usage.percent)}%${label ? ` of ${tokens(usage.window!)}` : ""}` : null].filter(Boolean);
+ const text = parts.length === 0 ? "ctx n/a" : `${label ? "ctx " : ""}${parts.join(" · ")}`;
+ return <span class={`session-ctx ctx-${usage.level ?? "unknown"}`} title={ctxTitle(usage)}>{text}</span>;
 }
 const workerPhase = (w: Worker): string => w.run_phase ?? "no run status";
 const workerDot = (w: Worker): string => w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown";

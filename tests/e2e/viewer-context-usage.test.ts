@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { appendFileSync, closeSync, openSync, readFileSync, renameSync, statSync, truncateSync, writeSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { recordModelWindows } from "../../src/model-windows.ts";
 import { SCAN_BYTES } from "../../src/viewer/context-usage.ts";
@@ -100,7 +100,7 @@ test("P19-ctx-views: Sessions carries operator, parent and worker context; Jobs 
 	const tab = await d.open("#sessions?view=workers&id=cp-one");
 	await tab.find(".session-ctx.ctx-warn");
 	const titles = tab.$$(".session-ctx").map((s) => s.getAttribute("title"));
-	assert.ok(titles.includes("ctx 204K / 272K · 75%") && titles.includes("ctx 136K / 272K · 50%"), `worker and parent figures: ${titles}`);
+	assert.ok(titles.includes("204,200 tokens used · model max 272,000 (75%)") && titles.some((title) => /^136,000 tokens used · .*model max 272,000 \(50%\)$/.test(title ?? "")), `worker and parent figures: ${titles}`);
 	assert.ok(titles.includes("context n/a"), "the operator's unknown context reads n/a");
 	assert.doesNotMatch(tab.root.innerHTML, /style=/);
 	const you = await d.open("#sessions?view=you");
@@ -110,6 +110,27 @@ test("P19-ctx-views: Sessions carries operator, parent and worker context; Jobs 
 	const chip = await jobs.find(".job-context > .ctx-chip.ctx-warn.ctx-compact");
 	assert.match(chip.textContent ?? "", /ctx 204K \/ 272K · 75%/);
 	assert.match(jobs.$('progress[aria-label="Context window used"]')!.getAttribute("value") ?? "", /^75\./);
+});
+
+// Scenario: Given an operator at 6,000 tokens on a 100K-window model and data/operator.json compact_at_tokens 50,000,
+// When the Sessions page opens, Then the header shows both shares and its title the absolute figures; driver claude
+// with no threshold falls back to the Claude CLI operator's 150,000.
+test("P19-ctx-compact: the header shows the compaction threshold's share beside the model window's", { timeout: 120_000 }, async (t) => {
+	const settings = (stateDir: string) => join(dirname(stateDir), "data", "operator.json");
+	const { d, at, view } = await ctxViewer(t, {}, { seed: ({ stateDir, sessions, home }) => {
+		write(join(home, "operator.jsonl"), reply({ ...ZERO, input: 6_000 }, { model: "w100" }));
+		write(operatorSessionsFile(sessions), line({ at: "2026-09-27T08:00:00.000Z", session_file: join(home, "operator.jsonl") }));
+		write(settings(stateDir), { compact_at_tokens: 50_000 });
+	} });
+	assert.equal(((await view("/api/sessions?view=you")).operator_context as Json).compact_at, 50_000);
+	const heading = async () => {
+		const tab = await d.open("#sessions?view=you");
+		const ctx = await tab.find(".session-heading .session-ctx");
+		return [ctx.textContent, ctx.getAttribute("title")];
+	};
+	assert.deepEqual(await heading(), ["ctx 12% of compact · 6% of 100K", "6,000 tokens used · compaction at 50,000 (12%) · model max 100,000 (6%)"]);
+	write(settings(at.stateDir), { driver: "claude" });
+	assert.deepEqual(await heading(), ["ctx 4% of compact · 6% of 100K", "6,000 tokens used · compaction at 150,000 (4%) · model max 100,000 (6%)"]);
 });
 
 test("P19-ctx-model: the latest model_change and thinking_level_change, else the last assistant model; unknown model explicit, unknown thinking omitted", { timeout: 120_000 }, async (t) => {

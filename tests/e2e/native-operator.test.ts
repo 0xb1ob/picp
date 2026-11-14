@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { layoutForHome } from "../../src/contracts.ts";
@@ -47,6 +47,7 @@ test("NO-1: a dashboard send reaches the Claude CLI operator's model, and the vi
 	const transcript = await op.view("/api/sessions?view=you&transcript=1", (view) => JSON.stringify(view.entries).includes("NO1-REPLY"), "the reply in the operator transcript");
 	assert.ok(JSON.stringify(transcript.entries).includes("NO1-HELLO"));
 	assert.ok(transcript.operator_context?.tokens > 0, JSON.stringify(transcript.operator_context));
+	assert.equal(transcript.operator_context?.compact_at, 150_000, "the header's compaction threshold: the Claude CLI operator's default");
 	const [recorded] = readOperatorSessions(join(op.state, "sessions"));
 	assert.match(recorded!.file, /native-operator-\d+\.jsonl$/);
 	assert.doesNotMatch(readFileSync(recorded!.file, "utf8"), /NO1-REPLY/, "the record holds no reply: only the mapping shows it");
@@ -290,6 +291,15 @@ test("NO-8: self_compact over the threshold runs /compact with the newest handof
 });
 
 const NEXT_MODEL = "anthropic/claude-picp-next";
+let applies = 0;
+/** `changes` through the operator's settings op, the frame the viewer forwards for a Settings save. */
+async function applySettings(op: NativeOperator, changes: Record<string, unknown>): Promise<Record<string, any>> {
+	const read = await op.send("settings_get", {}) as Record<string, any>;
+	const frame = { mode: "set", changes, expected_revision: read.result.snapshot.revision, dry_run: false, request_id: `no-apply-${++applies}`, peer: null };
+	return (await op.send("settings_apply", frame) as Record<string, any>).result;
+}
+const applyRows = (home: string) => existsSync(modelApplyFile(home)) ? readFileSync(modelApplyFile(home), "utf8").split("\n").filter(Boolean)
+	.map((line) => JSON.parse(line) as { session: string; state: string; thinking?: string | null }) : [];
 
 // Scenario: Given a Claude CLI operator, When Settings saves a new operator model, then a new thinking level, through
 // the session's settings op (the frame the viewer forwards), Then each next turn's call names the model, then carries
@@ -300,12 +310,7 @@ test("NO-9: a Settings model or thinking change applies on the next turn; a non-
 	const first = await op.seen("NO9-BEFORE");
 	assert.deepEqual([first.body.model, first.body.output_config], ["claude-picp-fake", undefined]);
 	await op.view("/api/sessions?view=you&transcript=1", (view) => JSON.stringify(view.entries).includes("NO9 before"), "the first reply");
-	let n = 0;
-	const apply = async (changes: Record<string, unknown>): Promise<Record<string, any>> => {
-		const read = await op.send("settings_get", {}) as Record<string, any>;
-		const frame = { mode: "set", changes, expected_revision: read.result.snapshot.revision, dry_run: false, request_id: `no9-apply-${++n}`, peer: null };
-		return (await op.send("settings_apply", frame) as Record<string, any>).result;
-	};
+	const apply = (changes: Record<string, unknown>) => applySettings(op, changes);
 	const file = join(op.home, layoutForHome("multi", op.home).data, "operator.json");
 	const before = readFileSync(file, "utf8");
 	const refused = await apply({ "models.operator": "openai/gpt-5" });
@@ -314,7 +319,7 @@ test("NO-9: a Settings model or thinking change applies on the next turn; a non-
 
 	const applied = await apply({ "models.operator": NEXT_MODEL });
 	assert.equal(applied.status, 200, JSON.stringify(applied));
-	const rows = () => existsSync(modelApplyFile(op.home)) ? readFileSync(modelApplyFile(op.home), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { session: string; state: string; thinking?: string | null }) : [];
+	const rows = () => applyRows(op.home);
 	await waitFor(rows, (seen) => seen.some((row) => row.session === "operator" && row.state === "applied"), { timeoutMs: 30_000, what: "the operator's model apply" });
 	assert.equal((await op.send("send", { kind: "message", text: "NO9-AFTER" })).ok, true);
 	assert.equal((await op.seen("NO9-AFTER")).body.model, "claude-picp-next");
@@ -325,6 +330,47 @@ test("NO-9: a Settings model or thinking change applies on the next turn; a non-
 	assert.equal((await op.send("send", { kind: "message", text: "NO9-EFFORT" })).ok, true);
 	const effort = await op.seen("NO9-EFFORT");
 	assert.deepEqual([effort.body.model, effort.body.output_config], ["claude-picp-next", { effort: "low" }]);
+});
+
+// Scenario: Given a Claude CLI operator mid-turn, When Settings saves a thinking level, Then the apply is queued and
+// lands at that turn's agent_settled with no further turn: the bridge reads isIdle() true while settling.
+// Regression: with isIdle `!busy` alone the change stays queued until some later turn settles.
+test("NO-14: a Settings change made mid-turn applies at that turn's settle, with no further turn", { timeout: 180_000 }, async (t) => {
+	let op: NativeOperator | undefined;
+	const midTurn = async () => {
+		assert.equal((await applySettings(op!, { "models.operator_thinking": "low" })).status, 200);
+		await waitFor(() => applyRows(op!.home), (seen) => seen.some((row) => row.session === "operator" && row.state === "queued"), { timeoutMs: 30_000, what: "the queued apply" });
+	};
+	op = await nativeOperator(t, [{ kind: "text", text: "NO14 reply", beforeAnswer: midTurn }]);
+	assert.equal((await op.send("send", { kind: "message", text: "NO14-GO" })).ok, true);
+	await waitFor(() => applyRows(op.home), (seen) => seen.some((row) => row.session === "operator" && row.state === "applied" && row.thinking === "low"), { timeoutMs: 30_000, what: "the apply at the settle" });
+	assert.equal(op.calls().length, 1, "applied at the settle, not by a later turn");
+});
+
+// Scenario: Given an operator skill under <home>/skills, When the Claude CLI operator's model is called, Then the system
+// prompt carries the skills index naming Read, the CLI is spawned with WebSearch and WebFetch, and a WebFetch call passes
+// the operator's guard. Fails too if pi's "the read tool" wording drifts and the Read rewrite silently no-ops.
+test("NO-13: the skills index and the web tools reach the Claude CLI operator", { timeout: 180_000 }, async (t) => {
+	const op = await nativeOperator(t, [
+		{ kind: "tool_use", calls: [{ name: "WebFetch", input: { url: "https://example.com", prompt: "NO13" } }] },
+		{ kind: "text", text: "NO13 done" },
+	], { seed: (home) => {
+		mkdirSync(join(home, "skills", "brainstorming"), { recursive: true });
+		writeFileSync(join(home, "skills", "brainstorming", "SKILL.md"), "---\nname: brainstorming\ndescription: NO13 skill description\n---\nbody\n");
+	} });
+	assert.equal((await op.send("send", { kind: "message", text: "NO13-GO" })).ok, true);
+	const system = JSON.stringify((await op.seen("NO13-GO")).body.system);
+	assert.match(system, /<name>brainstorming<\/name>/);
+	assert.match(system, /NO13 skill description/);
+	assert.ok(system.includes("Use Read to load a skill's file"), "the skills index names Read");
+	assert.ok(!system.includes("the read tool"), "pi's wording, rewritten for the Claude CLI");
+	const [fetched] = await waitFor(() => toolResults(op.provider.requests), (seen) => seen.length >= 1, { timeoutMs: 60_000, what: "the WebFetch result" });
+	assert.doesNotMatch(fetched!, /Refused/, "the guard passes WebFetch to the CLI");
+	const [record] = readOperatorSessions(join(op.state, "sessions"));
+	const spawns = readFileSync(join(dirname(record!.file), "native-operator-claude", "config", "fake-claude", "spawns.jsonl"), "utf8");
+	const argv = (JSON.parse(spawns.split("\n")[0]!) as { argv: string[] }).argv;
+	const tools = argv.find((arg) => arg.startsWith("--tools="))?.slice("--tools=".length).split(",") ?? [];
+	assert.ok(tools.includes("WebSearch") && tools.includes("WebFetch"), argv.join(" "));
 });
 
 const PROBE_SERVER = join(REPO_ROOT, "tests/fixtures/mcp-probe-server.mjs");

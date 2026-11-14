@@ -21,6 +21,8 @@ export interface ContextUsage {
  model: string | null; last_compact_at: string | null;
  /** The session's latest `thinking_level_change`; null (never rendered) when the file records none. */
  thinking: string | null;
+ /** The session's effective compaction threshold in tokens (operator and parent); absent where none is known. */
+ compact_at?: number | null;
 }
 export interface SessionEntry {
  id: string; at: string; kind: "say" | "tool" | "via" | "decision" | "ask" | "system";
