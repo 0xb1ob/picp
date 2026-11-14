@@ -1,15 +1,11 @@
 /**
- * A stand-in `claude` CLI for the Agent SDK (stream-json over stdio, the control protocol included) that sends each
- * model call to tests/harness/claude-mock-provider.ts, so native e2e cases run where Claude Code is not installed.
- * Covers what the native parent drives: turns, cp_* tools over the SDK's MCP relay with PreToolUse hooks, `--resume`,
- * `/compact <instructions>` (as claude 2.1.318 runs it), `getContextUsage`, `interrupt`, `--replay-user-messages` and
- * a mid-turn message joining after the next tool batch (else its own queued turn); for the operator, Bash/Read/Write,
- * Stop hooks, image blocks, `--mcp-config` stdio servers and the lockdown's hook listing. Each spawn's argv is logged.
+ * A stand-in `claude` CLI (stream-json, control protocol) calling tests/harness/claude-mock-provider.ts, for the native
+ * parent, operator and workers: hooks, MCP, Bash/Read/Write/Edit/Grep/Glob; logs each spawn's argv and env key names.
  */
 import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, matchesGlob, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { CLAUDE_VERSION_FLOOR } from "../../src/drivers/claude-cli.ts";
 
@@ -35,7 +31,8 @@ function flag(name: string): string | undefined {
 
 const store = join(process.env.CLAUDE_CONFIG_DIR ?? join(process.env.HOME ?? ".", ".claude"), "fake-claude");
 mkdirSync(join(store, "sessions"), { recursive: true });
-appendFileSync(join(store, "spawns.jsonl"), `${JSON.stringify({ argv: args, at: new Date().toISOString() })}\n`);
+// Names only: a value here would copy the synthetic token into test artifacts.
+appendFileSync(join(store, "spawns.jsonl"), `${JSON.stringify({ argv: args, envKeys: Object.keys(process.env).sort(), at: new Date().toISOString() })}\n`);
 
 const settingsArg = flag("--settings");
 const settings = settingsArg === undefined ? {} : JSON.parse(settingsArg.startsWith("{") ? settingsArg : readFileSync(settingsArg, "utf8")) as { env?: Record<string, string> };
@@ -170,16 +167,40 @@ const textOf = (content: Message["content"]): string => typeof content === "stri
 const failed = (status: number, body: Record<string, unknown>): string =>
 	`API Error: ${status} ${(body.error as { message?: string } | undefined)?.message ?? JSON.stringify(body)}`;
 
-/** The built-ins `--tools` names that a case drives (Bash, Read, Write), run for real; any other is not available. */
+/** Every file under `root` (absolute paths, `.git` skipped), or `root` itself when it is a file. */
+function walk(root: string): string[] {
+	if (!statSync(root).isDirectory()) return [root];
+	return readdirSync(root, { withFileTypes: true }).filter((entry) => entry.name !== ".git")
+		.flatMap((entry) => entry.isDirectory() ? walk(join(root, entry.name)) : [join(root, entry.name)]);
+}
+
+/** The built-ins `--tools` names that a case drives (Bash, Read, Write, Edit, Grep, Glob), run for real. */
 function builtin(name: string, input: Record<string, unknown>, toolUseId: string): Block {
 	const done = (content: string, isError = false): Block => ({ type: "tool_result", tool_use_id: toolUseId, is_error: isError, content });
 	try {
 		const file = String(input.file_path ?? "");
+		const base = resolve(String(input.path ?? process.cwd()));
 		if (name === "Read") return done(readFileSync(file, "utf8"));
 		if (name === "Write") {
 			mkdirSync(dirname(file), { recursive: true });
 			writeFileSync(file, String(input.content ?? ""));
 			return done(`File created successfully at: ${file}`);
+		}
+		if (name === "Edit") {
+			const [before, after, text] = [String(input.old_string ?? ""), String(input.new_string ?? ""), readFileSync(file, "utf8")];
+			if (before === "" || !text.includes(before)) return done(`String to replace not found in file.\nString: ${before}`, true);
+			writeFileSync(file, input.replace_all === true ? text.split(before).join(after) : text.replace(before, () => after));
+			return done(`The file ${file} has been updated.`);
+		}
+		if (name === "Grep") {
+			const needle = String(input.pattern ?? "");
+			const hits = walk(base).flatMap((each) => readFileSync(each, "utf8").split("\n").flatMap((line, i) => line.includes(needle) ? [`${each}:${i + 1}:${line}`] : []));
+			return done(hits.length > 0 ? hits.join("\n") : "No matches found");
+		}
+		if (name === "Glob") {
+			const pattern = String(input.pattern ?? "");
+			const found = walk(base).filter((each) => matchesGlob(isAbsolute(pattern) ? each : relative(base, each), pattern));
+			return done(found.length > 0 ? found.join("\n") : "No files found");
 		}
 		if (name === "Bash") return done(execFileSync("sh", ["-c", String(input.command ?? "")], { encoding: "utf8" }));
 	} catch (error) {
@@ -342,7 +363,8 @@ function control(line: { request_id: string; request: Record<string, unknown> })
 		stopIds = (hooks.Stop ?? []).flatMap((matcher) => matcher.hookCallbackIds ?? []);
 		servers = Array.isArray(body.sdkMcpServers) ? body.sdkMcpServers.map(String) : [];
 		systemPrompt = Array.isArray(body.systemPrompt) ? body.systemPrompt.join("\n\n") : String(body.systemPrompt ?? "");
-		return reply({ commands: [{ name: "compact", description: "Compact the conversation", argumentHint: "<instructions>", builtin: true }], output_style: "default", available_output_styles: ["default"], models: [], account: {} });
+		// The SDK holds the prompt of a query with an `onFailure: "block"` hook (the workers') until this is true.
+		return reply({ commands: [{ name: "compact", description: "Compact the conversation", argumentHint: "<instructions>", builtin: true }], output_style: "default", available_output_styles: ["default"], models: [], account: {}, hook_on_failure_supported: true });
 	}
 	if (body.subtype === "get_hooks_listing") return reply({ hooks: [], policy: { managedOnly, policyHookCount: 0 } });
 	if (body.subtype === "get_context_usage") {
