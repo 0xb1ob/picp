@@ -776,3 +776,15 @@ requires before it sends the prompt of a query whose hook is `onFailure: "block"
 changed. `tests/e2e/native-worker-parity.test.ts` NP-0a…NP-0e pin the guards every later step must keep: secret
 paths and env dumps, writes outside the worktree or into `.git`, `exclude_paths` on Edit/Write, and pushes outside
 `refs/heads/<job>`.
+
+### WP4 web tools (planner role)
+
+A native planner-role worker (profiles `planner` and `qa`, any profile whose packages activate `pi-web-access`) gets the
+CLI's `WebSearch` and `WebFetch`; implementers and reviewers keep them disallowed. The dispatch sets `CP_NATIVE_WEB=1`
+(`nativeSpawnOptions`, from `activatedPackageNames`) and the research addendum names both tools. Each call passes pi's
+`webEgressRefusal` in the worker process, as `fetch_content {url, prompt}` / `web_search {query, …}`, with the
+worker's env: no `.pi-command-post`, job path, secret value or credential shape leaves the host. `WebFetch` processes
+pages with the CLI's own model (pi refuses that `answer` mode). Whether the CLI loads the web tools under the scratch
+config is unknown (K1), so the lockdown declares them optional: present or absent, it passes; any other extra still
+refuses. `tests/e2e/native-worker-tools.test.ts` NP-4a…NP-4c pin a fetch and a search reaching the planner, egress
+refusals leaving no request at a loopback web server, and web for the planner role only. Rollback: revert.

@@ -36,6 +36,7 @@ import { ASKING_ROLES, type QuestionRelay } from "./questions.ts";
 import { SECRET_PATTERNS } from "./secret-patterns.ts";
 import { STRIPPED_ENV_KEYS } from "./stripped-env.ts";
 import {
+	activatedPackageNames,
 	activePackagesForRole,
 	type DetectedWorkerPackages,
 	NO_DETECTED_WORKER_PACKAGES,
@@ -665,7 +666,9 @@ export class WorkerManager {
 				? { extraArgs: [...(request.extraArgs ?? []), ...(optional.flags ?? [])] }
 				: {}),
 			...(this.#options.piBin ? { piBin: this.#options.piBin } : {}),
-			...(request.driver ? nativeSpawnOptions(request.model, plan.env, request.profile.systemPrompt) : {}),
+			...(request.driver ? nativeSpawnOptions(request.model, plan.env, request.profile.systemPrompt, {
+				web: activatedPackageNames(role, request.profile.frontmatter.packages).includes("pi-web-access"),
+			}) : {}),
 		});
 		const managed: ManagedWorker = {
 			key,

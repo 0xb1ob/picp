@@ -4,6 +4,8 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { TestContext } from "node:test";
@@ -21,8 +23,22 @@ export const EXCLUDE_PATHS = [".github/workflows/", "secrets/", "**/.env*"];
 
 type Tool = { toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } };
 
-/** `files` seed the project repo; `run`'s extra env joins the parent's, which the worker inherits. */
-export async function nativeWorkerHome(t: TestContext, script: readonly ClaudeStep[], opts: { files?: Record<string, string> } = {}) {
+/** A loopback web server (the external service at the boundary): every path serves `page`; `paths` logs each request. */
+export async function startFakeWeb(t: TestContext, page: string): Promise<{ url: string; paths: string[] }> {
+	const seen: string[] = [];
+	const server = createServer((req, res) => {
+		seen.push(req.url ?? "");
+		res.writeHead(200, { "content-type": "text/plain" });
+		res.end(page);
+	});
+	await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+	t.after(() => new Promise<void>((done) => (server.closeAllConnections(), server.close(() => done()))));
+	return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, paths: seen };
+}
+
+/** `files` seed the project repo; `settingsEnv` joins the fake settings env (fake-claude's knobs); `run`'s extra env
+ * joins the parent's, which the worker inherits. */
+export async function nativeWorkerHome(t: TestContext, script: readonly ClaudeStep[], opts: { files?: Record<string, string>; settingsEnv?: Record<string, string> } = {}) {
 	const b = await dispatchS29(t, { files: opts.files });
 	writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS }));
 	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true, claude_ship: true }));
@@ -33,7 +49,7 @@ export async function nativeWorkerHome(t: TestContext, script: readonly ClaudeSt
 	t.after(async () => { await claude.close(); rmSync(fakeHome, { recursive: true, force: true }); rmSync(gh, { recursive: true, force: true }); });
 	const settings = join(fakeHome, ".claude", "settings.json");
 	mkdirSync(join(fakeHome, ".claude"), { recursive: true, mode: 0o700 });
-	writeFileSync(settings, JSON.stringify({ env: { ANTHROPIC_BASE_URL: claude.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN } }));
+	writeFileSync(settings, JSON.stringify({ env: { ...opts.settingsEnv, ANTHROPIC_BASE_URL: claude.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN } }));
 	// commitIdentityEnv reads git config, not the GIT_AUTHOR_* the preload exports: a native implementer needs this.
 	writeFileSync(join(fakeHome, ".gitconfig"), "[user]\n\tname = native worker e2e\n\temail = native-worker@test.invalid\n");
 	const bin = join(fakeHome, "bin");
