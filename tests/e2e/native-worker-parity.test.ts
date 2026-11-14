@@ -121,7 +121,7 @@ test("NP-0d: an implementer pushes only its job branch; no credential reaches th
 	const before = h.originRefs();
 	const job = await h.job("ship");
 	id = job.id;
-	const ends = await h.run([job.dispatch("Add src/np0d.ts and push it."), h.awaitEnvelope(id)], { GH_TOKEN: "ghp_np0dsyntheticcredential00000000000000", SSH_AUTH_SOCK: "/tmp/np0d-agent.sock" });
+	const ends = await h.run([job.dispatch("Add src/np0d.ts and push it."), h.awaitEnvelope(id)], { GH_TOKEN: "np0d-synthetic-gh-token", SSH_AUTH_SOCK: "/tmp/np0d-agent.sock" });
 	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
 	const results = toolResults(h.claude.requests);
 	const after = h.originRefs();
