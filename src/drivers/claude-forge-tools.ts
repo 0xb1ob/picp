@@ -139,6 +139,10 @@ export function forgeTools(job: ForgeJob, env: NodeJS.ProcessEnv = process.env, 
 	let jobRepo: string | undefined;
 	const resolveJobRepo = async (): Promise<string | undefined> => {
 		if (jobRepo !== undefined) return jobRepo;
+		const remote = await exec("git", ["remote", "get-url", "origin"], job.worktree, readEnv);
+		const origin = remote.ok ? /^(?:https:\/\/|ssh:\/\/git@|git@)github\.com[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(remote.out) : null;
+		if (origin !== null) return (jobRepo = `${origin[1]}/${origin[2]}`);
+		// A non-GitHub origin URL (an enterprise host, a local mirror): gh resolves the repo from the worktree.
 		const read = await ghReadOnly(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
 		const name = read.out.trim();
 		if (read.ok && /^[\w.-]+\/[\w.-]+$/.test(name)) jobRepo = name;
@@ -241,8 +245,8 @@ export function forgeTools(job: ForgeJob, env: NodeJS.ProcessEnv = process.env, 
 				const named = apiPathRepo(args.path);
 				if (named !== undefined) {
 					const own = await resolveJobRepo();
-					if (own === undefined) return refuse("gh_read could not tell this job's repo (`gh repo view` failed); use repos/{owner}/{repo}/... in path.");
-					if (named.toLowerCase() !== own.toLowerCase()) return refuse(`gh_read \`api\` reads only ${own}, this job's repo, never ${named}; ${REMEDY}.`);
+					if (own === undefined) return refuse(`gh_read could not tell this job's origin repo, so it never reads ${args.path}; use repos/{owner}/{repo}/... in path.`);
+					if (named.toLowerCase() !== own.toLowerCase()) return refuse(`gh_read \`api\` reads only ${own}, this job's origin, never ${args.path} (${named}); ${REMEDY}.`);
 				}
 				argv = ["api", args.path];
 			} else if (args.verb === "issue view") {
