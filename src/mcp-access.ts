@@ -11,6 +11,7 @@ import type { CommandRunner } from "./doctor.ts";
 import { operatorDriverSetting } from "./operator-compact.ts";
 import { listProfiles } from "./profiles.ts";
 import { SECRET_PATTERNS } from "./secret-patterns.ts";
+import { loadNativeConfig, NATIVE_CLASSES, nativeConfigFile } from "./worker-driver.ts";
 import { agentDirOf, enabledServers, MCP_CALL_TOOL, readUserMcpServers } from "./worker-mcp.ts";
 
 export interface McpAccessOptions {
@@ -25,6 +26,15 @@ export interface McpAccessOptions {
 function claudeOperator(home: string | undefined): boolean {
 	try {
 		return home !== undefined && operatorDriverSetting(join(home, LAYOUT.data, "operator.json")) === "claude";
+	} catch {
+		return false;
+	}
+}
+
+/** Whether any `data/native.json` switch is on; an unreadable file is off here (its own doctor line names it). */
+function nativeWorkers(home: string | undefined): boolean {
+	try {
+		return home !== undefined && NATIVE_CLASSES.some((key) => loadNativeConfig(nativeConfigFile(home))[key]);
 	} catch {
 		return false;
 	}
@@ -61,7 +71,8 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 	const workerProfiles = listProfiles(join(o.packageRoot, "profiles")).map((p) => p.frontmatter.name);
 	const claude = claudeOperator(o.home);
 	const session = claude ? `operator session: driver claude: servers from ${user.path}, no codemode` : "operator session: builtin:mcp, codemode, tool-search";
-	const by = `every worker profile (${workerProfiles.join(", ")}; implementer/ship workers and the gate, diff and quality reviewers included) via ${MCP_CALL_TOOL}, all exposed tools, no annotation filter (servers read in place from ${user.path}); the CP parent: unchanged`;
+	const native = nativeWorkers(o.home) ? `; native workers: servers from ${user.path} as mcp__<server>__<tool>, no OAuth sign-in under the scratch config` : "";
+	const by = `every worker profile (${workerProfiles.join(", ")}; implementer/ship workers and the gate, diff and quality reviewers included) via ${MCP_CALL_TOOL}, all exposed tools, no annotation filter (servers read in place from ${user.path}); the CP parent: unchanged${native}`;
 	const finding = (check: string, severity: DoctorFinding["severity"], what: string, fix?: string, detail?: string): DoctorFinding => ({
 		check,
 		severity,

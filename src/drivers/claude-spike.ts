@@ -59,6 +59,7 @@ import { workerHostGuard } from "../worker-host-guard.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
 import { WEB_TOOLS, webEgressRefusal } from "../web-egress.ts";
+import { CLAUDE_MCP_HELPER_TOOLS, type ClaudeMcpServers } from "../worker-mcp.ts";
 import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
 import { forgeTools } from "./claude-forge-tools.ts";
 import {
@@ -74,7 +75,7 @@ import {
 } from "./claude-roles.ts";
 import { VERDICT_TOOL, type VerdictState, verdictServer } from "./claude-verdict.ts";
 import { shipBashRefusal } from "./claude-ship-policy.ts";
-import { checkSurface, type Lockdown } from "./claude-lockdown.ts";
+import { checkSurface, type Lockdown, mcpToolPrefix } from "./claude-lockdown.ts";
 import { assertNativeEffort } from "./claude.ts";
 
 export { CLAUDE_VERSION_FLOOR, ClaudeSpikeError, claudeVersionRefusal, parseClaudeVersion, resolveClaude } from "./claude-cli.ts";
@@ -235,11 +236,25 @@ const deny = (reason: string): HookJSONOutput => ({
 	hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
 });
 
+/**
+ * WP5: a tool of a user MCP server (`mcp`) or one of the three MCP helpers. `{}` allows it, as pi's `mcp_call` runs
+ * under no tool_call guard; `refusal` names a hidden tool; undefined when the name is neither.
+ */
+export function userMcpRoute(mcp: ClaudeMcpServers | undefined, toolName: string): { refusal?: string } | undefined {
+	const servers = Object.keys(mcp?.servers ?? {});
+	if (mcp === undefined || servers.length === 0) return undefined;
+	if (CLAUDE_MCP_HELPER_TOOLS.includes(toolName)) return {};
+	const server = servers.find((name) => toolName.startsWith(mcpToolPrefix(name)));
+	if (server === undefined) return undefined;
+	return mcp.hidden(server, toolName.slice(mcpToolPrefix(server).length)) ? { refusal: `Refused: ${toolName} is hidden in ${mcp.path}.` } : {};
+}
+
 /** The PreToolUse hook: nothing runs before `ready` settles clean (the lockdown); then the tool set and every guard. */
 export function preToolUseHook(
 	guards: readonly SpikeGuard[],
 	onDeny: (tool: string, reason: string) => void = () => {},
 	ready: Promise<string | undefined> = Promise.resolve(undefined),
+	mcp?: ClaudeMcpServers,
 ): HookCallback {
 	return async (input) => {
 		if (input.hook_event_name !== "PreToolUse") return {};
@@ -249,8 +264,9 @@ export function preToolUseHook(
 			return deny(reason);
 		}
 		try {
-			const call = normalizeToolCall(input.tool_name, input.tool_input);
-			reason = call === undefined ? `Refused: ${input.tool_name} is not in the spike's tool set.` : undefined;
+			const user = userMcpRoute(mcp, input.tool_name);
+			const call = user === undefined ? normalizeToolCall(input.tool_name, input.tool_input) : undefined;
+			reason = user !== undefined ? user.refusal : call === undefined ? `Refused: ${input.tool_name} is not in the spike's tool set.` : undefined;
 			for (const guard of call === undefined ? [] : guards) {
 				reason = guard(call as NormalizedCall);
 				if (reason !== undefined) break;
@@ -360,6 +376,8 @@ export interface SpikeRunOptions {
 	tools?: readonly string[];
 	/** WP4: a planner-role run also gets WebSearch and WebFetch under `webEgressRefusal`; other roles ignore it. */
 	web?: boolean;
+	/** WP5: the user's MCP servers beside picp's, every role; the lockdown declares them and the helpers optional. */
+	mcp?: ClaudeMcpServers;
 	extraGuards?: readonly SpikeGuard[];
 	hostEnv?: NodeJS.ProcessEnv;
 	timeoutMs?: number;
@@ -445,7 +463,9 @@ async function runInScratch(
 	const state: ReportState = { refusals: [], attempts: 0 };
 	const native = nativeRole(options.job.role);
 	const web = options.web === true && native === "research";
-	const tools = options.tools ?? roleTools(options.job.role, { web });
+	const userServers = Object.keys(options.mcp?.servers ?? {});
+	const mcpHelpers = userServers.length > 0 ? CLAUDE_MCP_HELPER_TOOLS : [];
+	const tools = options.tools ?? [...roleTools(options.job.role, { web }), ...mcpHelpers];
 	// The lockdown expects the role's MCP surface: a reviewer's server holds report_verdict alone.
 	const mcpTools = native === "reviewer" ? [VERDICT_TOOL] : [REPORT_TOOL, ...roleMcpTools(options.job.role)];
 	const forge = native === "reviewer" ? [] : forgeTools(options.job, hostEnv).filter((t) => roleForgeTools(options.job.role).includes(t.name));
@@ -514,7 +534,7 @@ async function runInScratch(
 		// Binds as allowManagedHooksOnly: settings-file and project hooks never run; picp's SDK callback still does.
 		managedSettings: CHILD_MANAGED_SETTINGS,
 		strictMcpConfig: true,
-		mcpServers: { picp: native === "reviewer" ? verdictServer(options.job, state) : reportServer(options.job, state, forge) },
+		mcpServers: { ...options.mcp?.servers, picp: native === "reviewer" ? verdictServer(options.job, state) : reportServer(options.job, state, forge) },
 		tools: [...tools],
 		// No bare allow rules: they shadow canUseTool, and the PreToolUse hook already allows every guarded call.
 		disallowedTools: ["Agent", "Task", ...(web ? [] : NATIVE_WEB_TOOLS)],
@@ -525,7 +545,7 @@ async function runInScratch(
 		canUseTool,
 		hooks: {
 			PreToolUse: [
-				{ hooks: [preToolUseHook([...spikeGuards(options.job, secrets, options.job.role, web), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
+				{ hooks: [preToolUseHook([...spikeGuards(options.job, secrets, options.job.role, web), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready, options.mcp)], onFailure: "block" },
 			],
 			// A report already on file (an earlier run's) is one this run cannot replace: nothing to ask for.
 			...(native === "reviewer" ? {} : { Stop: [{ hooks: [stopHook(() => state.accepted !== undefined || existsSync(join(options.job.runDir, ENVELOPE_FILE)), () => liveTasks.size)] }] }),
@@ -537,8 +557,8 @@ async function runInScratch(
 		...nativeEffortOptions(options.thinking),
 		...(options.resume === undefined ? {} : { resume: options.resume.sessionId }),
 	};
-	// The CLI may leave the web tools out (K1: availability under the scratch config), so they are optional, not expected.
-	const optionalTools = web ? NATIVE_WEB_TOOLS : [];
+	// The CLI may leave the web tools out (K1) and ToolSearch with nothing deferred: optional, not expected.
+	const optionalTools = [...(web ? NATIVE_WEB_TOOLS : []), ...mcpHelpers];
 	const expectedTools = [...tools.filter((name) => !optionalTools.includes(name)), ...mcpTools];
 	try {
 		const q = query({ prompt: input(), options: sdkOptions });
@@ -552,7 +572,7 @@ async function runInScratch(
 				initModel = message.model;
 				sessionId = message.session_id;
 				coldStartMs = Date.now() - started;
-				checking = checkSurface(q, message, expectedTools, { optionalTools }).then((lockdown) => {
+				checking = checkSurface(q, message, expectedTools, { optionalTools, optionalServers: userServers }).then((lockdown) => {
 					if (lockdown.verdict === "refused") abort.abort();
 					release(lockdown.refusal);
 					return lockdown;

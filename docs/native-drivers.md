@@ -807,3 +807,19 @@ pages with the CLI's own model (pi refuses that `answer` mode). Whether the CLI 
 config is unknown (K1), so the lockdown declares them optional: present or absent, it passes; any other extra still
 refuses. `tests/e2e/native-worker-tools.test.ts` NP-4a…NP-4c pin a fetch and a search reaching the planner, egress
 refusals leaving no request at a loopback web server, and web for the planner role only. Rollback: revert.
+
+### WP5 user MCP servers (every role)
+
+Every native worker (planner, implementer, gate reviewer) gets the operator's MCP servers from `<agent dir>/mcp.json`,
+as pi's workers reach them through `mcp_call`. The worker process reads the file once (`claudeMcpServers`, the
+operator's reader, with `picp` as the reserved name), passes each enabled stdio or HTTP server beside picp's own, and
+appends the operator-style servers section to the system prompt; a skipped server (`picp`, `cwd`, `auth`, `!command`,
+an unset `$VAR`) is one stderr line and a `native_mcp_skipped` run event, never a config value. `enabled: false`
+servers never load; a tool `toolExposure`/`exposure` hides is refused by name in the PreToolUse hook; the others run
+with no further tool guard, as `mcp_call` does on pi. `ToolSearch`, `ListMcpResourcesTool` and `ReadMcpResourceTool`
+join when any server loads. The lockdown declares the user servers and those helpers optional: any other server, tool
+or plugin still refuses the run before a tool executes. User servers hold their own credentials and can act
+externally, as on pi; OAuth HTTP servers have no sign-in under the scratch config (O4). `/doctor`'s `mcp.workers`
+detail names the native path when a `data/native.json` switch is on. `tests/e2e/native-worker-tools.test.ts`
+NP-5a…NP-5c pin every role reaching the servers, the reserved name, and the lockdown with web and MCP optional.
+Recovery: switch `claude_ship` / `claude_research` off, remove the server from `mcp.json`, or revert.

@@ -10,7 +10,7 @@ import { parseArgs } from "node:util";
 import { formatSkillsForPrompt, loadSkills } from "@earendil-works/pi-coding-agent";
 import registerCpBridge, { operatorToolRefusal, resolveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { OPERATOR_NOTE } from "../operator-note.ts";
-import { agentDirOf, claudeMcpServers, readUserMcpServers } from "../worker-mcp.ts";
+import { agentDirOf, CLAUDE_MCP_HELPER_TOOLS, claudeMcpSection, claudeMcpServers, readUserMcpServers } from "../worker-mcp.ts";
 import { lex, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
 import { mcpToolPrefix } from "./claude-lockdown.ts";
 import { HeadlessHost, type HostPorts } from "./claude-parent-session.ts";
@@ -48,14 +48,8 @@ const user = readUserMcpServers(agentDir);
 const mcp = claudeMcpServers(user, process.env);
 for (const line of mcp.skipped) process.stderr.write(`cp-operator: ${line}\n`);
 const userServers = Object.keys(mcp.servers);
-/** pi's builtin:mcp beside the servers: deferred tools load through ToolSearch, resources through the two resource tools. */
-const MCP_TOOLS = userServers.length > 0 ? ["ToolSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"] : [];
-const described = (name: string): string => {
-	const description = (user.servers[name] as { description?: unknown }).description;
-	return typeof description === "string" ? `${name}: ${description}` : name;
-};
-const serversSection = userServers.length === 0 ? ""
-	: `\n\nMCP servers (from ${mcp.path}; tools mcp__<server>__<tool>, deferred ones found with ToolSearch):\n${userServers.map((name) => `- ${described(name)}`).join("\n")}`;
+const MCP_TOOLS = userServers.length > 0 ? [...CLAUDE_MCP_HELPER_TOOLS] : [];
+const serversSection = claudeMcpSection(user, mcp);
 const skillsIndex = formatSkillsForPrompt(loadSkills({ cwd, agentDir, skillPaths, includeDefaults: false }).skills, "read").replace("the read tool", "Read");
 // The CLI's own dir beside the record holds its config and transcripts: as secret as ~/.claude.
 const secrets = [...secretPaths(operatorClaudeSettings(), [homedir(), userInfo().homedir]), join(dirname(sessionFile), `${RECORD_PREFIX}-claude`)];
