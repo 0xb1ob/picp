@@ -887,3 +887,15 @@ same brief note a pi worker gets (`skillsBriefNote`, `src/job-skills.ts`): each 
 `MENTION_NEVER` refusals still apply at dispatch. `tests/e2e/native-routing.test.ts` J1 (the skills row routes
 claude; ops still routes pi) and `tests/e2e/native-worker-tools.test.ts` NP-6a (the brief names the path and the
 worker's Read returns the skill body) pin it. Rollback: revert (restores the selection refusal).
+
+### WP7 ops profile
+
+An `ops:<class>` job (profile `ops`, role planner) no longer routes to pi as `ineligible`. The dispatch sets
+`CP_NATIVE_PROFILE=<profile name>` (`nativeSpawnOptions`, from the worker manager), and `nativeWorkerChildEnv` gives the
+`ops` child alone the host's `SSH_AUTH_SOCK` (when set) and unsets `buildChildEnv`'s `GIT_SSH_COMMAND=false`; every
+other profile keeps both as before. Every `ssh` is still appended to the job's `host-audit.jsonl` and a key or `*.pem`
+read is still refused (`workerHostGuard`); the research write scope applies, so README and other repo writes stay
+refused. The native Bash scope still refuses `scp` and `rsync`, so a native ops job copies with `ssh … > <artifact
+dir>/…`. `tests/e2e/native-routing.test.ts` J1 (the ops row routes claude) and `tests/e2e/native-worker-tools.test.ts`
+NP-7a (a stub `ssh` sees the agent, one audit row, the key read and README write refused; a plain planner beside it
+gets no agent and keeps `GIT_SSH_COMMAND`) pin it. Recovery: revert (ops goes back to pi by the selection refusal).

@@ -1,7 +1,7 @@
 /**
  * Claude/pi worker parity (WP4+) through the real `cp_dispatch` of a pi parent (mock model), fake-claude as the CLI on
  * CI, only boundary services faked. NP-4*: the planner role's web tools; NP-5*: user MCP servers and the lockdown;
- * NP-6a: per-job skills.
+ * NP-6a: per-job skills; NP-7a: the ops profile's audited ssh.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -11,11 +11,14 @@ import { CommandPost } from "../../src/command-post.ts";
 import { LAYOUT, paths } from "../../src/contracts.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { VERDICT_TOOL } from "../../src/drivers/claude-verdict.ts";
+import { HOST_AUDIT_FILE } from "../../src/worker-host-guard.ts";
 import { type ClaudeStep, type ClaudeToolUse, FAKE_NATIVE_MODEL, type RecordedClaudeRequest, toolResults } from "../harness/claude-mock-provider.ts";
 import { readRunEvents, REPO_ROOT, type ScriptStep, waitFor } from "../harness/index.ts";
+import { REAL_CLAUDE } from "../harness/native-parent.ts";
 import { NATIVE, nativeWorkerHome, startFakeWeb } from "../harness/native-worker.ts";
 
 const calls = (...uses: ClaudeToolUse[]): ClaudeStep => ({ kind: "tool_use", calls: uses });
+const bash = (command: string): ClaudeToolUse => ({ name: "Bash", input: { command } });
 const done: ClaudeStep = { kind: "text", text: "Reported." };
 const text = (end: { result: { content?: unknown } } | undefined) => JSON.stringify(end?.result.content ?? "");
 const researchReport = (id: string, home: string) => ({
@@ -279,4 +282,64 @@ test("NP-6a: a native job with a per-job skill reads its SKILL.md", { skip: NATI
 	const [run] = await h.runs(id);
 	assert.deepEqual([run?.lockdown, run?.denials, run?.report], ["ok", 0, true], JSON.stringify(run));
 	assert.equal(accepted(h.b.home, id), 1);
+});
+
+const STUB_SSH = join(REPO_ROOT, "tests/fixtures/stub-ssh.mjs");
+const KEY_READ = /^\[error\] Refused: a worker never reads a private ssh key, a \.ssh directory or a \*\.pem file \(`~\/\.ssh\/id_ed25519`\)\./;
+
+// Scenario: Given an ops:pull job on the Claude CLI and a parent SSH_AUTH_SOCK, When it runs ssh, reads ~/.ssh/id_ed25519
+//   and redirects into README.md, Then ssh runs with the agent and is written to host-audit.jsonl, while the key read and
+//   the write are refused. Negative control: a plain planner in the same home gets no agent and keeps
+//   GIT_SSH_COMMAND=false; dropping workerHostGuard fails on the missing audit row.
+test("NP-7a: an ops job runs ssh natively, audited; key reads and repo writes stay refused", { skip: NATIVE, timeout: 420_000 }, async (t) => {
+	const ids = { ops: "", plain: "" };
+	// The stub answers every ssh; the .invalid host could resolve nowhere even if it did not.
+	const ssh = bash("ssh np7a-host.invalid uptime");
+	const research = (which: keyof typeof ids): ClaudeStep[] => [
+		calls({ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[which])), content: "# native ops\n" }) }),
+		calls({ name: REPORT_TOOL, input: () => researchReport(ids[which], h.b.home) }),
+		done,
+	];
+	const h = await nativeWorkerHome(t, [
+		calls(ssh, bash("cat ~/.ssh/id_ed25519"), bash("echo x > README.md")),
+		...research("ops"),
+		calls(ssh),
+		...research("plain"),
+	], { files: { "README.md": "# np7a\n" } });
+	const wrapper = join(h.fakeHome, "stub-ssh.sh");
+	writeFileSync(wrapper, `#!/bin/sh\nexec '${process.execPath}' '${STUB_SSH}' "$@"\n`, { mode: 0o755 });
+	h.installStubBin("ssh", wrapper);
+	// The ops worker stays live after its report, beside the plain planner.
+	writeFileSync(join(h.b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true, claude_ship: true, max_concurrent: 2 }));
+	const ops = await h.b.ledger.create({ title: `np7a pull ${Math.random()}`, project: "demo", delivery: "local", kind: "research", labels: ["ops:pull"] });
+	const plain = await h.job("research");
+	[ids.ops, ids.plain] = [ops.id, plain.id];
+	const dispatchOps: ScriptStep = { kind: "tool_calls", calls: [{ name: "cp_dispatch", args: {
+		job_id: ops.id, task: "Check the host's uptime.", model: FAKE_NATIVE_MODEL, driver: "claude", queue: false, when_ready: false,
+	} }] };
+	const ends = await h.run([dispatchOps, h.awaitEnvelope(ops.id), plain.dispatch("Check the host's uptime."), h.awaitEnvelope(plain.id)],
+		{ SSH_AUTH_SOCK: "/tmp/np7a-agent.sock" });
+	for (const end of ends.filter((each) => each.toolName === "cp_dispatch")) assert.notEqual(end.isError, true, text(end));
+	assert.equal(h.record(ops.id)?.worker?.profile, "ops");
+	const results = toolResults(h.claude.requests);
+	const all = results.join("\n---\n");
+	assert.match(results[0] ?? "", /^ssh-ok agent=yes/, all);
+	assert.match(results[1] ?? "", KEY_READ, all);
+	assert.match(results[2] ?? "", /^\[error\] Refused: a native planner's Bash /, all);
+	assert.deepEqual(results.filter((result) => result.startsWith("ssh-ok")).map((result) => result.trim()), ["ssh-ok agent=yes", "ssh-ok agent=no"], all);
+	assert.equal(readFileSync(join(h.worktree(ops.id), "README.md"), "utf8"), "# np7a\n");
+	for (const [id, count] of [[ops.id, 2], [plain.id, 0]] as const) {
+		const audit = readFileSync(join(h.b.home, paths.runDir(id), HOST_AUDIT_FILE), "utf8").trim().split("\n");
+		assert.deepEqual(audit.map((line) => (JSON.parse(line) as { command: string }).command), ["ssh np7a-host.invalid uptime"], id);
+		const [run] = await h.runs(id);
+		assert.deepEqual([run?.lockdown, run?.denials, run?.report], ["ok", count, true], JSON.stringify(run));
+		assert.equal(accepted(h.b.home, id), 1, id);
+	}
+	const [opsKeys, plainKeys] = [h.spawnedEnvKeys(ops.id), h.spawnedEnvKeys(plain.id)];
+	assert.ok((opsKeys !== undefined && plainKeys !== undefined) || REAL_CLAUDE, "fake-claude recorded no spawned env keys");
+	if (opsKeys !== undefined && plainKeys !== undefined) {
+		const has = (keys: string[]) => ["SSH_AUTH_SOCK", "GIT_SSH_COMMAND"].map((key) => keys.includes(key));
+		assert.deepEqual(has(opsKeys), [true, false], JSON.stringify(opsKeys));
+		assert.deepEqual(has(plainKeys), [false, true], JSON.stringify(plainKeys));
+	}
 });

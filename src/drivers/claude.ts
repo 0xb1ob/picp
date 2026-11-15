@@ -50,7 +50,7 @@ export interface NativeSelection {
 	delivery: Delivery;
 	jobs: readonly FleetRecord[];
 	env?: NodeJS.ProcessEnv;
-	/** The worker profile's name; `ops` never runs native. */
+	/** The worker profile's name; every profile may run native (WP7: `ops` too). */
 	profile?: string;
 }
 
@@ -74,7 +74,6 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 	const nativeClass = nativeClassOf(input.kind, input.role, input.delivery);
 	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local, answer, board or pipeline), ship (role implementer, delivery pr or local) and gate-reviewer jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
 	if (nativeClass === undefined) return ineligible;
-	if (input.profile === "ops") return { category: "ineligible", why: "the ops profile needs ssh/scp, which the native Bash policy refuses" };
 	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
 	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs), input.jobId, config.max_concurrent);
@@ -193,9 +192,9 @@ export function nativeAddendum(kind: string | undefined, delivery: string | unde
 
 /**
  * Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir,
- * not the argv or env. `web` (the role activates pi-web-access) sets CP_NATIVE_WEB=1 for the worker.
+ * not the argv or env. `web` (the role activates pi-web-access) sets CP_NATIVE_WEB=1; `profile` sets CP_NATIVE_PROFILE.
  */
-export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string, options: { web?: boolean } = {}): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env" | "shutdownGraceMs"> {
+export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string, options: { web?: boolean; profile?: string } = {}): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env" | "shutdownGraceMs"> {
 	const runDir = env.CP_RUN_DIR;
 	if (!runDir) throw new NativeDriverError("the Claude CLI worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const web = options.web === true && env.CP_ROLE === "planner";
@@ -203,12 +202,15 @@ export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, system
 	mkdirSync(runDir, { recursive: true });
 	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env.CP_KIND, env.CP_DELIVERY, env.CP_ROLE, web)}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
-	const { CP_NATIVE_WEB: _inherited, ...rest } = env;
+	const { CP_NATIVE_WEB: _inherited, CP_NATIVE_PROFILE: _profile, ...rest } = env;
 	// A reported run waits up to NATIVE_REPORTED_GRACE_MS for its result after stdin ends; a SIGTERM would cut it.
 	return {
 		piBin: process.execPath,
 		argv: [WORKER_ENTRY],
-		env: { ...rest, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file, ...(web ? { CP_NATIVE_WEB: "1" } : {}) },
+		env: {
+			...rest, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file, ...(web ? { CP_NATIVE_WEB: "1" } : {}),
+			...(options.profile ? { CP_NATIVE_PROFILE: options.profile } : {}),
+		},
 		shutdownGraceMs: NATIVE_SHUTDOWN_GRACE_MS,
 	};
 }

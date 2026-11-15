@@ -63,11 +63,15 @@ const CHILD_TOOL_VARS = [
 	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 ] as const;
 
-/** WP3: a native worker's CLI child beyond `buildChildEnv`: pi's non-interactive variables, the job identity and the
- * host's named tool-cache, CA and proxy variables. Never CP_HOME, CP_RUN_DIR, GH_*, SSH_AUTH_SOCK or a secret-named
- * key; a proxy URL with credentials (`@`) is dropped, naming the keys once through `warn`. */
-export function nativeWorkerChildEnv(env: NodeJS.ProcessEnv, warn: (line: string) => void = (line) => void process.stderr.write(`[claude cli] ${line}\n`)): Record<string, string> {
-	const child: Record<string, string> = { ...NONINTERACTIVE_WORKER_ENV };
+/** WP3: the CLI child's env beyond `buildChildEnv`: pi's non-interactive variables, the job identity, named tool/CA/proxy
+ * variables; never CP_HOME, CP_RUN_DIR, GH_* or a secret-named key; a proxy URL with `@` is dropped (one `warn` line).
+ * WP7: profile `ops` alone gets the host SSH_AUTH_SOCK and unsets buildChildEnv's GIT_SSH_COMMAND (undefined). */
+export function nativeWorkerChildEnv(env: NodeJS.ProcessEnv, profile?: string, warn: (line: string) => void = (line) => void process.stderr.write(`[claude cli] ${line}\n`)): Record<string, string | undefined> {
+	const child: Record<string, string | undefined> = { ...NONINTERACTIVE_WORKER_ENV };
+	if (profile === "ops") {
+		child.GIT_SSH_COMMAND = undefined;
+		if (env.SSH_AUTH_SOCK) child.SSH_AUTH_SOCK = env.SSH_AUTH_SOCK;
+	}
 	const dropped: string[] = [];
 	for (const key of [...CHILD_IDENTITY, ...CHILD_TOOL_VARS]) {
 		const value = env[key];

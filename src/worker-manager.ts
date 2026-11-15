@@ -668,6 +668,7 @@ export class WorkerManager {
 			...(this.#options.piBin ? { piBin: this.#options.piBin } : {}),
 			...(request.driver ? nativeSpawnOptions(request.model, plan.env, request.profile.systemPrompt, {
 				web: activatedPackageNames(role, request.profile.frontmatter.packages).includes("pi-web-access"),
+				profile: request.profile.frontmatter.name,
 			}) : {}),
 		});
 		const managed: ManagedWorker = {
