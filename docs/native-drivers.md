@@ -805,7 +805,8 @@ run (test runners, `python3`, `node -e`, `npx`, `curl`, `$VAR`, globs, `cd`, her
 3. `gh` (remedy: `gh_read`; for an implementer also `pr_create`/`pr_edit`); `scp` and `rsync` (remedy: `cp`/`mv`);
    git `push|fetch|pull|remote|config|worktree|submodule|clone|send-pack|http-push|receive-pack|upload-pack` (remedy:
    `git_push`, `git_fetch` then `git merge`); git run outside the worktree (`-C`, `--git-dir`, `--work-tree`, `GIT_DIR=`,
-   a tracked `cd`); `-c alias.*`, `--config-env alias.*` and any `GIT_CONFIG*` assignment or export; a second branch (`switch`/`checkout` to
+   a tracked `cd`); `-c alias.*`, `--config-env alias.*` and any `GIT_CONFIG*` assignment or export; `HOME=`/
+   `XDG_CONFIG_HOME=` on git, exported, or handed to a git inside `sh -c`, `eval`, `env -S` or `find -exec` (WP3); a second branch (`switch`/`checkout` to
    another branch, `-b`/`-c`, `branch <new>`); and for a planner any repo-changing verb (`add`, `commit`, `merge`,
    `reset`, `restore`, `checkout`, `stash`, `rm`, `init`, …).
 4. Write destinations: redirect targets and the destinations of `cp`/`mv`/`install`/`ln`, `rm`/`mkdir`/`touch`/`tee`/
@@ -846,7 +847,9 @@ The CLI child of a native worker now gets, beyond `buildChildEnv`'s allow-list, 
 `CP_HOME`, `CP_RUN_DIR`, `GH_*`, `SSH_AUTH_SOCK` or a secret-named key; a proxy value containing `@` (embedded
 credentials) is dropped, with one stderr line naming the keys, never the value. A CA override lets the child trust a
 custom CA, as pi's workers already do. `tests/e2e/native-worker-parity.test.ts` NP-3a pins it through the spawned env
-key names and the child's own output. Rollback: revert (the child is back to the allow-list).
+key names and the child's own output. NP-1a now also pins `GH_REPO`: with a GitHub origin, an `upstream` remote and
+gh's set-default on that upstream, every `gh_read` runs with the origin's repo. Rollback: revert (the child is back to
+the allow-list).
 
 ### WP4 web tools (planner role)
 
