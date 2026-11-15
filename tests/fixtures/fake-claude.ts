@@ -54,7 +54,7 @@ const managedOnly = (JSON.parse(flag("--managed-settings") ?? "{}") as { disable
 /** `--mcp-config` stdio servers, spawned on first use; an http entry is listed as failed (this fake has no client). */
 const configured = (JSON.parse(flag("--mcp-config") ?? "{}") as { mcpServers?: Record<string, { type?: string; command?: string; args?: string[]; env?: Record<string, string> }> }).mcpServers ?? {};
 const external = Object.entries(configured).filter(([, server]) => server.type !== "sdk");
-/** Test knob (settings env): JSON merged into every `system/init`, a surface picp never passed (the lockdown's case). */
+/** Test knob (settings env): JSON merged into every `system/init` (arrays appended), a surface picp never passed. */
 const initExtra = JSON.parse(env.FAKE_CLAUDE_INIT_EXTRA ?? "{}") as Record<string, unknown>;
 const resumed = flag("--resume");
 const sessionId = resumed ?? randomUUID();
@@ -247,12 +247,16 @@ async function runTool(use: Block): Promise<Block> {
 	return { type: "tool_result", tool_use_id: toolUseId, is_error: called.isError === true, content: called.content ?? [] };
 }
 
-const init = (): void => send({
-	type: "system", subtype: "init", session_id: sessionId, model, cwd: process.cwd(), tools: [...builtins, ...(tools ?? []).map((each) => each.name)],
-	mcp_servers: [...servers, ...external.map(([name]) => name)].map((name) => ({ name, status: servers.includes(name) || stdioNames.includes(name) ? "connected" : "failed" })),
-	permissionMode: "default", slash_commands: ["compact"], apiKeySource: "none", claude_code_version: CLAUDE_VERSION_FLOOR, output_style: "default", uuid: randomUUID(),
-	...initExtra,
-});
+const init = (): void => {
+	const line: Record<string, unknown> = {
+		type: "system", subtype: "init", session_id: sessionId, model, cwd: process.cwd(), tools: [...builtins, ...(tools ?? []).map((each) => each.name)],
+		mcp_servers: [...servers, ...external.map(([name]) => name)].map((name) => ({ name, status: servers.includes(name) || stdioNames.includes(name) ? "connected" : "failed" })),
+		permissionMode: "default", slash_commands: ["compact"], apiKeySource: "none", claude_code_version: CLAUDE_VERSION_FLOOR, output_style: "default", uuid: randomUUID(),
+	};
+	// An extra array joins init's own (a stray tool beside the real ones); any other value replaces it.
+	for (const [key, value] of Object.entries(initExtra)) line[key] = Array.isArray(value) && Array.isArray(line[key]) ? [...line[key] as unknown[], ...value] : value;
+	send(line);
+};
 
 const validImage = (block: Block): boolean => {
 	const source = block.source as { type?: unknown; media_type?: unknown; data?: unknown } | undefined;
