@@ -4,10 +4,10 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { test } from "node:test";
+import { delimiter, join } from "node:path";
+import { type TestContext, test } from "node:test";
 import { paths } from "../../src/contracts.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { type ClaudeStep, type ClaudeToolUse, FAKE_CLAUDE_AUTH_TOKEN, toolResults } from "../harness/claude-mock-provider.ts";
@@ -24,6 +24,30 @@ const researchReport = (id: string, home: string) => ({
 });
 const blocked = (id: string) => ({ job_id: id, kind: "ship", status: "blocked", summary: "Parity case done.", blockers: ["the e2e case ends here"] });
 const accepted = (home: string, id: string) => readRunEvents(home, id).filter((event) => event.type === "envelope_received").length;
+const ghRead = (input: Record<string, unknown>): ClaudeToolUse => ({ name: "mcp__picp__gh_read", input });
+
+/** A scripted forge `gh` first on the workers' PATH: logs and answers reads; the hermetic stub answers the rest. */
+function scriptedGh(t: TestContext, h: Awaited<ReturnType<typeof nativeWorkerHome>>): () => string[] {
+	const dir = mkdtempSync(join(tmpdir(), "cp-np1-gh-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const log = join(dir, "calls.log");
+	const rest = h.env.PATH.split(delimiter).slice(1).join(delimiter);
+	writeFileSync(join(dir, "gh"), [
+		"#!/bin/sh",
+		`case "$*" in "--version"|"api user --jq .login") PATH='${rest}' exec gh "$@" ;; esac`,
+		`printf '%s\\n' "$*" >> '${log}'`,
+		'case "$1 $2" in',
+		"\t\"issue view\") printf 'np1 issue %s body\\n' \"$3\" ;;",
+		"\t\"pr view\") printf 'np1 pr %s body\\n' \"$3\" ;;",
+		"\t\"repo view\") echo o/r ;;",
+		"\t\"api \"*) printf '[{\"body\":\"np1 comment from %s\"}]\\n' \"$2\" ;;",
+		"\t*) echo \"np1 gh: unscripted gh $*\" >&2; exit 1 ;;",
+		"esac",
+		"",
+	].join("\n"), { mode: 0o755 });
+	h.installStubBin("gh", join(dir, "gh"));
+	return () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : []);
+}
 
 test("NP-0a: a native research job reports through fake-claude and tears down", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	let id = "";
@@ -169,5 +193,75 @@ test("NP-0e: exclude_paths hold for Edit and Write; a write outside them lands",
 	assert.equal(denied.count, 3, JSON.stringify(denied));
 	assert.ok(denied.lines.every((line) => / an excluded path /.test(line)), JSON.stringify(denied));
 	assert.equal(readFileSync(join(wt(), "src", "new.ts"), "utf8"), "export const fresh = true;\n");
+	assert.equal(accepted(h.b.home, id), 1);
+});
+
+// Scenario: Given a native planner whose task names issue 7, When it calls gh_read issue view 7, Then the issue body
+//   reaches it; so do another PR and an api GET; an implementer reads the same way; Bash gh is refused naming gh_read.
+test("NP-1a: a native planner and implementer read issues and other PRs with gh_read", { skip: NATIVE, timeout: 300_000 }, async (t) => {
+	for (const kind of ["research", "ship"] as const) {
+		let id = "";
+		const h = await nativeWorkerHome(t, [
+			calls(ghRead({ verb: "issue view", number: 7 }), ghRead({ verb: "pr view", number: 9 }), ghRead({ verb: "api", path: "repos/o/r/pulls/9/comments" }), bash("gh issue view 7")),
+			...(kind === "research" ? [calls({ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(id)), content: "# native\n" }) })] : []),
+			calls({ name: REPORT_TOOL, input: () => (kind === "research" ? researchReport(id, h.b.home) : blocked(id)) }),
+			done,
+		]);
+		const ghCalls = scriptedGh(t, h);
+		const job = await h.job(kind);
+		id = job.id;
+		const ends = await h.run([job.dispatch("Summarise issue 7, PR 9 and its comments."), h.awaitEnvelope(id)]);
+		assert.notEqual(ends[0]?.isError, true, `${kind}: ${text(ends[0])}`);
+		const results = toolResults(h.claude.requests);
+		const all = `${kind}:\n${results.join("\n---\n")}`;
+		assert.match(results[0] ?? "", /^np1 issue 7 body/, all);
+		assert.match(results[1] ?? "", /^np1 pr 9 body/, all);
+		assert.match(results[2] ?? "", /np1 comment from repos\/o\/r\/pulls\/9\/comments/, all);
+		assert.match(results[3] ?? "", /^\[error\] [\s\S]*`gh` \(no credentials in this run; read GitHub with the gh_read tool\)/, all);
+		const denied = await h.denials(id);
+		assert.equal(denied.count, 1, JSON.stringify(denied));
+		assert.match(denied.lines[0] ?? "", /^Bash: Refused: /);
+		const reads = ghCalls();
+		for (const read of ["pr view 9", "api repos/o/r/pulls/9/comments"]) assert.ok(reads.includes(read), `${kind}: ${read} not in ${JSON.stringify(reads)}`);
+		assert.equal(reads.filter((line) => line === "issue view 7").length, 1, `${kind}: gh_read ran it once; Bash gh never did`);
+		assert.equal(accepted(h.b.home, id), 1, kind);
+	}
+});
+
+// Scenario: Given gh_read in repo o/r, When the model passes -X POST (or any other write, host, repo, browser or watch
+//   flag, a bundled -iXPOST, a graphql path, or another repo by api path, URL, positional or search qualifier), Then
+//   the call is refused by name and gh never ran for it; only the repo resolution `gh repo view` ran.
+test("NP-1b: gh_read refuses every write shape and every other repo before gh runs", { skip: NATIVE, timeout: 300_000 }, async (t) => {
+	let id = "";
+	const issues = (args: string[]) => ({ verb: "api", path: "repos/o/r/issues", args });
+	const shapes: Array<[Record<string, unknown>, string]> = [
+		[issues(["-X", "POST"]), "-X"], [issues(["--method", "PUT"]), "--method"], [issues(["-f", "a=b"]), "-f"], [issues(["-F", "a=b"]), "-F"],
+		[issues(["--raw-field", "a=b"]), "--raw-field"], [issues(["--input", "f"]), "--input"], [issues(["-H", "x"]), "-H"],
+		[issues(["--hostname", "h"]), "--hostname"], [issues(["--repo", "o/x"]), "--repo"], [{ verb: "api", path: "/graphql" }, "/graphql"],
+		[{ verb: "pr view", args: ["--web"] }, "--web"], [issues(["-iXPOST"]), "-X"],
+		[{ verb: "run view", run_id: "42", args: ["--watch"] }, "--watch"], [{ verb: "pr checks", args: ["-w"] }, "-w"],
+		[{ verb: "api", path: "repos/other/x/issues" }, "other/x"], [{ verb: "api", path: "/repos/other/x/issues" }, "other/x"],
+		[{ verb: "api", path: "https://api.github.com/repos/other/x/issues" }, "https://api.github.com/repos/other/x/issues"],
+		[{ verb: "repo view", args: ["other/x"] }, "other/x"], [{ verb: "pr list", args: ["--search", "repo:other/x"] }, "repo:other/x"],
+		[{ verb: "issue list", args: ["-Srepo:other/y"] }, "repo:other/y"], [{ verb: "pr list", args: ["-dS", "org:other"] }, "org:other"],
+	];
+	const h = await nativeWorkerHome(t, [
+		calls(...shapes.map(([input]) => ghRead(input))),
+		calls({ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(id)), content: "# native\n" }) }),
+		calls({ name: REPORT_TOOL, input: () => researchReport(id, h.b.home) }),
+		done,
+	]);
+	const ghCalls = scriptedGh(t, h);
+	const job = await h.job("research");
+	id = job.id;
+	const ends = await h.run([job.dispatch("Try every gh_read shape."), h.awaitEnvelope(id)]);
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const resolve = "repo view --json nameWithOwner --jq .nameWithOwner";
+	assert.deepEqual(ghCalls().filter((line) => line !== resolve), [], "gh ran for a refused shape");
+	const results = toolResults(h.claude.requests);
+	shapes.forEach(([, flag], i) => {
+		const escaped = flag.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+		assert.match(results[i] ?? "", new RegExp(`^\\[error\\] Refused: gh_read .*${escaped}`), results.join("\n---\n"));
+	});
 	assert.equal(accepted(h.b.home, id), 1);
 });

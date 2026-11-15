@@ -56,7 +56,8 @@ test("forge tools: push lands origin/<job> only; main, base, force and non-fast-
 		assert.match((await call("pr_create", { title: "Again", body: "" })).text, /already opened this job's PR: https:\/\/github\.com\/picp-e2e\/forge\/pull\/7/);
 		assert.match((await call("pr_edit", { pr: 99, title: "x" })).text, /^Refused: pr_edit reaches only this job's PR #7 .*; #99 is refused\.$/);
 		assert.equal((await call("pr_edit", { pr: 7, title: "Renamed" })).isError, false);
-		assert.match((await call("gh_read", { verb: "pr view", pr: 99 })).text, /#99 is refused/);
+		// WP1 widened gh_read: another PR of this repo is read, no longer refused.
+		assert.equal((await call("gh_read", { verb: "pr view", number: 99 })).isError, false);
 
 		const view = await call("gh_read", { verb: "pr view" });
 		const logs = await call("gh_read", { verb: "run view", run_id: "42", log_failed: true });
@@ -68,7 +69,8 @@ test("forge tools: push lands origin/<job> only; main, base, force and non-fast-
 		assert.match((await call("gh_read", { verb: "run view", run_id: "42" })).text, /already took its one CI status snapshot/);
 
 		const calls = readFileSync(log, "utf8").trim().split("\n");
-		assert.deepEqual(calls.map((line) => line.split(" ").slice(0, 2).join(" ")), ["pr create", "pr edit", "pr view", "run view", "pr checks"]);
+		assert.deepEqual(calls.map((line) => line.split(" ").slice(0, 2).join(" ")), ["pr create", "pr edit", "pr view", "pr view", "run view", "pr checks"]);
+		assert.equal(calls[2], "pr view 99");
 		assert.match(calls[0] ?? "", /^pr create --draft --head cp-forge-unit --base release --title Native forge --body Body\.$/);
 		assert.equal(calls[1], "pr edit https://github.com/picp-e2e/forge/pull/7 --title Renamed");
 		assert.deepEqual(commitIdentityEnv(repo.path, env), { GIT_AUTHOR_NAME: "cp test", GIT_AUTHOR_EMAIL: "cp@test.invalid", GIT_COMMITTER_NAME: "cp test", GIT_COMMITTER_EMAIL: "cp@test.invalid" });

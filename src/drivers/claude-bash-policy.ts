@@ -55,12 +55,8 @@ const GIT_READ: Record<string, Options> = {
 	"cat-file": { short: "ptse" },
 	grep: { short: "nilcwFEv", shortValue: "e", long: ["--name-only", "--no-index"] },
 };
-const GH_NOUNS = new Set(["pr", "issue", "run", "repo", "release"]);
-const GH_READ = new Set(["view", "list", "diff", "checks", "status"]);
-const GH_OPTIONS: Options = {
-	shortValue: "qRLs", long: ["--comments", "--log", "--log-failed", "--name-only", "--patch"],
-	longValue: ["--json", "--jq", "--repo", "--limit", "--state"],
-};
+/** WP1: GitHub reads go through the in-process gh_read tool; the CLI child holds no credentials. */
+export const GH_BASH = "`gh` (no credentials in this run; read GitHub with the gh_read tool)";
 
 /** A table's own entry, so a prototype key such as `constructor` is never a command. */
 export function own(table: Record<string, Options>, key: string): Options | undefined {
@@ -229,18 +225,18 @@ export function wordsRefusal(words: readonly string[], cwd: string, secrets: rea
 	return undefined;
 }
 
-/** One segment against the read-only list (and git/gh reads); undefined when it may run. */
+/** One segment against the read-only list (and git reads); undefined when it may run. */
 export function segmentRefusal(words: readonly string[], cwd: string, secrets: readonly string[]): string | undefined {
 	const shared = wordsRefusal(words, cwd, secrets);
 	if (shared !== undefined) return shared;
 	const [name = "", ...args] = words;
-	const [sub = "", verb = ""] = args;
-	if (name === "git" || name === "gh") {
-		const known = name === "git" ? own(GIT_READ, sub) : GH_NOUNS.has(sub) && GH_READ.has(verb) ? GH_OPTIONS : undefined;
-		const label = name === "git" ? `git ${sub}` : `gh ${sub} ${verb}`;
-		if (known === undefined) return `\`${label}\``;
-		const option = unlistedOption(known, args.slice(name === "git" ? 1 : 2), false);
-		return option === undefined ? undefined : `\`${label}\` option \`${option}\` (not on its allow-list)`;
+	const [sub = ""] = args;
+	if (name === "gh") return GH_BASH;
+	if (name === "git") {
+		const known = own(GIT_READ, sub);
+		if (known === undefined) return `\`git ${sub}\``;
+		const option = unlistedOption(known, args.slice(1), false);
+		return option === undefined ? undefined : `\`git ${sub}\` option \`${option}\` (not on its allow-list)`;
 	}
 	const known = own(READ_ONLY, name);
 	if (known === undefined) return `\`${name}\` (not on the read-only list)`;
@@ -253,5 +249,5 @@ export function readOnlyBashRefusal(command: string, cwd: string, secrets: reado
 	const lexed = lex(command);
 	const why = "denied" in lexed ? lexed.denied : lexed.segments.map((words) => segmentRefusal(words, cwd, secrets)).find((reason) => reason !== undefined);
 	if (why === undefined) return undefined;
-	return `Refused: a research worker's Bash runs only read-only commands (rg, grep, ls, cat, head, tail, wc, git log/show/diff/status, gh view/list); ${why} is denied. Write findings with the Write tool into the artifact directory.`;
+	return `Refused: a research worker's Bash runs only read-only commands (rg, grep, ls, cat, head, tail, wc, git log/show/diff/status); ${why} is denied. Write findings with the Write tool into the artifact directory.`;
 }

@@ -1,6 +1,6 @@
 /**
- * N4d: a native implementer's network as in-process picp MCP tools. They run in the claude-worker process, which
- * holds the inherited worker env, so no credential enters the CLI child. Every output is token-redacted and capped.
+ * N4d/WP1: a native implementer's network (a planner's: gh_read) as in-process picp MCP tools. They run in the
+ * claude-worker process, which holds the worker env, so no credential enters the CLI child. Output is redacted, capped.
  */
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
@@ -66,13 +66,97 @@ function recordPr(runDir: string, pr: RecordedPr): void {
 	renameSync(join(runDir, `${FORGE_PR_FILE}.tmp`), join(runDir, FORGE_PR_FILE));
 }
 
+const GH_READ_VERBS = [
+	"pr view", "pr list", "pr diff", "pr checks", "issue view", "issue list", "run view", "run list", "release view", "release list", "repo view", "api",
+] as const;
+const GH_ARG_MAX = 200;
+const GH_ARGS_MAX = 20;
+// A method, a body, a header, another host or repo, the browser, or a blocking watch: never a plain GET read here.
+const GH_REFUSED_LONG = ["--method", "--field", "--raw-field", "--input", "--header", "--hostname", "--repo", "--web", "--watch"];
+const GH_REFUSED_SHORT = new Set(["X", "f", "F", "H", "R", "w"]);
+// Read flags whose next word is their value; any other bare word in `args` is a positional (a repo, URL or extra).
+const GH_VALUE_LONG = new Set([
+	"--json", "--jq", "--template", "--limit", "--state", "--label", "--author", "--assignee", "--base", "--head", "--search", "--branch",
+	"--workflow", "--event", "--status", "--user", "--commit", "--job", "--attempt", "--milestone", "--app", "--created", "--mention", "--cache",
+	"--preview", "--order",
+]);
+const GH_VALUE_SHORT = new Set([..."qtLslAaBSbecjmpO"]);
+const SEARCH_QUALIFIER = /(?:^|[\s(])-?(?:repo|org|user|owner):/i;
+const API_REPO = /^\/*repos\/([^/?#]+)\/([^/?#]+)(?:[/?#]|$)/;
+const REMEDY = "gh_read only reads this job's repo with GET; forge writes are not available to a native worker";
+
+/** Why `gh_read` refuses `args` (and an `api` `path`) before gh runs; undefined when the read may run. */
+function ghReadRefusal(verb: string, args: readonly string[], path: string | undefined): string | undefined {
+	if (path !== undefined && verb !== "api") return `gh_read takes a path only with \`api\`, not \`${verb}\`.`;
+	if (path !== undefined && (/^\/?graphql(?:[/?#]|$)/i.test(path) || /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("-"))) {
+		return `gh_read \`api\` never reads ${path} (graphql, a URL or a flag); ${REMEDY}.`;
+	}
+	if (path !== undefined && (/(?:^|\/)\.\.?(?:[/?#]|$)|%2[ef]|%5c|\\/i.test(path) || !API_REPO.test(path))) {
+		return `gh_read \`api\` reads only repos/<owner>/<repo>/... of this job's repo, never ${path}; ${REMEDY}.`;
+	}
+	const positionals: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i] as string;
+		const long = arg.startsWith("--") ? GH_REFUSED_LONG.find((flag) => arg === flag || arg.startsWith(`${flag}=`)) : undefined;
+		// pflag bundles short letters (`-iXPOST`), so any refused letter in the leading run counts.
+		const short = !arg.startsWith("--") && arg.startsWith("-") ? [.../^-([A-Za-z]*)/.exec(arg)?.[1] ?? ""].find((c) => GH_REFUSED_SHORT.has(c)) : undefined;
+		const flag = long ?? (short === undefined ? undefined : `-${short}`);
+		if (flag !== undefined) return `gh_read never passes \`${flag}\` (in \`${arg}\`); ${REMEDY}.`;
+		if (arg === "--") {
+			positionals.push(...args.slice(i + 1));
+			break;
+		}
+		let search = arg === "--search" ? args[i + 1] : arg.startsWith("--search=") ? arg.slice(9) : undefined;
+		if (arg.startsWith("--")) {
+			if (GH_VALUE_LONG.has(arg)) i++;
+		} else if (arg.length > 1 && arg.startsWith("-")) {
+			// As pflag: the first value letter takes the rest of the bundle, or the next word (`-dSrepo:x/y`, `-dS q`).
+			const letters = /^-([A-Za-z]*)/.exec(arg)?.[1] ?? "";
+			const at = [...letters].findIndex((c) => GH_VALUE_SHORT.has(c));
+			if (at >= 0) {
+				const attached = arg.slice(2 + at);
+				const value = attached === "" ? args[++i] : attached;
+				if (letters[at] === "S") search = value;
+			}
+		} else positionals.push(arg);
+		if (search !== undefined && SEARCH_QUALIFIER.test(search)) return `gh_read never searches another repo, org or user (\`${search}\`); ${REMEDY}.`;
+	}
+	const extra = positionals.slice(verb === "release view" ? 1 : 0)[0];
+	if (extra !== undefined) {
+		return `gh_read never passes the positional \`${extra}\` (another repo, a URL or an extra argument): it reads only this job's repo; ` +
+			"put the number in number/run_id and the api path in path.";
+	}
+	return undefined;
+}
+
+/** The `owner/repo` an `api` path names; undefined for gh's `{owner}/{repo}` placeholders (this job's repo). */
+function apiPathRepo(path: string): string | undefined {
+	const [, owner = "", repo = ""] = API_REPO.exec(path) ?? [];
+	return owner === "{owner}" && repo === "{repo}" ? undefined : `${owner}/${repo}`;
+}
+
 /** `git_push`, `git_fetch`, `pr_create`, `pr_edit` and `gh_read` for `job`; `env` is the worker's own (credentials). */
 export function forgeTools(job: ForgeJob, env: NodeJS.ProcessEnv = process.env, state: ForgeState = processState): SdkMcpToolDefinition<any>[] {
 	const base = env.CP_BASE_BRANCH?.trim() || undefined;
 	const protectedBranches = [...new Set(["main", ...(base ? [base] : [])])];
 	const branch = job.job_id;
 	const gh = (args: string[]) => exec("gh", args, job.worktree, env);
+	// GH_REPO would point every read at another repo; without it gh reads the worktree's own.
+	const { GH_REPO: _ghRepo, ...readEnv } = env;
+	const ghReadOnly = (args: string[]) => exec("gh", args, job.worktree, readEnv);
 	let creating: Promise<ReturnType<typeof reply>> | undefined;
+	let jobRepo: string | undefined;
+	const resolveJobRepo = async (): Promise<string | undefined> => {
+		if (jobRepo !== undefined) return jobRepo;
+		const remote = await exec("git", ["remote", "get-url", "origin"], job.worktree, readEnv);
+		const origin = remote.ok ? /^(?:https:\/\/|ssh:\/\/git@|git@)github\.com[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(remote.out) : null;
+		if (origin !== null) return (jobRepo = `${origin[1]}/${origin[2]}`);
+		// A non-GitHub origin URL (an enterprise host, a local mirror): gh resolves the repo from the worktree.
+		const read = await ghReadOnly(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
+		const name = read.out.trim();
+		if (read.ok && /^[\w.-]+\/[\w.-]+$/.test(name)) jobRepo = name;
+		return jobRepo;
+	};
 
 	const push = tool(
 		"git_push",
@@ -146,21 +230,46 @@ export function forgeTools(job: ForgeJob, env: NodeJS.ProcessEnv = process.env, 
 
 	const ghRead = tool(
 		"gh_read",
-		"One read: `pr view`/`pr checks` of this job's PR, or `run view` of a run in this repo (log_failed for its failure log). One CI status snapshot per worker; never poll.",
-		{ verb: z.enum(["pr view", "pr checks", "run view"]), pr: z.number().int().optional(), run_id: z.string().regex(/^\d+$/).optional(), log_failed: z.boolean().optional() },
+		"One GitHub read in this job's repo: any issue, PR (`pr view|checks|diff` default to this job's PR), run, release or the repo; " +
+			"`api` is a GET of `path` under repos/<owner>/<repo>/ of this repo (no graphql, no URL). `args` add read flags only: " +
+			"write, host, repo, browser and watch flags and positionals (but a release tag) are refused. One CI status snapshot per worker; never poll.",
+		{
+			verb: z.enum(GH_READ_VERBS),
+			number: z.number().int().positive().optional(),
+			run_id: z.string().regex(/^\d+$/).optional(),
+			log_failed: z.boolean().optional(),
+			path: z.string().min(1).max(GH_ARG_MAX).optional(),
+			args: z.array(z.string().max(GH_ARG_MAX)).max(GH_ARGS_MAX).optional(),
+		},
 		async (args) => {
+			const extra = args.args ?? [];
+			const why = ghReadRefusal(args.verb, extra, args.path);
+			if (why !== undefined) return refuse(why);
 			let argv: string[];
 			if (args.verb === "run view") {
 				if (args.run_id === undefined || !/^\d+$/.test(args.run_id)) return refuse("gh_read `run view` needs a numeric run_id.");
 				argv = ["run", "view", args.run_id, ...(args.log_failed === true ? ["--log-failed"] : [])];
+			} else if (args.verb === "api") {
+				if (args.path === undefined) return refuse("gh_read `api` needs a path, such as repos/<owner>/<repo>/pulls/<n>/comments.");
+				const named = apiPathRepo(args.path);
+				if (named !== undefined) {
+					const own = await resolveJobRepo();
+					if (own === undefined) return refuse(`gh_read could not tell this job's origin repo, so it never reads ${args.path}; use repos/{owner}/{repo}/... in path.`);
+					if (named.toLowerCase() !== own.toLowerCase()) return refuse(`gh_read \`api\` reads only ${own}, this job's origin, never ${args.path} (${named}); ${REMEDY}.`);
+				}
+				argv = ["api", args.path];
+			} else if (args.verb === "issue view") {
+				if (args.number === undefined) return refuse("gh_read `issue view` needs the issue number.");
+				argv = ["issue", "view", String(args.number)];
+			} else if (args.verb === "pr view" || args.verb === "pr checks" || args.verb === "pr diff") {
+				argv = [...args.verb.split(" "), args.number === undefined ? (recordedPr(job.runDir)?.url ?? branch) : String(args.number)];
 			} else {
-				const pr = thisPr(args.pr, "gh_read");
-				if (typeof pr === "string") return refuse(pr);
-				argv = [...args.verb.split(" "), pr?.url ?? branch];
+				argv = args.verb.split(" ");
 			}
-			const status = args.verb === "pr checks" || (args.verb === "run view" && args.log_failed !== true);
+			argv.push(...extra);
+			const status = args.verb === "pr checks" || args.verb === "run list" || (args.verb === "run view" && args.log_failed !== true && !extra.includes("--log"));
 			if (status && state.statusQueries++ >= 1) return refuse(`${ciStatusRepeatRefusal().replace(/^Refused: /, "")}\nWith gh_read that log is \`run view\` with log_failed.`);
-			const read = await gh(argv);
+			const read = await ghReadOnly(argv);
 			return reply(read.out || `gh ${argv.slice(0, 2).join(" ")} printed nothing`, !read.ok);
 		},
 	);

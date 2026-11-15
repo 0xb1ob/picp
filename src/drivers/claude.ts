@@ -141,15 +141,16 @@ export function nativeModelId(model: string): string {
 
 /** What the native model is told after the profile body: its tools are Claude's, and the artifact is Written. */
 export const NATIVE_ADDENDUM = [
-	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Bash, Write) plus report_result;",
-	"ignore any other tool names above. Write the research artifact with the Write tool to the predeclared artifact",
-	"path (CP_ARTIFACT_PATH), never with a shell heredoc, then call report_result.",
+	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Bash, Write), gh_read for GitHub",
+	"reads (never gh in Bash) and report_result; ignore any other tool names above. Write the research artifact with the",
+	"Write tool to the predeclared artifact path (CP_ARTIFACT_PATH), never with a shell heredoc, then call report_result.",
 ].join("\n");
 
 /** Delivery `board`: intake publishes the artifact dir's board.json and site/, so both are Written there. */
 export const NATIVE_BOARD_ADDENDUM = [
-	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Bash, Write) plus report_result;",
-	"ignore any other tool names above. This job is delivery board: with the Write tool, never a shell heredoc, write",
+	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Bash, Write), gh_read for GitHub",
+	"reads (never gh in Bash) and report_result; ignore any other tool names above. This job is delivery board: with",
+	"the Write tool, never a shell heredoc, write",
 	"board.json, site/index.html and a short report.md in the artifact directory (the directory of CP_ARTIFACT_PATH),",
 	"then call report_result with artifact_path = CP_ARTIFACT_PATH (the board.json path).",
 ].join("\n");
@@ -159,7 +160,8 @@ export const NATIVE_SHIP_ADDENDUM = [
 	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Edit, Write, Bash), the picp forge",
 	"tools (git_push, git_fetch, pr_create, pr_edit, gh_read) and report_result; ignore any other tool names above.",
 	"Commit with git in Bash, push only with git_push, open the draft PR with pr_create (never gh in Bash), then call",
-	"report_result once with head_sha = git rev-parse HEAD.",
+	"report_result once with head_sha = git rev-parse HEAD. gh_read reads this repo: pr view|list|diff|checks, issue",
+	"view|list, run view|list, release view|list, repo view, and api GET of repos/<owner>/<repo>/... of this repo only.",
 ].join("\n");
 
 /** Delivery `local` (N4i): picp integrates the branch itself, so the worker commits and never pushes or opens a PR. */
