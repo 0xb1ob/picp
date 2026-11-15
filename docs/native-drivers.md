@@ -813,7 +813,7 @@ run (test runners, `python3`, `node -e`, `npx`, `curl`, `$VAR`, globs, `cd`, her
    A destination the shell expands later (`$`, a glob, `~`, braces) or relative after a `cd` it cannot follow is
    refused.
 
-The lexer quotes like the shell, blanks quoted heredoc bodies (an unquoted body's `$(…)` is still scanned), re-scans
+The lexer (`src/drivers/claude-bash-lex.ts`) quotes like the shell, blanks quoted heredoc bodies (an unquoted body's `$(…)` is still scanned), re-scans
 `$(…)`, backticks, `<(…)`, `sh|bash -c`, `eval`, `env -S` and `find -exec` (three levels at most), and looks through
 `env`, `command`, `xargs`, `timeout`, `nohup`, `nice` and similar wrappers; it tracks `cd` along `&&` chains and
 restores it after a `( … )` subshell. Refusals read `Refused: a native <planner|implementer>'s Bash <cause> is denied;
