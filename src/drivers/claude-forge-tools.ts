@@ -84,6 +84,8 @@ const GH_VALUE_SHORT = new Set([..."qtLslAaBSbecjmpO"]);
 const SEARCH_QUALIFIER = /(?:^|[\s(])-?(?:repo|org|user|owner):/i;
 const API_REPO = /^\/*repos\/([^/?#]+)\/([^/?#]+)(?:[/?#]|$)/;
 const REMEDY = "gh_read only reads this job's repo with GET; forge writes are not available to a native worker";
+/** An `api` path that reads CI status (runs, check runs or suites, a commit's status), not a log: one snapshot too. */
+const CI_STATUS_PATH = /\/(?:actions\/runs|check-runs|check-suites|commits\/[^/?#]+\/status(?:es)?)(?![^?#]*\/logs)(?:[/?#]|$)/;
 
 /** Why `gh_read` refuses `args` (and an `api` `path`) before gh runs; undefined when the read may run. */
 function ghReadRefusal(verb: string, args: readonly string[], path: string | undefined): string | undefined {
@@ -141,16 +143,23 @@ export function forgeTools(job: ForgeJob, env: NodeJS.ProcessEnv = process.env, 
 	const protectedBranches = [...new Set(["main", ...(base ? [base] : [])])];
 	const branch = job.job_id;
 	const gh = (args: string[]) => exec("gh", args, job.worktree, env);
-	// GH_REPO would point every read at another repo; without it gh reads the worktree's own.
+	// The worker's GH_REPO is dropped; a GitHub origin pins it, so no upstream remote or set-default picks the base repo.
 	const { GH_REPO: _ghRepo, ...readEnv } = env;
-	const ghReadOnly = (args: string[]) => exec("gh", args, job.worktree, readEnv);
+	let origin: Promise<string | undefined> | undefined;
+	const originRepo = (): Promise<string | undefined> => (origin ??= exec("git", ["remote", "get-url", "origin"], job.worktree, readEnv).then((remote) => {
+		const github = remote.ok ? /^(?:https:\/\/|ssh:\/\/git@|git@)github\.com[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(remote.out) : null;
+		return github === null ? undefined : `${github[1]}/${github[2]}`;
+	}));
+	const ghReadOnly = async (args: string[]) => {
+		const pinned = await originRepo();
+		return exec("gh", args, job.worktree, pinned === undefined ? readEnv : { ...readEnv, GH_REPO: pinned });
+	};
 	let creating: Promise<ReturnType<typeof reply>> | undefined;
 	let jobRepo: string | undefined;
 	const resolveJobRepo = async (): Promise<string | undefined> => {
 		if (jobRepo !== undefined) return jobRepo;
-		const remote = await exec("git", ["remote", "get-url", "origin"], job.worktree, readEnv);
-		const origin = remote.ok ? /^(?:https:\/\/|ssh:\/\/git@|git@)github\.com[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(remote.out) : null;
-		if (origin !== null) return (jobRepo = `${origin[1]}/${origin[2]}`);
+		const pinned = await originRepo();
+		if (pinned !== undefined) return (jobRepo = pinned);
 		// A non-GitHub origin URL (an enterprise host, a local mirror): gh resolves the repo from the worktree.
 		const read = await ghReadOnly(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
 		const name = read.out.trim();
@@ -267,7 +276,8 @@ export function forgeTools(job: ForgeJob, env: NodeJS.ProcessEnv = process.env, 
 				argv = args.verb.split(" ");
 			}
 			argv.push(...extra);
-			const status = args.verb === "pr checks" || args.verb === "run list" || (args.verb === "run view" && args.log_failed !== true && !extra.includes("--log"));
+			const status = args.verb === "pr checks" || args.verb === "run list" || (args.verb === "run view" && args.log_failed !== true && !extra.includes("--log")) ||
+				extra.some((arg) => /statusCheckRollup/i.test(arg)) || (args.verb === "api" && CI_STATUS_PATH.test(args.path ?? ""));
 			if (status && state.statusQueries++ >= 1) return refuse(`${ciStatusRepeatRefusal().replace(/^Refused: /, "")}\nWith gh_read that log is \`run view\` with log_failed.`);
 			const read = await ghReadOnly(argv);
 			return reply(read.out || `gh ${argv.slice(0, 2).join(" ")} printed nothing`, !read.ok);

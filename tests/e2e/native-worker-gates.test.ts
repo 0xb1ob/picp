@@ -57,9 +57,9 @@ async function withFixture(body: (fixture: Fixture) => Promise<void>): Promise<v
 	}
 }
 
-test("G1: a research run's Bash cannot write the worktree or anywhere else; named read-only commands still run", { skip, timeout: 180_000 }, async () => {
+test("G1: a research run's Bash cannot write the worktree or beside it by any literal shape; what pi's planner runs still runs", { skip, timeout: 180_000 }, async () => {
 	await withFixture(async ({ root, worktree, run }) => {
-		// A real repo, so the git `--output` shapes (controls n and o) would write into it if they ran.
+		// A real repo, so the git `--output` shapes would write into it if they ran.
 		execFileSync("git", ["init", "-q", worktree]);
 		const writes = [
 			`echo x > ${worktree}/redirect.txt`,
@@ -74,35 +74,40 @@ test("G1: a research run's Bash cannot write the worktree or anywhere else; name
 			`cat $(touch ${worktree}/subst.txt)`,
 			`find ${worktree} -name README.md -exec touch ${worktree}/find.txt ;`,
 			`sort -o ${worktree}/sort.txt ${worktree}/README.md`,
-			`rg --pre "touch ${worktree}/pre.txt" gates ${worktree}`,
-			`FOO=1 cat ${worktree}/README.md`,
 			`(touch ${worktree}/subshell.txt)`,
-			`python3 -c "open('${worktree}/py.txt','w')"`,
 			`find ${worktree} \${U:--delete}`,
 			`find ${worktree} $'-\\x64elete'`,
 			`find ${worktree} {-delete,}`,
 			`git log \${U:---output=${worktree}/f}`,
-			`sort -S 1 --compress-program=sh ${worktree}/README.md`,
 			`git grep --no-index -nOrm gates`,
-			`file -C -m /dev/null`,
 			`git log --pretty --output=${worktree}/pretty.txt`,
 			`git show --format --output=${worktree}/format.txt`,
 			`git diff -U --output=${worktree}/diff.txt`,
 		];
+		// Allowed, unlexable, best effort (WP2 parity with pi's planner): interpreters and program-running options are
+		// a lexical tripwire's named limit, so these run; each writes, if at all, outside the worktree.
+		const unlexable = [
+			`FOO=1 cat ${worktree}/README.md`,
+			`python3 -c "open('${root}/artifacts/py.txt','w')"`,
+			`rg --pre "touch ${root}/artifacts/pre.txt" gates ${worktree}`,
+			`sort -S 1 --compress-program=sh ${worktree}/README.md`,
+			`cd ${root}/artifacts && file -C -m /dev/null`,
+		];
 		const provider = await startClaudeMockProvider([
 			...writes.map(bash),
 			bash(`cat ${worktree}/README.md | wc -l && ls ${worktree} 2>/dev/null`),
+			...unlexable.map(bash),
 			{ kind: "text", text: "done" },
 		]);
 		const result = await run(provider);
 		await provider.close();
 		assert.equal(result.lockdown?.verdict, "ok", result.error);
-		// Every write shape was denied before it ran: the worktree and its parent hold only what the test made.
+		// Every literal write shape was denied before it ran: the worktree and its parent hold only what the test made.
 		assert.deepEqual(readdirSync(worktree).sort(), [".git", "README.md"]);
 		assert.equal(readFileSync(join(worktree, "README.md"), "utf8"), "gates repo readme\n");
 		assert.deepEqual(readdirSync(root).sort(), ["artifacts", "repo"]);
 		assert.equal(result.denials.length, writes.length, result.denials.map((denial) => denial.reason).join("\n"));
-		for (const denial of result.denials) assert.match(`${denial.tool}: ${denial.reason}`, /^Bash: Refused: a research worker's Bash runs only read-only/);
+		for (const denial of result.denials) assert.match(`${denial.tool}: ${denial.reason}`, /^Bash: Refused: a native planner's Bash /);
 		assert.ok(toolResults(provider.requests).some((text) => /^1\nREADME\.md/.test(text)), toolResults(provider.requests).join("\n---\n"));
 	});
 });

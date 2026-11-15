@@ -5,7 +5,7 @@ import { paths, type Role } from "../contracts.ts";
 import { liveGrants, MandateStore } from "../mandate.ts";
 import { loadMandateDefaults } from "../mandate-defaults.ts";
 import { secretPathIn } from "./claude-bash-policy.ts";
-import { worktreePathRefusal } from "./claude-ship-policy.ts";
+import { worktreePathRefusal } from "./claude-bash-scope.ts";
 import type { SpikeGuard, SpikeJob } from "./claude-spike.ts";
 
 export type NativeRole = "research" | "implementer" | "reviewer";

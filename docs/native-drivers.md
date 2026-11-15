@@ -213,25 +213,14 @@ Fake model through the real installed `claude` 2.1.318 unless stated; `tests/e2e
 G1–G3 and R1 and skips when `claude` is not on PATH (as in CI). Still no runtime wiring: dispatch, send and revive are
 N3b, which must keep every layer below on.
 
-- **G1, shell write scope: deny-by-default Bash policy shipped** (`src/drivers/claude-bash-policy.ts`, called from the
-  Bash guard in `src/drivers/claude-spike.ts`). The SDK `sandbox` option was tried first: on this host bubblewrap works
-  but `socat` is missing, and `sandbox: { enabled: true, failIfUnavailable: true }` fails closed at startup ("socat not
-  installed"), so it is never silently unsandboxed but cannot run here. The OS sandbox needs `socat` and stays a later
-  option; picp does not install it. The policy lexes the command and runs it only when every segment is a named
-  read-only command (`rg`, `grep`, `ls`, `cat`, `head`, `wc`, `sort`, `find`, read-only `git` subcommands,
-  `gh <noun> view|list|…`, and similar) using only options on that command's own allow-list: short clusters are
-  checked letter by letter (`git grep -nOrm` is refused at `O`) and long options match exactly, `=` form included; a
-  value is attached (`--opt=v`, `-n5`) or the next word, which must not start with `-` (so `git log -n --output=f`
-  is refused); git's optional-value `--pretty`/`--format` count only as `--pretty=…` and `-U` only as `-U<digits>`;
-  `find` takes only its listed primaries. A deny-list of dangerous flags did not converge (`sort --compress-program`,
-  `rg --hostname-bin`, `git grep -O`, `file -C` each turned up in review), so nothing outside the lists runs and
-  `file` is gone. Also refused: redirects (other than to `/dev/null` or fd dup), command substitution, every `$`
-  expansion but `$?` (`$NAME`, `${…}`, `$'…'`, `$"…"`, `$[…]`), unquoted braces, `~` and globs (`*`, `?`, `[`: the
-  shell expands them after the check, so a planted link could name a secret), subshells, background jobs, env
-  assignments and unknown commands. The Write tool stays scoped to the artifact dir.
+- **G1, shell write scope.** The SDK `sandbox` option was tried first: on this host bubblewrap works but `socat` is
+  missing, and `sandbox: { enabled: true, failIfUnavailable: true }` fails closed at startup ("socat not installed"),
+  so it is never silently unsandboxed but cannot run here. The OS sandbox needs `socat` and stays a later option; picp
+  does not install it. The deny-by-default read-only allow-list shipped here was replaced by the deny-by-shape scope of
+  [WP2](#wp2-bash-scope) (`src/drivers/claude-bash-scope.ts`). The Write tool stays scoped to the artifact dir.
 - **R1, env and secret paths.** A passed settings file's `env` reaches the CLI and every Bash child, so it is kept out
-  in layers: `printenv`, `cd`, `env`, `set`, `declare`, `export`, `typeset` and `compgen` are not on the list, `$`
-  expansion is refused, and a secret-path guard refuses Read, Grep, Glob and Bash arguments that are, link to, or
+  in layers: env dumps (`env` with no command, `printenv`, bare `set`/`export`/`declare`, `compgen -v`) and secret-named
+  `$` expansions are refused ([WP2](#wp2-bash-scope)), and a secret-path guard refuses Read, Grep, Glob and Bash arguments that are, link to, or
   contain the passed settings path, `<home>/.claude*`, `<home>/.config/claude*` (both `$HOME` and the passwd home),
   `/proc` or `/dev/fd`. The existing guards do not match these paths (`workerHostGuard` covers ssh keys only), so the
   guard is new and sits beside them. The CLI's own `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` exists in 2.1.318 but runs
@@ -539,13 +528,10 @@ unchanged; implementer gets Read, Grep, Glob, Edit, Write and Bash plus `report_
 name. The lockdown's expected tools follow the role. An implementer's Edit/Write lands only where the realpath of the
 target's nearest existing parent is inside the worktree (no symlink escapes, a dangling one included), outside `.git`,
 off the secret paths and clear of the home's and every live grant's `exclude_paths`, which the worker process reads,
-never the CLI child. Its Bash (`src/drivers/claude-ship-policy.ts`) runs pi's pattern guards first, then a default-deny
-allow-list: the read-only list, local git verbs, `npm ci|run typecheck|test:one|lint|build|changelog:*`, `node`/`npx
-tsx` on worktree scripts, and `mkdir|mv|cp|rm` and redirects on worktree paths only. Push, fetch, `gh`, `cd`, env dumps
-and `$` expansion are denied; there is no network tool beyond `npm ci`/`npx tsx`, which reach the package registry, and
-network actions arrive as picp tools in N4d. The honest limit: `npm run`
-and `node` execute repo code, so this is defence in depth at pi parity, not a sandbox. Selection stays research-only
-until N4f, so no production job reaches this yet.
+never the CLI child. Its Bash runs pi's pattern guards first, then (since [WP2](#wp2-bash-scope)) the native Bash
+scope in place of the default-deny allow-list N4c shipped. The honest limit: `npm run` and `node` execute repo code, so
+this is defence in depth at pi parity, not a sandbox. Selection stays research-only until N4f, so no production job
+reaches this yet.
 
 ## Implementer forge tools (N4d)
 
@@ -795,6 +781,58 @@ Planners now get `gh_read` too (`roleForgeTools`; the lockdown expects it); no o
 off (U1). Bash `gh` is refused for both roles with a remedy naming `gh_read`. `tests/e2e/native-worker-parity.test.ts`
 NP-1a (reads reach a planner and an implementer) and NP-1b (every write shape and every other repo refused; gh ran
 only the repo lookup) pin it.
+
+Follow-up (in WP2): a GitHub origin URL now pins `GH_REPO` for every `gh_read`, so neither an `upstream` remote nor
+`gh repo set-default` can change the base repo gh resolves (a non-GitHub origin keeps `GH_REPO` dropped). `pr view|list`
+with `statusCheckRollup` in `args` and an `api` path under `actions/runs` (not its logs), `check-runs`, `check-suites`
+or `commits/<ref>/status(es)` now count toward the one CI status snapshot too; NP-1c pins a second read through
+these routes being refused before gh runs.
+
+### WP2 Bash scope
+
+`src/drivers/claude-bash-scope.ts` replaces both Claude-only allow-lists (`readOnlyBashRefusal`, `shipBashRefusal`;
+`src/drivers/claude-ship-policy.ts` is gone) for planners and implementers alike. pi's pattern guards still run
+first, in pi's order and wording. Then `nativeBashRefusal` refuses by shape, first hit wins, and lets everything else
+run (test runners, `python3`, `node -e`, `npx`, `curl`, `$VAR`, globs, `cd`, heredocs, headless browsers):
+
+1. Secrets: a secret path named anywhere in the command (a home's `.claude` via `~/`, `~user/` or `$HOME/`, never a
+   repo-local `.claude/`; any `.claude` or `.config/claude` word once the cwd is unknown or outside the worktree,
+   as after `cd ~user`) or as a path word (with `~`, a glob's literal prefix, and every
+   match of an unquoted glob checked through its links, so a planted link is caught), and a `$NAME`/`${NAME}` whose
+   name looks secret (`SECRET_ENV_NAME`) or starts `ANTHROPIC_`/`CLAUDE_`, or an indirect `${!…}`.
+2. Env dumps: `env` with no command, `printenv` bare or of a secret name, bare `set`/`export`/`readonly`/`declare`/
+   `typeset` (or with `-p`), `compgen -v|-e`, BSD `ps e`.
+3. `gh` (remedy: `gh_read`; for an implementer also `pr_create`/`pr_edit`); `scp` and `rsync` (remedy: `cp`/`mv`);
+   git `push|fetch|pull|remote|config|worktree|submodule|clone|send-pack|http-push|receive-pack|upload-pack` (remedy:
+   `git_push`, `git_fetch` then `git merge`); git run outside the worktree (`-C`, `--git-dir`, `--work-tree`, `GIT_DIR=`,
+   a tracked `cd`); `-c alias.*`, `--config-env alias.*` and any `GIT_CONFIG*` assignment or export; a second branch (`switch`/`checkout` to
+   another branch, `-b`/`-c`, `branch <new>`); and for a planner any repo-changing verb (`add`, `commit`, `merge`,
+   `reset`, `restore`, `checkout`, `stash`, `rm`, `init`, …).
+4. Write destinations: redirect targets and the destinations of `cp`/`mv`/`install`/`ln`, `rm`/`mkdir`/`touch`/`tee`/
+   `chmod`/…, `dd of=`, `sed -i`/`perl -i`, `sort -o`, `curl -o`, `wget -O`, `chromium --screenshot=`, `find -delete`/
+   `-fprint`, `tar -C`, `unzip -d`, git `restore`/`checkout --`/`rm`/`mv` paths and `--output`. Each must land in a
+   root: an implementer's worktree (realpath, outside `.git` and its `exclude_paths`, a directory named by an excluded
+   `dir/` counting as inside it; the root itself only for `git restore .`/`git checkout -- .` with no source rev, since
+   `git checkout <rev> -- .` could rewrite excluded paths), the artifact dir, the scratch `TMPDIR` (`$TMPDIR/…`
+   resolves), or `/tmp` outside the worktree's lease dir, the clone, the scratch dir and picp's run and artifact dirs.
+   A destination the shell expands later (`$`, a glob, `~`, braces) or relative after a `cd` it cannot follow is
+   refused.
+
+The lexer (`src/drivers/claude-bash-lex.ts`) quotes like the shell, blanks quoted heredoc bodies (an unquoted body's `$(…)` is still scanned), re-scans
+`$(…)`, backticks, `<(…)`, `sh|bash -c`, `eval`, `env -S` and `find -exec` (three levels at most), and looks through
+`env`, `command`, `xargs`, `timeout`, `nohup`, `nice` and similar wrappers; it tracks `cd` along `&&` chains and
+restores it after a `( … )` subshell. Refusals read `Refused: a native <planner|implementer>'s Bash <cause> is denied;
+<remedy>. pi's guards and these scope checks are the only limits; everything else runs.` The CLI child also gets
+`GIT_SSH_COMMAND=false`. The addenda now say Bash runs any command under pi's guards and writes only in the role's roots.
+
+Residuals, named: (r1) the scope is lexical, so `node -e`, `python3 -c`, a repo script or a program that writes on its
+own (`npm install`, `tar -x`, a browser without `=path`) can write anywhere the OS user can and read the settings env,
+as on pi; a planner's teardown gate still needs a clean tree. (r2) A credential-free local-path origin would accept a
+push made by such an interpreter (production origins need credentials the child lacks). (r3) An unencrypted key under
+the passwd home stays usable by OpenSSH, mitigated by `GIT_SSH_COMMAND=false` unless an interpreter overrides it.
+(r4) A glob's matches are checked at decision time; a link planted between the check and the run is not.
+`tests/e2e/native-worker-parity.test.ts` NP-2a…NP-2g pin it at the consumer; `tests/claude-ship-policy.test.ts` keeps
+the adversarial lexer table.
 
 ### WP4 web tools (planner role)
 
