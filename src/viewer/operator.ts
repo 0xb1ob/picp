@@ -13,6 +13,7 @@
  * and its `thinking` becomes `--thinking` (never over an explicit `--thinking` or a resumed session; no env pin).
  * Restart session (cp-aqxl): pi gets `CP_OPERATOR_RELAUNCH_FILE`; when pi exits leaving a marker there that names its
  * own pid (the dashboard restart), pi is relaunched here with exactly `--session <file>`, at most 3 times per 10 min.
+ * On the claude driver `-c`/`--continue` (dashboard Resume) resumes the newest recorded `native-operator-*` record.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
@@ -28,7 +29,8 @@ import { operatorDriverOf, relaunchFileFor, superviseOperatorPi } from "../opera
 import { PACKAGE_ROOT } from "../home.ts";
 import { listenPlan, viewerAddress } from "./cli.ts";
 import { hostHeaderFor } from "./server.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { existsSync, realpathSync as entryRealpath } from "node:fs";
+import { readOperatorSessions } from "./operator-sessions.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const OPERATOR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -183,7 +185,7 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 			spawnPi: (args, env) => {
 				const childEnv = { ...process.env, ...env, ...(address.local ? { CP_VIEWER_HOST: host } : {}), CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" };
 				if (home && driver() === "claude") {
-					const native = nativeOperatorSpawn({ home, model: flagValue(args, "--model") ?? configuredOperatorModel(home).model ?? process.env.CP_OPERATOR_MODEL?.trim(), sessionFile: nativeSession(args), skills });
+					const native = nativeOperatorSpawn({ home, model: flagValue(args, "--model") ?? configuredOperatorModel(home).model ?? process.env.CP_OPERATOR_MODEL?.trim(), sessionFile: nativeSession(args, home), skills });
 					// Headless: the dashboard is its input, so the terminal's stdin stays with the launcher.
 					return spawn(native.bin, native.args, { stdio: ["ignore", "inherit", "inherit"], env: childEnv });
 				}
@@ -207,10 +209,18 @@ const flagValue = (args: readonly string[], flag: string): string | undefined =>
 	const at = args.findIndex((arg) => arg === flag || arg.startsWith(`${flag}=`));
 	return at === -1 ? undefined : args[at]!.includes("=") ? args[at]!.slice(flag.length + 1) : args[at + 1];
 };
-/** A resumed `--session` the claude operator can take: its own native record, never a pi session file. */
-const nativeSession = (args: readonly string[]): string | undefined => {
+/**
+ * A resumed `--session` the claude operator can take: its own native record, never a pi session file. `-c`/`--continue`
+ * takes the newest recorded operator session when that is such a record that still exists; else a stderr line, a new one.
+ */
+const nativeSession = (args: readonly string[], home: string): string | undefined => {
 	const file = flagValue(args, "--session");
-	return file && operatorDriverOf(file) === "claude" ? file : undefined;
+	if (file) return operatorDriverOf(file) === "claude" ? file : undefined;
+	if (!args.includes("-c") && !args.includes("--continue")) return undefined;
+	const newest = readOperatorSessions(join(home, layoutForHome("multi", home).sessions))[0]?.file;
+	if (newest && operatorDriverOf(newest) === "claude" && existsSync(newest)) return newest;
+	process.stderr.write(`cp-operator: -c found no Claude CLI operator session to continue (${newest ?? "none"}); starting a new one\n`);
+	return undefined;
 };
 
 /** The selected home's `state/operator/relaunch.json`; no home resolves: undefined, pi runs once. */

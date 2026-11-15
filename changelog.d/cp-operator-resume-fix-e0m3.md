@@ -1,0 +1,1 @@
+- Fix: the dashboard's tmux "Resume last session" (`cp-operator -c`) on the Claude CLI operator no longer drops `-c` and opens an empty session; `-c`/`--continue` resumes the newest recorded `native-operator-*` record and its claude session, or starts a new one with a stderr line saying why (no record, or a pi session is newest).
