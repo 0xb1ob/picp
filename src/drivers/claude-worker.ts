@@ -17,6 +17,7 @@ import { commitIdentityEnv } from "./claude-forge-tools.ts";
 import { implementerArtifactPath, implementerExclusions, nativeRole } from "./claude-roles.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
 import { VERDICT_TOOL } from "./claude-verdict.ts";
+import { agentDirOf, type ClaudeMcpServers, claudeMcpSection, claudeMcpServers, readUserMcpServers } from "../worker-mcp.ts";
 import { type NativeTranscript, nativeTranscript, nativeTranscriptFile } from "./claude-transcript.ts";
 import { modelFamily, type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
 import { classifyTurn, nativeRunStop, startIdlePrompt, type TurnEnd } from "./claude-lifecycle.ts";
@@ -128,6 +129,17 @@ function briefFor(jobId: string): string {
 	return existsSync(file) ? `${readFileSync(file, "utf8").trimEnd()}\n\n` : "";
 }
 
+let userMcp: { mcp: ClaudeMcpServers; section: string } | undefined;
+/** WP5: the agent dir's mcp.json, read once per process; each skipped server is one stderr line and a run event. */
+function loadUserMcp(): { mcp: ClaudeMcpServers; section: string } {
+	if (userMcp) return userMcp;
+	const user = readUserMcpServers(agentDirOf(env));
+	const mcp = claudeMcpServers(user, env, "picp");
+	for (const line of mcp.skipped) process.stderr.write(`[claude cli] ${line}\n`);
+	if (mcp.skipped.length > 0) write({ type: "native_mcp_skipped", lines: mcp.skipped });
+	return (userMcp = { mcp, section: claudeMcpSection(user, mcp) });
+}
+
 /** The role contract the dispatch wrote; a missing or unreadable file stops the turn, never a run without it. */
 function readSystemPrompt(): string {
 	const file = env.CP_NATIVE_SYSTEM_PROMPT_FILE;
@@ -159,7 +171,9 @@ async function turn(prompt: string): Promise<Turn> {
 	const [jobId, runDir, worktree] = [env.CP_JOB_ID, env.CP_RUN_DIR, env.CP_WORKTREE];
 	let artifactPath = env.CP_ARTIFACT_PATH;
 	if (!jobId || !runDir || !worktree || (role === "planner" && !artifactPath)) throw new Error("Claude CLI worker started without its job identity");
-	const systemPrompt = readSystemPrompt();
+	const user = loadUserMcp();
+	const contract = readSystemPrompt();
+	const systemPrompt = user.section === "" ? contract : `${contract.trimEnd()}${user.section}\n`;
 	let current = resuming ? readNativeSession(sessionFile) : freshSession(worktree);
 	const moved = resuming ? nativeSessionMoved(current, worktree) : undefined;
 	if (moved) {
@@ -196,6 +210,8 @@ async function turn(prompt: string): Promise<Turn> {
 		...(implementer ? { providerEnv: commitIdentityEnv(worktree) } : {}),
 		systemPrompt,
 		prompt,
+		web: env.CP_NATIVE_WEB === "1",
+		mcp: user.mcp,
 		signal: abort.signal,
 		onMessage: relay,
 		maxTurns,

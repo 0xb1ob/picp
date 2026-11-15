@@ -24,7 +24,12 @@ export function nativeRole(role: Role): NativeRole {
 	throw new Error(`the Claude CLI has no tool set for role ${role}; only planner, implementer and gate-reviewer run on it`);
 }
 
-export const roleTools = (role: Role): readonly string[] => TOOLS[nativeRole(role)];
+/** WP4: the CLI's own web tools, standing in for pi-web-access in the planner role only. */
+export const NATIVE_WEB_TOOLS: readonly string[] = ["WebSearch", "WebFetch"];
+
+/** The role's built-ins; `web` adds WebSearch and WebFetch to the research role only. */
+export const roleTools = (role: Role, options: { web?: boolean } = {}): readonly string[] =>
+	nativeRole(role) === "research" && options.web === true ? [...TOOLS.research, ...NATIVE_WEB_TOOLS] : TOOLS[nativeRole(role)];
 
 /** N4h: a reviewer reads only its scratch cwd (the review packet); a Read/Grep/Glob path elsewhere is refused. */
 export function reviewerReadGuard(job: SpikeJob): SpikeGuard {

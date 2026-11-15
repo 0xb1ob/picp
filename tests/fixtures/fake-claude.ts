@@ -1,6 +1,6 @@
 /**
  * A stand-in `claude` CLI (stream-json, control protocol) calling tests/harness/claude-mock-provider.ts, for the native
- * parent, operator and workers: hooks, MCP, Bash/Read/Write/Edit/Grep/Glob; logs each spawn's argv and env key names.
+ * parent, operator and workers: hooks, MCP, file/Bash/web built-ins; logs each spawn's argv and env key names.
  */
 import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -42,6 +42,8 @@ const model = flag("--model") ?? "claude-picp-fake";
 const effort = flag("--effort");
 const replay = args.includes("--replay-user-messages");
 const builtins = flag("--tools")?.split(",").filter(Boolean) ?? [];
+/** The built-ins offered to the model beside the MCP tools, as claude lists them in each request. */
+const builtinDefs = builtins.map((name) => ({ name, input_schema: { type: "object" } }));
 /** Test knob (settings env): `off` skips every SDK hook callback, PreToolUse and Stop alike (a negative control). */
 const hooksOff = env.FAKE_CLAUDE_HOOKS === "off";
 /** Stop-hook continuations one turn takes before it ends anyway (claude has no cap; this fake must never spin). */
@@ -52,7 +54,7 @@ const managedOnly = (JSON.parse(flag("--managed-settings") ?? "{}") as { disable
 /** `--mcp-config` stdio servers, spawned on first use; an http entry is listed as failed (this fake has no client). */
 const configured = (JSON.parse(flag("--mcp-config") ?? "{}") as { mcpServers?: Record<string, { type?: string; command?: string; args?: string[]; env?: Record<string, string> }> }).mcpServers ?? {};
 const external = Object.entries(configured).filter(([, server]) => server.type !== "sdk");
-/** Test knob (settings env): JSON merged into every `system/init`, a surface picp never passed (the lockdown's case). */
+/** Test knob (settings env): JSON merged into every `system/init` (arrays appended), a surface picp never passed. */
 const initExtra = JSON.parse(env.FAKE_CLAUDE_INIT_EXTRA ?? "{}") as Record<string, unknown>;
 const resumed = flag("--resume");
 const sessionId = resumed ?? randomUUID();
@@ -156,7 +158,7 @@ async function callModel(messages: Message[]): Promise<{ status: number; body: R
 		method: "POST",
 		...(turnAbort ? { signal: turnAbort.signal } : {}),
 		headers: { "content-type": "application/json", authorization: `Bearer ${env.CLAUDE_CODE_OAUTH_TOKEN ?? ""}` },
-		body: JSON.stringify({ model, max_tokens: 4096, system: [{ type: "text", text: systemPrompt }], messages, tools: await listTools(), stream: false, ...(effort ? { output_config: { effort } } : {}) }),
+		body: JSON.stringify({ model, max_tokens: 4096, system: [{ type: "text", text: systemPrompt }], messages, tools: [...builtinDefs, ...await listTools()], stream: false, ...(effort ? { output_config: { effort } } : {}) }),
 	});
 	return { status: response.status, body: await response.json() as Record<string, unknown> };
 }
@@ -174,10 +176,18 @@ function walk(root: string): string[] {
 		.flatMap((entry) => entry.isDirectory() ? walk(join(root, entry.name)) : [join(root, entry.name)]);
 }
 
-/** The built-ins `--tools` names that a case drives (Bash, Read, Write, Edit, Grep, Glob), run for real. */
-function builtin(name: string, input: Record<string, unknown>, toolUseId: string): Block {
+/** The built-ins `--tools` names that a case drives (Bash, Read, Write, Edit, Grep, Glob, WebFetch), run for real;
+ * WebSearch answers the settings-env knob FAKE_CLAUDE_SEARCH_RESULTS. */
+async function builtin(name: string, input: Record<string, unknown>, toolUseId: string): Promise<Block> {
 	const done = (content: string, isError = false): Block => ({ type: "tool_result", tool_use_id: toolUseId, is_error: isError, content });
 	try {
+		if (name === "WebFetch") {
+			const url = new URL(String(input.url ?? ""));
+			// Loopback only: a test's fake web server, never the network.
+			if (url.hostname !== "127.0.0.1") return done(`fake-claude fetches 127.0.0.1 only, not ${url.hostname}`, true);
+			return done((await (await fetch(url)).text()).slice(0, 64 * 1024));
+		}
+		if (name === "WebSearch") return done(env.FAKE_CLAUDE_SEARCH_RESULTS ?? "no results");
 		const file = String(input.file_path ?? "");
 		const base = resolve(String(input.path ?? process.cwd()));
 		if (name === "Read") return done(readFileSync(file, "utf8"));
@@ -220,7 +230,7 @@ async function runTool(use: Block): Promise<Block> {
 			return { type: "tool_result", tool_use_id: toolUseId, is_error: true, content: out.hookSpecificOutput.permissionDecisionReason ?? "denied" };
 		}
 	}
-	if (builtins.includes(name)) return builtin(name, (use.input ?? {}) as Record<string, unknown>, toolUseId);
+	if (builtins.includes(name)) return await builtin(name, (use.input ?? {}) as Record<string, unknown>, toolUseId);
 	// Test knob (settings env): hold the first allowed call to this tool before it runs, until an interrupt ends the turn.
 	if (env.FAKE_CLAUDE_HOLD_AFTER_ALLOW === name && !existsSync(join(store, "held"))) {
 		writeFileSync(join(store, "held"), toolUseId);
@@ -237,12 +247,16 @@ async function runTool(use: Block): Promise<Block> {
 	return { type: "tool_result", tool_use_id: toolUseId, is_error: called.isError === true, content: called.content ?? [] };
 }
 
-const init = (): void => send({
-	type: "system", subtype: "init", session_id: sessionId, model, cwd: process.cwd(), tools: [...builtins, ...(tools ?? []).map((each) => each.name)],
-	mcp_servers: [...servers, ...external.map(([name]) => name)].map((name) => ({ name, status: servers.includes(name) || stdioNames.includes(name) ? "connected" : "failed" })),
-	permissionMode: "default", slash_commands: ["compact"], apiKeySource: "none", claude_code_version: CLAUDE_VERSION_FLOOR, output_style: "default", uuid: randomUUID(),
-	...initExtra,
-});
+const init = (): void => {
+	const line: Record<string, unknown> = {
+		type: "system", subtype: "init", session_id: sessionId, model, cwd: process.cwd(), tools: [...builtins, ...(tools ?? []).map((each) => each.name)],
+		mcp_servers: [...servers, ...external.map(([name]) => name)].map((name) => ({ name, status: servers.includes(name) || stdioNames.includes(name) ? "connected" : "failed" })),
+		permissionMode: "default", slash_commands: ["compact"], apiKeySource: "none", claude_code_version: CLAUDE_VERSION_FLOOR, output_style: "default", uuid: randomUUID(),
+	};
+	// An extra array joins init's own (a stray tool beside the real ones); any other value replaces it.
+	for (const [key, value] of Object.entries(initExtra)) line[key] = Array.isArray(value) && Array.isArray(line[key]) ? [...line[key] as unknown[], ...value] : value;
+	send(line);
+};
 
 const validImage = (block: Block): boolean => {
 	const source = block.source as { type?: unknown; media_type?: unknown; data?: unknown } | undefined;

@@ -91,6 +91,9 @@ function resolvedValue(value: string, env: NodeJS.ProcessEnv): string {
 	});
 }
 
+/** pi's builtin:mcp beside the servers: deferred tools load through ToolSearch, resources through the other two. */
+export const CLAUDE_MCP_HELPER_TOOLS: readonly string[] = ["ToolSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"];
+
 export interface ClaudeMcpServers {
 	path: string;
 	servers: Record<string, McpStdioServerConfig | McpHttpServerConfig>;
@@ -101,10 +104,11 @@ export interface ClaudeMcpServers {
 }
 
 /**
- * The Claude CLI operator's user servers (O4): each enabled stdio or HTTP entry as an SDK config with values resolved
- * from `env`, as pi resolves them. pi-only keys are dropped; a server needing `cwd`, `auth` or `!command` is skipped.
+ * The Claude CLI's user servers (operator O4, workers WP5): each enabled stdio or HTTP entry as an SDK config, values
+ * resolved from `env` as pi does. pi-only keys are dropped; a server needing `cwd`, `auth` or `!command` is skipped,
+ * and so is `reserved`, the session's own server name (operator `cp`, worker `picp`).
  */
-export function claudeMcpServers(user: UserMcpServers, env: NodeJS.ProcessEnv = process.env): ClaudeMcpServers {
+export function claudeMcpServers(user: UserMcpServers, env: NodeJS.ProcessEnv = process.env, reserved = "cp"): ClaudeMcpServers {
 	const servers: ClaudeMcpServers["servers"] = {};
 	const kept: Record<string, Record<string, unknown>> = {};
 	// The parse message can quote the file: name the path only.
@@ -113,7 +117,7 @@ export function claudeMcpServers(user: UserMcpServers, env: NodeJS.ProcessEnv = 
 		const skip = (why: string) => void skipped.push(`MCP server ${name} not loaded: ${why}`);
 		if (isRecord(raw) && (raw.enabled === false || (raw.exposure === "hidden" && !isRecord(raw.toolExposure)))) continue;
 		if (!isRecord(raw) || (typeof raw.command !== "string" && typeof raw.url !== "string")) skip(`it needs "command" (stdio) or "url" (HTTP)`);
-		else if (name === "cp") skip("cp is the operator's own server");
+		else if (name === reserved) skip(`${reserved} is the ${reserved === "cp" ? "operator" : "worker"}'s own server`);
 		else if (raw.cwd !== undefined || raw.auth !== undefined) skip(`"${raw.cwd !== undefined ? "cwd" : "auth"}" has no Claude CLI equivalent`);
 		else {
 			try {
@@ -129,6 +133,17 @@ export function claudeMcpServers(user: UserMcpServers, env: NodeJS.ProcessEnv = 
 	}
 	const hidden = (server: string, tool: string) => kept[server] !== undefined && exposureOf(kept[server], tool) === "hidden";
 	return { path: user.path, servers, hidden, skipped };
+}
+
+/** The system-prompt section naming the loaded servers (with their `description`); empty when none loaded. */
+export function claudeMcpSection(user: UserMcpServers, mcp: ClaudeMcpServers): string {
+	const names = Object.keys(mcp.servers);
+	if (names.length === 0) return "";
+	const described = (name: string): string => {
+		const description = (user.servers[name] as { description?: unknown }).description;
+		return typeof description === "string" ? `${name}: ${description}` : name;
+	};
+	return `\n\nMCP servers (from ${mcp.path}; tools mcp__<server>__<tool>, deferred ones found with ToolSearch):\n${names.map((name) => `- ${described(name)}`).join("\n")}`;
 }
 
 /**
