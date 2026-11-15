@@ -795,20 +795,23 @@ these routes being refused before gh runs.
 first, in pi's order and wording. Then `nativeBashRefusal` refuses by shape, first hit wins, and lets everything else
 run (test runners, `python3`, `node -e`, `npx`, `curl`, `$VAR`, globs, `cd`, heredocs, headless browsers):
 
-1. Secrets: a secret path named anywhere in the command or as a path word (with `~`, a glob's literal prefix, and every
+1. Secrets: a secret path named anywhere in the command (a home's `.claude` via `~/`, `~user/` or `$HOME/`, never a
+   repo-local `.claude/`) or as a path word (with `~`, a glob's literal prefix, and every
    match of an unquoted glob checked through its links, so a planted link is caught), and a `$NAME`/`${NAME}` whose
    name looks secret (`SECRET_ENV_NAME`) or starts `ANTHROPIC_`/`CLAUDE_`, or an indirect `${!…}`.
 2. Env dumps: `env` with no command, `printenv` bare or of a secret name, bare `set`/`export`/`readonly`/`declare`/
    `typeset` (or with `-p`), `compgen -v|-e`, BSD `ps e`.
-3. `gh` (remedy: `gh_read`; for an implementer also `pr_create`/`pr_edit`); git `push|fetch|pull|remote|config|
-   worktree|submodule|clone` (remedy: `git_push`, `git_fetch` then `git merge`); git run outside the worktree (`-C`,
-   `--git-dir`, `--work-tree`, `GIT_DIR=`, a tracked `cd`); `-c alias.*`; a second branch (`switch`/`checkout` to
+3. `gh` (remedy: `gh_read`; for an implementer also `pr_create`/`pr_edit`); `scp` and `rsync` (remedy: `cp`/`mv`);
+   git `push|fetch|pull|remote|config|worktree|submodule|clone|send-pack|http-push|receive-pack|upload-pack` (remedy:
+   `git_push`, `git_fetch` then `git merge`); git run outside the worktree (`-C`, `--git-dir`, `--work-tree`, `GIT_DIR=`,
+   a tracked `cd`); `-c alias.*` and any `GIT_CONFIG*` assignment or export; a second branch (`switch`/`checkout` to
    another branch, `-b`/`-c`, `branch <new>`); and for a planner any repo-changing verb (`add`, `commit`, `merge`,
    `reset`, `restore`, `checkout`, `stash`, `rm`, `init`, …).
 4. Write destinations: redirect targets and the destinations of `cp`/`mv`/`install`/`ln`, `rm`/`mkdir`/`touch`/`tee`/
    `chmod`/…, `dd of=`, `sed -i`/`perl -i`, `sort -o`, `curl -o`, `wget -O`, `chromium --screenshot=`, `find -delete`/
-   `-fprint`, git `restore`/`checkout --`/`rm`/`mv` paths and `--output`. Each must land in a root: an implementer's
-   worktree (realpath, outside `.git` and its `exclude_paths`), the artifact dir, the scratch `TMPDIR` (`$TMPDIR/…`
+   `-fprint`, `tar -C`, `unzip -d`, git `restore`/`checkout --`/`rm`/`mv` paths and `--output`. Each must land in a
+   root: an implementer's worktree (realpath, outside `.git` and its `exclude_paths`, a directory named by an excluded
+   `dir/` counting as inside it; the root itself only for `git restore .`/`git checkout -- .`), the artifact dir, the scratch `TMPDIR` (`$TMPDIR/…`
    resolves), or `/tmp` outside the worktree's lease dir, the clone, the scratch dir and picp's run and artifact dirs.
    A destination the shell expands later (`$`, a glob, `~`, braces) or relative after a `cd` it cannot follow is
    refused.

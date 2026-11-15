@@ -3,9 +3,13 @@
  * cuts command and process substitutions out as their own scripts, and keeps redirect targets apart from words.
  */
 
-/** One shell word as written; `open` when the shell still expands it (`$`, a glob, braces, `~`), `glob` for a glob. */
+/**
+ * One shell word as written; `open` when the shell still expands it (`$`, a glob, braces, `~`), `glob` for a glob.
+ */
 export interface Word { text: string; open: boolean; glob: boolean }
-/** A simple command: its words, output redirect targets, input redirect sources, the operator after it, its `(` depth. */
+/**
+ * A simple command: its words, output redirect targets, input redirect sources, the operator after it, its `(` depth.
+ */
 export interface Cmd { words: Word[]; dests: Word[]; reads: Word[]; sep: string; depth: number }
 
 /** Closing index of a `$(…)`/`<(…)` (from inside its paren) or a backtick span; quotes hide parens. */
@@ -23,7 +27,9 @@ function closing(src: string, from: number, end: "`" | ")"): number {
 	return src.length;
 }
 
-/** Cuts each `$(…)`, backtick and `<(…)`/`>(…)` into `nested`, leaving an unresolved `$_`; `quotes` false in a heredoc. */
+/**
+ * Cuts each `$(…)`, backtick and `<(…)`/`>(…)` into `nested`, leaving an unresolved `$_`; `quotes` false in a heredoc.
+ */
 export function extract(src: string, nested: string[], quotes = true): string {
 	let out = "";
 	let quote: string | undefined;

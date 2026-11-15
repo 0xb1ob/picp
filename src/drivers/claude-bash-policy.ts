@@ -128,7 +128,9 @@ export function lex(command: string, options: { redirects?: boolean } = {}): Lex
  */
 export function bashSecretHit(command: string, cwd: string, secrets: readonly string[], home: string): string | undefined {
 	const paths = secrets.filter((secret) => secret !== "/proc" && secret !== "/dev/fd");
-	const named = paths.find((secret) => command.includes(secret)) ?? /\.claude\b|(?<![\w.-])\/(?:proc|dev\/fd)(?![\w.-])/.exec(command)?.[0];
+	// A home's `.claude` (`~/`, `~user/`, `$HOME/`), never a repo-local `.claude/`; literal home paths match `paths`.
+	const homeConfig = /(?:~[\w.-]*|\$\{?HOME\}?)\/\.claude\b|(?<![\w.-])\/(?:proc|dev\/fd)(?![\w.-])/;
+	const named = paths.find((secret) => command.includes(secret)) ?? homeConfig.exec(command)?.[0];
 	if (named !== undefined) return named;
 	const lexed = lex(command, { redirects: true });
 	const words = "denied" in lexed ? [] : [...lexed.segments.flat(), ...lexed.redirects];

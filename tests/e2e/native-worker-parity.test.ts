@@ -391,11 +391,12 @@ test("NP-2c: a planner runs scripts and reaches the network but writes only its 
 });
 
 // Scenario: Given a native implementer with a local commit, When it runs sh -c "git push origin HEAD:main" or any
-//   other literal push shape, Then it is refused and no origin ref moves. Negative control: skip the `sh -c` re-scan
-//   and the scratch origin (a local path, no credentials needed) takes main.
+//   other literal push shape (an env-config alias `git p` included), Then it is refused and no origin ref moves.
+//   Negative control: skip the `sh -c` re-scan or the GIT_CONFIG_* refusal and the local-path origin takes main.
 test("NP-2d: push scope holds in every literal shape", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	let id = "";
-	const pushes = ["git push", "git push origin HEAD:other", "sh -c \"git push origin HEAD:main\"", "git -c x=y push", "GIT_DIR=../o git push", "cd .. && git push"];
+	const pushes = ["git push", "git push origin HEAD:other", "sh -c \"git push origin HEAD:main\"", "git -c x=y push", "GIT_DIR=../o git push", "cd .. && git push",
+		"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin HEAD:main"];
 	const h = await nativeWorkerHome(t, [
 		calls(bash("git commit -q --allow-empty -m np2d")),
 		calls(...pushes.map(bash)),
@@ -474,6 +475,7 @@ test("NP-2g: Bash honours exclude_paths", { skip: NATIVE, timeout: 300_000 }, as
 		calls(
 			bash("echo x > .github/workflows/x.yml"), bash("echo x | tee .github/workflows/y.yml"), bash("cp README.md .github/workflows/z.yml"),
 			bash("echo k > secrets/k"), bash("echo A=1 > .env.local"),
+			bash("tar -cf src.tar src"), bash("tar -xf src.tar -C .github/workflows"),
 			// The workflow is edited on disk as the model asks, so the refused checkout is what would have reverted it.
 			{ name: "Bash", input: () => (writeFileSync(ci(), "edited\n"), { command: "git checkout -- .github/workflows/ci.yml" }) },
 			bash("echo x > src/ok.txt"),
@@ -490,8 +492,9 @@ test("NP-2g: Bash honours exclude_paths", { skip: NATIVE, timeout: 300_000 }, as
 		assert.equal(existsSync(join(wt(), file)), false, `file exists: ${file}; denials ${JSON.stringify(denied)}`);
 	}
 	assert.equal(readFileSync(ci(), "utf8"), "edited\n");
-	assert.equal(denied.count, 6, JSON.stringify(denied));
+	assert.equal(denied.count, 7, JSON.stringify(denied));
 	assert.ok(denied.lines.every((line) => / an excluded path /.test(line)), JSON.stringify(denied));
+	assert.equal(existsSync(join(wt(), ".github", "workflows", "src")), false, "tar extracted into .github/workflows");
 	assert.equal(readFileSync(join(wt(), "src", "ok.txt"), "utf8"), "x\n");
 	assert.equal(accepted(h.b.home, id), 1);
 });

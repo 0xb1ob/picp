@@ -63,6 +63,10 @@ test("implementer guards: pushes, escapes, secrets, env dumps, .git and exclusio
 				"ln -s README.md ../x", "curl -so ../x https://example.com", "declare -p", "export -p", "set", "compgen -v", "echo ${!X}",
 				"printenv ANTHROPIC_AUTH_TOKEN", "cat *", "echo x > $TMPDIR/../x", `echo x > ${root}/run/native-pr.json`, "rm -rf /tmp",
 				"$X push", "git diff --outp=../x", "ls | xargs rm", "ps eww", "env -S 'git push'",
+				"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin HEAD:main",
+				"export GIT_CONFIG_PARAMETERS=\"'alias.p=push'\"", "env GIT_CONFIG_GLOBAL=/tmp/g git p", "git send-pack ../o main",
+				"git http-push x", "scp README.md h:x", "rsync README.md ../x", "unzip -d ../x a.zip", "tar -xf a.tar -C .github/workflows",
+				"tar -xf a.tar --directory=../x",
 			].map(bash),
 			write("Edit", join(worktree, ".env")), write("Write", ".github/workflows/x.yml"), write("Write", "../x"), write("Write", "out/x"),
 			write("Write", "dangling.md"), write("Write", ".git/hooks/pre-commit"), write("Edit", join(worktree, ".git", "config")),
@@ -79,6 +83,7 @@ test("implementer guards: pushes, escapes, secrets, env dumps, .git and exclusio
 				"(cd src && touch a.ts); echo x > b.txt", "sh -c 'echo x > src/a.txt'", "find src -name '*.orig' -delete", "sed -i s/a/b/ src/x.ts",
 				"git checkout HEAD~1 -- src/x.ts", "git log --oneline | head -5", "cat <<'EOF'\n$(git push)\nEOF", "ls 2>&1 | wc -l",
 				"git branch --show-current", "ps aux", `echo x > ${root}/art/notes.md`, "cd src && echo x > a.txt", "npx prettier --check .",
+				"git restore .", "git checkout -- .", "ls .claude && rg -n '\\.claude' src", "tar -xf a.tar -C src", "unzip -d /tmp/cp-unzip-unit a.zip",
 			].map(bash),
 			write("Edit", join(worktree, "src", "x.ts")), write("Write", "src/new.ts"), ["Read", { file_path: join(worktree, "README.md") }],
 		];
@@ -92,7 +97,9 @@ test("implementer guards: pushes, escapes, secrets, env dumps, .git and exclusio
 		assert.match(await reason("Bash", { command: "env" }), /Bash an environment dump \(`env`\) is denied/);
 		assert.match(await reason("Bash", { command: "cd /usr && git commit -m x" }), /Bash running git outside this worktree \(\/usr\) is denied/);
 		assert.match(await reason("Bash", { command: "git switch main" }), /onto a second branch is denied; this job works on cp-ship-unit only/);
-		assert.match(await reason("Bash", { command: "echo x > $HOME/x" }), /writing to \$HOME\/x \(a destination the shell expands later\) is denied/);
+		assert.match(await reason("Bash", { command: "rsync README.md ../x" }), /`rsync` \(it can copy across the network\) is denied; copy files with cp or mv\./);
+		assert.match(await reason("Bash", { command: "GIT_CONFIG_COUNT=1 git p" }), /setting GIT_CONFIG_COUNT \(git config from the env/);
+		assert.match(await reason("Bash", { command: "echo x > $HOME/x" }),/writing to \$HOME\/x \(a destination the shell expands later\) is denied/);
 		assert.match(await reason("Write", { file_path: "../x" }), /; a path outside the worktree \(\.\.\/x\) is denied\.$/);
 		assert.match(await reason("Write", { file_path: "out/x" }), /a path outside the worktree \(out\/x\)/);
 		assert.match(await reason("Write", { file_path: ".git/hooks/x" }), /a path inside \.git/);

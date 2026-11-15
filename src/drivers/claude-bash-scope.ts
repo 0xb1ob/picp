@@ -59,7 +59,8 @@ export function worktreePathRefusal(path: string, worktree: string, excluded: re
 	const rel = relative(realpathSync(worktree), real);
 	if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return `a path outside the worktree (${path})`;
 	if (rel.split(sep).includes(".git")) return `a path inside .git (${path})`;
-	const needle = excluded.find((ex) => hitsNeedle(rel, ex));
+	// `${rel}/` too: a directory destination (`tar -C`, `cp -t`) named by an excluded `dir/` needle is inside it.
+	const needle = excluded.find((ex) => hitsNeedle(rel, ex) || hitsNeedle(`${rel}${sep}`, ex));
 	return needle === undefined ? undefined : `an excluded path (${path} matches ${needle})`;
 }
 
@@ -103,7 +104,12 @@ const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const ALL_OPERANDS = new Set(["rm", "rmdir", "mkdir", "touch", "truncate", "chmod", "chown", "chgrp", "tee", "shred", "unlink", "mv"]);
 const BROWSERS = new Set(["chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome", "headless_shell"]);
 const HARMLESS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "-"]);
-const GIT_NETWORK = new Set(["push", "fetch", "pull", "remote", "config", "worktree", "submodule", "clone"]);
+const GIT_NETWORK = new Set([
+	"push", "fetch", "pull", "remote", "config", "worktree", "submodule", "clone", "send-pack", "http-push", "receive-pack", "upload-pack",
+]);
+/** Env handing git config past `-c` (an alias can rename a refused verb): refused as an assignment or export. */
+const GIT_CONFIG_ENV = /^GIT_CONFIG(?:_\w*)?(?:=|$)/;
+const EXPORTERS = new Set(["export", "declare", "typeset", "local", "readonly"]);
 const GIT_PLANNER = new Set([
 	"add", "commit", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash", "clean", "rm", "mv", "cherry-pick", "revert", "tag", "am",
 	"apply", "init", "update-ref", "notes",
@@ -124,6 +130,8 @@ function fileDests(name: string, args: readonly Word[]): Word[] {
 	if (name === "dd") return args.filter((w) => w.text.startsWith("of=")).map((w) => ({ ...w, text: w.text.slice(3) }));
 	if (name === "sort" || name === "curl") return values(args, ["-o"], "--output");
 	if (name === "wget") return values(args, ["-O", "-o"], "--output-document");
+	if (name === "unzip") return values(args, ["-d"]);
+	if (name === "tar") return values(args, ["-C"], "--directory");
 	if (BROWSERS.has(name)) return args.flatMap((w) => /^--(?:screenshot|print-to-pdf)=(.+)$/s.exec(w.text)?.slice(1).map((text) => ({ ...w, text })) ?? []);
 	if (name === "sed" || name === "perl") {
 		if (!args.some((w) => /^-[a-zA-Z]*i/.test(w.text) || w.text.startsWith("--in"))) return [];
@@ -233,7 +241,11 @@ function gitRefusal(args: readonly Word[], assigns: readonly Word[], here: strin
 	}
 	if (sub === "branch" && (has(BRANCH_WRITE) || (ops.length > 0 && !has(BRANCH_LIST)))) return second;
 	if (!impl && GIT_PLANNER.has(sub)) return denied(`\`git ${sub}\` (a planner never changes the repo or its history)`);
-	const dests = sub === "restore" ? operands(rest, ["-s", "--source"]) : sub === "checkout" ? paths : sub === "rm" || sub === "mv" ? operands(rest) : [];
+	// As on pi, `git restore .` and `git checkout -- .` may name the worktree root itself.
+	const root = realpathSync(scope.worktree);
+	const notRoot = (w: Word) => w.open || realTarget(resolve(dir ?? scope.worktree, w.text)) !== root;
+	const restored = sub === "restore" ? operands(rest, ["-s", "--source"]) : sub === "checkout" ? paths : [];
+	const dests = sub === "rm" || sub === "mv" ? operands(rest) : restored.filter(notRoot);
 	// An expansion in a diff-family call may become `--output=<file>`, so it counts as an unresolved destination.
 	const expanding = /^(?:log|show|diff|format-patch|whatchanged|range-diff)$/.test(sub) ? rest.filter((w) => w.open && /[$`{]/.test(w.text)) : [];
 	const pager = sub === "grep" ? values(rest, ["-O"], "--open-files-in-pager")[0] : undefined;
@@ -272,6 +284,9 @@ function commandRefusal(cmd: Cmd, here: string | undefined, scope: BashScope, le
 	if ([...cmd.words, ...cmd.dests, ...cmd.reads].some((word) => secretWord(word, base, scope))) return SECRET;
 	const { assigns, words, dump, split, moved } = unwrap(cmd.words);
 	if (dump !== undefined) return dump;
+	const exported = EXPORTERS.has(words[0]?.text ?? "") ? words.slice(1) : [];
+	const config = [...assigns, ...exported].find((w) => GIT_CONFIG_ENV.test(w.text));
+	if (config !== undefined) return denied(`setting ${config.text.split("=")[0]} (git config from the env, such as an alias for a refused verb)`);
 	const at = moved ? undefined : here;
 	if (split !== undefined) return scriptRefusal(split, at, scope, level + 1);
 	const [first, ...args] = words;
@@ -289,6 +304,7 @@ function commandRefusal(cmd: Cmd, here: string | undefined, scope: BashScope, le
 		}
 	}
 	if (name === "eval") return scriptRefusal(args.map((w) => w.text).join(" "), at, scope, level + 1) ?? cmd.dests.map((w) => destRefusal(w, at, scope)).find(Boolean);
+	if (name === "scp" || name === "rsync") return denied(`\`${name}\` (it can copy across the network)`, "copy files with cp or mv");
 	if (name === "gh") {
 		return denied("`gh` (no credentials in this run; read GitHub with the gh_read tool)", scope.role === "implementer" ? "open and edit this job's PR with pr_create and pr_edit" : undefined);
 	}
