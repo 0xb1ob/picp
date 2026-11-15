@@ -117,7 +117,7 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 		// key included; the host endpoint is never called.
 		const hostKeys = (result.spawnedEnvKeys ?? []).filter((key) => /^(ANTHROPIC|CLAUDE)_/.test(key));
 		assert.deepEqual(hostKeys, [...CHILD_CLAUDE_KEYS].sort());
-		assert.match(reasons[4] ?? "", /^Bash: [\s\S]*`printenv` \(not on the read-only list\)/);
+		assert.match(reasons[4] ?? "", /^Bash: Refused: a native planner's Bash an environment dump \(`printenv ANTHROPIC_API_KEY`\) is denied/);
 		assert.equal(host.requests.length, 0);
 		assert.ok(!JSON.stringify(provider.requests.map((request) => request.body)).includes("host-api-key-sentinel"));
 		assert.ok(provider.requests.length > 0);

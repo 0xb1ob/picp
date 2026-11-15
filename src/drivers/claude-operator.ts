@@ -71,7 +71,7 @@ function guard(toolName: string, input: unknown): string | undefined {
 	const scoped = operatorToolRefusal(call.name, call.input, cwd, () => resolveOperatorTarget());
 	if (scoped) return scoped;
 	if (call.name === "bash") {
-		const hit = bashSecretHit(String(call.input.command ?? ""), cwd, secrets);
+		const hit = bashSecretHit(String(call.input.command ?? ""), cwd, secrets, homedir());
 		return hit === undefined ? undefined : refused("Bash", hit);
 	}
 	const paths = call.name === "find" ? [call.input.path, call.input.pattern] : [call.input.path];

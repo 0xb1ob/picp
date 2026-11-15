@@ -3,7 +3,6 @@
  * lexer the operator's best-effort Bash secret check reads words with. Worker Bash scope: claude-bash-scope.ts (WP2).
  */
 import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 /** Paths no research tool reads: the passed settings file, the homes' Claude config, `/proc` and `/dev/fd`. */
@@ -123,12 +122,15 @@ export function lex(command: string, options: { redirects?: boolean } = {}): Lex
 	return { segments: segments.filter((segment) => segment.length > 0), redirects };
 }
 
-/** A secret a Bash command run in `cwd` names: literally anywhere, or as a lexed path word (best effort past `$`). */
-export function bashSecretHit(command: string, cwd: string, secrets: readonly string[]): string | undefined {
+/**
+ * A secret a Bash command run in `cwd` names: literally anywhere, or as a lexed path word (best effort past `$`), with
+ * `~` read as `home`.
+ */
+export function bashSecretHit(command: string, cwd: string, secrets: readonly string[], home: string): string | undefined {
 	const paths = secrets.filter((secret) => secret !== "/proc" && secret !== "/dev/fd");
 	const named = paths.find((secret) => command.includes(secret)) ?? /\.claude\b|(?<![\w.-])\/(?:proc|dev\/fd)(?![\w.-])/.exec(command)?.[0];
 	if (named !== undefined) return named;
 	const lexed = lex(command, { redirects: true });
 	const words = "denied" in lexed ? [] : [...lexed.segments.flat(), ...lexed.redirects];
-	return words.find((word) => /^[.~]|\//.test(word) && secretPathIn(word.replace(/^~(?=$|\/)/, homedir()), cwd, secrets));
+	return words.find((word) => /^[.~]|\//.test(word) && secretPathIn(word.replace(/^~(?=$|\/)/, home), cwd, secrets));
 }

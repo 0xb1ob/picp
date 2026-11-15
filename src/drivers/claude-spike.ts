@@ -176,7 +176,7 @@ export function spikeGuards(
 ): SpikeGuard[] {
 	const native = nativeRole(role);
 	const writeScope = writeScopeGuard(job, secrets, native);
-	const scope = native === "reviewer" ? undefined : bashScope(job, secrets, native);
+	const scope = native === "reviewer" ? undefined : bashScope(job, secrets, native, homedir());
 	let ciStatusQueries = 0;
 	const bash: SpikeGuard = (call) => {
 		if (call.name !== "bash") return undefined;
