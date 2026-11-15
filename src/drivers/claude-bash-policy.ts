@@ -1,103 +1,10 @@
 /**
- * N3a G1: the research run's Bash is deny-by-default. Only named read-only commands run; a redirect, a substitution,
- * an expansion, a glob, a subshell, a background job, an env assignment, an unknown command, an option off that
- * command's allow-list or a secret path is refused.
+ * The secret paths every native Claude session refuses (settings, Claude config, `/proc`, `/dev/fd`) and the quoting
+ * lexer the operator's best-effort Bash secret check reads words with. Worker Bash scope: claude-bash-scope.ts (WP2).
  */
 import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-
-/**
- * Options a command accepts: letters, letters taking a value (`attached`: only as `-U3`), long (or find primary)
- * names, names taking a value, and names whose value is optional so they count only in `--name=value` form.
- */
-export type Options = {
-	short?: string; shortValue?: string; attached?: string;
-	long?: readonly string[]; longValue?: readonly string[]; longEquals?: readonly string[]; digits?: boolean;
-};
-
-// Allow-lists, not deny-lists: an option that runs a program, writes a file or opens a pager is never added here.
-const READ_ONLY: Record<string, Options> = {
-	rg: {
-		short: "nilcwFSsvU", shortValue: "egtABCm",
-		long: ["--files", "--hidden", "--json"], longValue: ["--glob", "--type", "--max-count"],
-	},
-	grep: { short: "nirlLcEFwvxhHosq", shortValue: "ABCem" },
-	ls: { short: "laAhR1tSdrF" },
-	cat: { short: "n" },
-	head: { shortValue: "nc", digits: true },
-	tail: { shortValue: "nc", digits: true },
-	wc: { short: "lwcm" },
-	sort: { short: "nrufhV", shortValue: "kt" },
-	find: {
-		long: ["-print", "-not", "-o", "-a", "-and", "-or"],
-		longValue: ["-name", "-iname", "-type", "-path", "-ipath", "-maxdepth", "-mindepth", "-size", "-mtime", "-newer"],
-	},
-	stat: { short: "Lt", shortValue: "c", longValue: ["--format"] },
-	diff: { short: "uqrNwbBiy", shortValue: "U" },
-	echo: { short: "neE" },
-	basename: { short: "a", shortValue: "s" },
-	dirname: {},
-	realpath: { short: "emsqLP" },
-	pwd: {},
-	true: {},
-};
-const GIT_PRETTY = ["--oneline", "--stat", "--name-only", "--name-status", "--no-ext-diff", "--no-textconv"];
-const GIT_READ: Record<string, Options> = {
-	// `--format=<fmt>` takes a required value and `--pretty[=<fmt>]` and diff `-U[<n>]` an optional one; none takes
-	// the next word.
-	log: { short: "p", shortValue: "n", digits: true, long: GIT_PRETTY, longValue: ["--since", "--until", "--author"], longEquals: ["--format", "--pretty"] },
-	show: { short: "s", long: [...GIT_PRETTY, "--no-patch"], longEquals: ["--format", "--pretty"] },
-	diff: { shortValue: "U", attached: "U", long: [...GIT_PRETTY, "--cached", "--staged"] },
-	status: { short: "sb", long: ["--short", "--porcelain", "--branch"] },
-	"ls-files": {},
-	blame: { short: "w", shortValue: "L" },
-	"rev-parse": { long: ["--abbrev-ref", "--short", "--show-toplevel", "--git-dir"] },
-	"cat-file": { short: "ptse" },
-	grep: { short: "nilcwFEv", shortValue: "e", long: ["--name-only", "--no-index"] },
-};
-/** WP1: GitHub reads go through the in-process gh_read tool; the CLI child holds no credentials. */
-export const GH_BASH = "`gh` (no credentials in this run; read GitHub with the gh_read tool)";
-
-/** A table's own entry, so a prototype key such as `constructor` is never a command. */
-export function own(table: Record<string, Options>, key: string): Options | undefined {
-	return Object.hasOwn(table, key) ? table[key] : undefined;
-}
-
-/**
- * The first option in `args` that `options` does not name, as written; GNU tools and git bundle short letters.
- * A value is attached (`--opt=v`, `-n5`) or the next word, which must not start with `-`, so no value hides an option.
- */
-export function unlistedOption(options: Options, args: readonly string[], primaries: boolean): string | undefined {
-	const separateValue = (i: number) => args[i + 1] !== undefined && !(args[i + 1] as string).startsWith("-");
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i] as string;
-		if (arg === "--" && !primaries) return undefined;
-		if (!arg.startsWith("-") || arg === "-" || (options.digits === true && /^-\d+$/.test(arg))) continue;
-		if (primaries || arg.startsWith("--")) {
-			const key = arg.split("=")[0] as string;
-			if (options.longValue?.includes(key) === true) {
-				if (arg.includes("=")) continue;
-				if (!separateValue(i)) return key;
-				i++;
-			} else if (options.longEquals?.includes(key) === true ? !arg.includes("=") : options.long?.includes(key) !== true) {
-				return key;
-			}
-			continue;
-		}
-		for (let j = 1; j < arg.length; j++) {
-			const letter = arg[j] as string;
-			if (options.shortValue?.includes(letter) === true) {
-				const last = j === arg.length - 1;
-				if (options.attached?.includes(letter) === true && !/^\d+$/.test(arg.slice(j + 1))) return `-${letter}`;
-				if (last && !separateValue(i)) return `-${letter}`;
-				i += last ? 1 : 0;
-				break;
-			}
-			if (options.short?.includes(letter) !== true) return `-${letter}`;
-		}
-	}
-	return undefined;
-}
 
 /** Paths no research tool reads: the passed settings file, the homes' Claude config, `/proc` and `/dev/fd`. */
 export function secretPaths(settingsPath: string | null, homes: readonly string[]): string[] {
@@ -216,38 +123,12 @@ export function lex(command: string, options: { redirects?: boolean } = {}): Lex
 	return { segments: segments.filter((segment) => segment.length > 0), redirects };
 }
 
-/** The checks every allow-list shares: no env assignment and no secret path in any argument. */
-export function wordsRefusal(words: readonly string[], cwd: string, secrets: readonly string[]): string | undefined {
-	const [name = "", ...args] = words;
-	if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(name)) return "an env assignment";
-	const paths = args.flatMap((arg) => [arg, arg.slice(arg.indexOf("=") + 1), arg.startsWith("-") ? arg.slice(arg.indexOf("/")) : ""]);
-	if (paths.some((path) => path !== "" && secretPathIn(path, cwd, secrets))) return "a secret path (settings, Claude config, /proc or /dev/fd)";
-	return undefined;
-}
-
-/** One segment against the read-only list (and git reads); undefined when it may run. */
-export function segmentRefusal(words: readonly string[], cwd: string, secrets: readonly string[]): string | undefined {
-	const shared = wordsRefusal(words, cwd, secrets);
-	if (shared !== undefined) return shared;
-	const [name = "", ...args] = words;
-	const [sub = ""] = args;
-	if (name === "gh") return GH_BASH;
-	if (name === "git") {
-		const known = own(GIT_READ, sub);
-		if (known === undefined) return `\`git ${sub}\``;
-		const option = unlistedOption(known, args.slice(1), false);
-		return option === undefined ? undefined : `\`git ${sub}\` option \`${option}\` (not on its allow-list)`;
-	}
-	const known = own(READ_ONLY, name);
-	if (known === undefined) return `\`${name}\` (not on the read-only list)`;
-	const option = unlistedOption(known, args, name === "find");
-	return option === undefined ? undefined : `\`${name}\` option \`${option}\` (not on its allow-list)`;
-}
-
-/** Undefined when every part of `command`, run in `cwd`, is a named read-only command; else the refusal naming why. */
-export function readOnlyBashRefusal(command: string, cwd: string, secrets: readonly string[]): string | undefined {
-	const lexed = lex(command);
-	const why = "denied" in lexed ? lexed.denied : lexed.segments.map((words) => segmentRefusal(words, cwd, secrets)).find((reason) => reason !== undefined);
-	if (why === undefined) return undefined;
-	return `Refused: a research worker's Bash runs only read-only commands (rg, grep, ls, cat, head, tail, wc, git log/show/diff/status); ${why} is denied. Write findings with the Write tool into the artifact directory.`;
+/** A secret a Bash command run in `cwd` names: literally anywhere, or as a lexed path word (best effort past `$`). */
+export function bashSecretHit(command: string, cwd: string, secrets: readonly string[]): string | undefined {
+	const paths = secrets.filter((secret) => secret !== "/proc" && secret !== "/dev/fd");
+	const named = paths.find((secret) => command.includes(secret)) ?? /\.claude\b|(?<![\w.-])\/(?:proc|dev\/fd)(?![\w.-])/.exec(command)?.[0];
+	if (named !== undefined) return named;
+	const lexed = lex(command, { redirects: true });
+	const words = "denied" in lexed ? [] : [...lexed.segments.flat(), ...lexed.redirects];
+	return words.find((word) => /^[.~]|\//.test(word) && secretPathIn(word.replace(/^~(?=$|\/)/, homedir()), cwd, secrets));
 }

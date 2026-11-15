@@ -18,7 +18,7 @@ import { ALWAYS_AVAILABLE } from "../src/routing.ts";
 import { nativeSpawn } from "../src/dispatch-driver.ts";
 import { assertNativeSelection, nativeAddendum, nativeBaseEnv, NativeDriverError, nativeMaxConcurrent, nativeSelectionRefusal, nativeSlotRefusal } from "../src/drivers/claude.ts";
 import { nativeRevivePrompt, nativeReviveBase, nativeSessionMoved, writeNativeSession } from "../src/drivers/claude-followup.ts";
-import { readOnlyBashRefusal, secretPaths } from "../src/drivers/claude-bash-policy.ts";
+import { secretPaths } from "../src/drivers/claude-bash-policy.ts";
 import { CLI_BUILTIN_AGENTS, type InitSurface, lockdownVerdict } from "../src/drivers/claude-lockdown.ts";
 import {
 	buildChildEnv,
@@ -51,6 +51,8 @@ test("buildChildEnv passes only the allow-list, the isolated dirs and the explic
 	assert.equal("ANTHROPIC_BASE_URL" in buildChildEnv(dirs, { ANTHROPIC_BASE_URL: "http://host" }), false);
 	// N4m: no marketplace auto-install, and policy settings that keep a settings-enabled plugin out of the kept scratch.
 	assert.equal(env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL, "1");
+	// WP2: a Bash `git push` over ssh never reaches a key on disk.
+	assert.equal(env.GIT_SSH_COMMAND, "false");
 	assert.deepEqual(CHILD_MANAGED_SETTINGS, { disableAllHooks: true, strictKnownMarketplaces: [] });
 });
 
@@ -88,87 +90,65 @@ test("preToolUseHook: guards deny, a throwing guard denies, an unknown tool deni
 });
 
 const SECRETS = secretPaths("/op/settings.json", ["/op", "/op"]);
-const bashRefusal = (command: string) => readOnlyBashRefusal(command, "/repo", SECRETS);
 
-test("readOnlyBashRefusal: named read-only commands run; expansions, writers, env dumps and secret paths are refused", () => {
+// WP2: a planner's Bash runs what pi's planner runs (scripts, network) but writes only its artifact dir, TMPDIR and
+// /tmp and never changes the repo; NP-2c in tests/e2e/native-worker-parity.test.ts pins the consumer outcome.
+test("native Bash scope, research role: scripts and network run; worktree and git writes, env dumps and secrets are refused", async (t) => {
 	assert.deepEqual(SECRETS, ["/op/settings.json", "/op/.claude", "/op/.config/claude", "/proc", "/dev/fd"]);
+	const root = mkdtempSync(join(tmpdir(), "cp-research-scope-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const worktree = join(root, "repo");
+	mkdirSync(join(worktree, "src"), { recursive: true });
+	writeFileSync(join(worktree, "README.md"), "readme\n");
+	writeFileSync(join(worktree, "src", "x.ts"), "export const x = 1;\n");
+	const art = join(root, "art", "cp-unit");
+	const job = { job_id: "cp-unit", kind: "research" as const, role: "planner" as const, delivery: "local" as const, runDir: join(root, "run"), worktree,
+		artifactPath: join(art, "report.md"), tmp: join(root, "scratch", "tmp") };
+	const hook = preToolUseHook(spikeGuards(job, SECRETS));
+	const bashRefusal = async (command: string) => (await call(hook, "Bash", { command }))?.permissionDecisionReason;
 	for (const command of [
-		"rg -n foo src | head -5",
-		"cat README.md | wc -l && ls 2>/dev/null",
-		"git log --oneline -3; git status",
-		"ls nope || echo none $?",
-		"grep 'a > b $HOME ${X} {a,b} ~' file",
-		"find . -name '*.ts'",
-		"sort -nr -k 2 f",
-		"git grep -n -e x; tail -5 f; head -n5 f",
-		"git log -n 3 --format=%H -- src",
-		"git show --pretty=oneline HEAD; git diff -U3 HEAD",
-	]) assert.equal(bashRefusal(command), undefined, command);
+		"rg -n foo src | head -5", "cat README.md | wc -l && ls 2>/dev/null", "git log --oneline -3; git status", "node -e 1",
+		"curl -s http://127.0.0.1:9/", "python3 -c 1", "find . -name '*.ts'", "cd src && ls", "ls src/*.ts", "echo $CP_JOB_ID", "FOO=1 cat README.md",
+		`chromium --headless --screenshot=${art}/a.png about:blank`, `echo x > ${art}/notes.md`, "echo x > $TMPDIR/a.txt",
+		"echo x > /tmp/cp-research-scope.txt", "git diff --stat", "grep 'a > b $HOME ${X} {a,b} ~' README.md", "ls nope || echo none $?",
+	]) assert.equal(await bashRefusal(command), undefined, command);
 	for (const [command, why] of [
-		["echo x > f", "a redirect"],
-		["echo x >> f", "a redirect"],
-		["cat < f", "a redirect"],
-		["echo x | tee f", "`tee`"],
-		["cat $(touch f)", "a command substitution"],
-		["cat \"`touch f`\"", "a command substitution"],
-		["(touch f)", "a subshell"],
-		["sleep 9 &", "a background job"],
-		["FOO=1 cat f", "an env assignment"],
-		["cp a b", "`cp`"],
-		["sed -i s/a/b/ f", "`sed`"],
+		["echo x > README.md", "writing to README.md outside its write roots (its artifact directory, TMPDIR or /tmp) is denied"],
+		["echo x | tee README.md", "writing to README.md"],
+		["touch src/x", "writing to src/x"],
+		["cp README.md src/y", "writing to src/y"],
+		["rm README.md", "writing to README.md"],
+		["sed -i s/a/b/ README.md", "writing to README.md"],
+		["find . -delete", "writing to ."],
+		["chromium --headless --screenshot=README.png about:blank", "writing to README.png"],
+		["curl -o README.md http://127.0.0.1:9/", "writing to README.md"],
+		["python3 -c 1 > README.md", "writing to README.md"],
+		["git diff --output=f", "writing to f"],
+		["(touch f)", "writing to f"],
+		["cat $(touch f)", "writing to f"],
+		["git add -A", "`git add` (a planner never changes the repo or its history) is denied"],
 		["git commit -m x", "`git commit`"],
-		["git -C /x status", "`git -C`"],
-		["git diff --output=f", "`git diff` option `--output`"],
-		["git log --outp=f", "`git log` option `--outp`"],
-		["git grep -nOrm x", "`git grep` option `-O`"],
-		["git grep -O rm x", "`git grep` option `-O`"],
-		["git grep --open-files-in-pager=rm x", "`git grep` option `--open-files-in-pager`"],
-		["git log --pretty --output=/repo/f", "`git log` option `--pretty`"],
-		["git show --format --output=/repo/f", "`git show` option `--format`"],
-		["git diff -U --output=f", "`git diff` option `-U`"],
-		["git diff -U3 --output=f", "`git diff` option `--output`"],
-		["git log -n --output=f", "`git log` option `-n`"],
-		["git log --since --output=f", "`git log` option `--since`"],
-		["rg -e -- --pre=sh x", "`rg` option `-e`"],
-		["head -n", "`head` option `-n`"],
-		["file -C -m f", "`file` (not on the read-only list)"],
-		["find . -delete", "`find` option `-delete`"],
-		["find . -name x -fprint f", "`find` option `-fprint`"],
-		["sort -o f g", "`sort` option `-o`"],
-		["sort -S 1 f", "`sort` option `-S`"],
-		["sort -nT /tmp f", "`sort` option `-T`"],
-		["sort --compress-program=sh f", "`sort` option `--compress-program`"],
-		["rg --pre sh x", "`rg` option `--pre`"],
-		["rg -nz x", "`rg` option `-z`"],
-		["rg --hostname-bin=sh x", "`rg` option `--hostname-bin`"],
-		["gh pr view 7 --json title", "`gh` (no credentials in this run; read GitHub with the gh_read tool)"],
-		["cat *", "an unquoted glob"],
-		["ls src/?.ts", "an unquoted glob"],
-		["ls [ab]", "an unquoted glob"],
-		["gh pr merge 7", "`gh` (no credentials"],
-		["echo 'open", "an unterminated quote"],
-		["find /repo ${U:--delete}", "a parameter expansion"],
-		["find /repo $'-\\x64elete'", "an ANSI-C or locale quote"],
-		["find /repo $\"-delete\"", "an ANSI-C or locale quote"],
-		["echo $[1+1]", "an arithmetic expansion"],
-		["find /repo {-delete,}", "a brace expansion"],
-		["git log ${U:---output=/repo/f}", "a parameter expansion"],
-		["echo $ANTHROPIC_AUTH_TOKEN", "a variable expansion"],
-		["echo \"$CP_SENTINEL_SECRET\"", "a variable expansion"],
-		["cat ~op/.claude/settings.json", "a tilde expansion"],
-		["printenv", "`printenv` (not on the read-only list)"],
-		["env", "`env` (not on the read-only list)"],
-		["cd /repo/src", "`cd` (not on the read-only list)"],
+		["git stash", "`git stash`"],
+		["git checkout main", "`git checkout` onto a second branch"],
+		["git push", "`git push` (no credentials in this run) is denied; a planner never pushes"],
+		["git -C /x status", "running git outside this worktree (/x)"],
+		["cd .. && git log", "running git outside this worktree"],
 		["cat /proc/self/environ", "a secret path"],
-		["grep -a SECRET /proc/1/environ", "a secret path"],
-		["cat ../../proc/self/environ", "a secret path"],
 		["cat /op/settings.json", "a secret path"],
 		["head /op/.claude.json", "a secret path"],
 		["rg x '/op/.cl*/s'", "a secret path"],
 		["rg x /op", "a secret path"],
 		["grep --file=/op/.config/claude/x y", "a secret path"],
 		["cat /dev/fd/3", "a secret path"],
-	] as Array<[string, string]>) assert.match(bashRefusal(command) ?? "", new RegExp(`; ${why.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), command);
+		["cat ~op/.claude/settings.json", "a secret path"],
+		["env", "an environment dump (`env`)"],
+		["printenv", "an environment dump (`printenv`)"],
+		["echo $ANTHROPIC_AUTH_TOKEN", "expanding $ANTHROPIC_AUTH_TOKEN (a secret-named variable)"],
+		["echo \"$CP_SENTINEL_SECRET\"", "expanding $CP_SENTINEL_SECRET"],
+		["gh pr view 7 --json title", "`gh` (no credentials in this run; read GitHub with the gh_read tool) is denied. pi's guards"],
+	] as Array<[string, string]>) {
+		assert.match(await bashRefusal(command) ?? "", new RegExp(`^Refused: a native planner's Bash .*${why.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), command);
+	}
 });
 
 const INIT: InitSurface = {

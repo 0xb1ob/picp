@@ -58,11 +58,11 @@ import { detectWorkerHistoryRewrite, workerHistoryRefusal } from "../worker-hist
 import { workerHostGuard } from "../worker-host-guard.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
-import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
+import { secretPathIn, secretPaths } from "./claude-bash-policy.ts";
+import { bashScope, nativeBashRefusal } from "./claude-bash-scope.ts";
 import { forgeTools } from "./claude-forge-tools.ts";
 import { FORGE_TOOL_NAMES, nativeRole, RESEARCH_TOOLS, reviewerReadGuard, roleForgeTools, roleMcpTools, roleTools, writeScopeGuard } from "./claude-roles.ts";
 import { VERDICT_TOOL, type VerdictState, verdictServer } from "./claude-verdict.ts";
-import { shipBashRefusal } from "./claude-ship-policy.ts";
 import { checkSurface, type Lockdown } from "./claude-lockdown.ts";
 import { assertNativeEffort } from "./claude.ts";
 
@@ -100,6 +100,8 @@ export interface SpikeJob {
 	artifactPath?: string;
 	/** Implementer only: grant and home `exclude_paths` no Edit/Write may touch, read by the worker process. */
 	excludePaths?: readonly string[];
+	/** The run's scratch TMPDIR (the child's `TMPDIR`), one of its Bash write roots; set by the run itself. */
+	tmp?: string;
 }
 
 /** A Claude tool call in picp's worker-guard vocabulary (`bash` {command}, `read`/`write` {path}, …). */
@@ -142,6 +144,8 @@ export function buildChildEnv(
 		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
 		CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1",
 		CLAUDE_AGENT_SDK_CLIENT_APP: "picp-native-spike",
+		// WP2: an unencrypted key under the passwd home stays out of reach of a Bash `git push` over ssh.
+		GIT_SSH_COMMAND: "false",
 		...providerEnv,
 	};
 }
@@ -172,10 +176,11 @@ export function spikeGuards(
 ): SpikeGuard[] {
 	const native = nativeRole(role);
 	const writeScope = writeScopeGuard(job, secrets, native);
+	const scope = native === "reviewer" ? undefined : bashScope(job, secrets, native);
 	let ciStatusQueries = 0;
 	const bash: SpikeGuard = (call) => {
 		if (call.name !== "bash") return undefined;
-		if (native === "reviewer") return "Refused: a reviewer has no Bash; it reads its scratch dir with Read, Grep and Glob.";
+		if (scope === undefined) return "Refused: a reviewer has no Bash; it reads its scratch dir with Read, Grep and Glob.";
 		const command = call.input.command;
 		if (typeof command !== "string") return "Refused: bash needs a string command.";
 		const ci = detectCiWait(command);
@@ -194,8 +199,7 @@ export function spikeGuards(
 		if (keySearch) return credentialSearchRefusal(keySearch);
 		if (shellPatchCommand(command)) return shellPatchRefusal();
 		if (ciStatusQuery(command) && ciStatusQueries++ >= 1) return ciStatusRepeatRefusal();
-		if (native === "implementer") return shipBashRefusal(command, job.worktree, secrets, job.job_id, job.excludePaths);
-		return readOnlyBashRefusal(command, job.worktree, secrets);
+		return nativeBashRefusal(command, scope);
 	};
 	return [
 		(call) => (WORKER_FORBIDDEN_TOOLS.includes(call.name) ? `${call.name} is a parent-only tool.` : undefined),
@@ -503,7 +507,7 @@ async function runInScratch(
 		canUseTool,
 		hooks: {
 			PreToolUse: [
-				{ hooks: [preToolUseHook([...spikeGuards(options.job, secrets), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
+				{ hooks: [preToolUseHook([...spikeGuards({ ...options.job, tmp: dirs.tmp }, secrets), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
 			],
 			// A report already on file (an earlier run's) is one this run cannot replace: nothing to ask for.
 			...(native === "reviewer" ? {} : { Stop: [{ hooks: [stopHook(() => state.accepted !== undefined || existsSync(join(options.job.runDir, ENVELOPE_FILE)), () => liveTasks.size)] }] }),
