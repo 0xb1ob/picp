@@ -103,7 +103,10 @@ async function rig(t: TestContext, { daemon = true, gated = false, cloudflared =
 	for (const role of ["supervise", "health", "update"]) writeFileSync(join(app, `src/service/${role}.ts`), 'process.on("SIGTERM", () => process.exit(0));\nsetInterval(() => {}, 1 << 30);\n');
 	if (cloudflared) writeFileSync(join(fake, "cloudflared"), CLOUDFLARED, { mode: 0o755 });
 	if (!gated) writeFileSync(join(fake, "go"), "");
-	const [localPort, remotePort] = [await freePort(), await freePort()];
+	const localPort = await freePort();
+	// Each probe closes before the next, so the OS may reuse a port; equal ports trip the dashboard-port refusal.
+	let remotePort = await freePort();
+	while (remotePort === localPort) remotePort = await freePort();
 	// Without the stand-in, PATH holds only node and dirname, so a cloudflared installed on this host is never found.
 	if (!cloudflared) for (const [tool, target] of [["node", process.execPath], ["dirname", "/usr/bin/dirname"]]) symlinkSync(target!, join(fake, tool!));
 	const PATH = cloudflared ? `${fake}:${dirname(process.execPath)}:/usr/bin:/bin` : fake;
