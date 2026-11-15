@@ -787,8 +787,9 @@ before `gh` runs, by name: `-X`/`--method`, `-f`/`-F`/`--field`/`--raw-field`, `
 `--hostname`, `-R`/`--repo`, `-w`/`--web`, `--watch` (short letters also inside a bundle such as `-iXPOST`); any
 positional in `args` but a `release view` tag (so `repo view other/x` is refused); a `--search`/`-S` value with a
 `repo:`/`org:`/`user:`/`owner:` qualifier; and an `api` path that is graphql, a URL, a flag, holds a `..` or encoded
-separator, or is not `repos/<owner>/<repo>/...`. A literal owner/repo must equal the job's repo, which `gh repo view
---json nameWithOwner` resolves once per worker; gh's `{owner}/{repo}` placeholders need no lookup. Output stays
+separator, or is not `repos/<owner>/<repo>/...`. A literal owner/repo must equal the job's origin, read once per
+worker from the worktree's `origin` GitHub URL (for a non-GitHub URL, from `gh repo view --json nameWithOwner`); gh's
+`{owner}/{repo}` placeholders need no lookup. The refusal names the path. Output stays
 token-redacted and capped, and `pr checks`, `run list` and a status `run view` share the one CI status snapshot.
 Planners now get `gh_read` too (`roleForgeTools`; the lockdown expects it); no other forge tool, so forge writes stay
 off (U1). Bash `gh` is refused for both roles with a remedy naming `gh_read`. `tests/e2e/native-worker-parity.test.ts`
