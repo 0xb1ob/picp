@@ -1,0 +1,1 @@
+- Claude CLI worker parity WP4 (cp-parity-p4-9ibz): a native planner-role worker (`planner`, `qa`) gets the CLI's `WebSearch` and `WebFetch` under pi's `webEgressRefusal`, with the lockdown declaring them optional; implementers and reviewers still get no web tool. `tests/e2e/native-worker-tools.test.ts` NP-4a…NP-4c pin it through `cp_dispatch` on fake-claude.

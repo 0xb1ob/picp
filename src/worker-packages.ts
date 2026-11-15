@@ -317,6 +317,12 @@ function isInside(path: string, root: string): boolean {
 	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
+/** The packages a role (or its profile's `packages:` override) activates, never-lists subtracted; installed or not. */
+export function activatedPackageNames(role: Role, override?: readonly string[]): string[] {
+	const never = [...NEVER_WORKER_RESOURCES, ...(ROLE_NEVER[role] ?? [])];
+	return (override ?? ROLE_PACKAGES[role] ?? []).filter((name) => !never.includes(name));
+}
+
 /**
  * What one worker actually loads: availability ∩ activation.
  *
@@ -331,8 +337,7 @@ export function activePackagesForRole(
 	role: Role,
 	override?: readonly string[],
 ): OptionalWorkerPackages {
-	const never = [...NEVER_WORKER_RESOURCES, ...(ROLE_NEVER[role] ?? [])];
-	const wanted = (override ?? ROLE_PACKAGES[role] ?? []).filter((name) => !never.includes(name));
+	const wanted = activatedPackageNames(role, override);
 	if (wanted.length === 0) return NO_OPTIONAL_WORKER_PACKAGES;
 	const extensions: string[] = [];
 	const flags: string[] = [];

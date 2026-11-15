@@ -178,26 +178,37 @@ export const NATIVE_REVIEW_ADDENDUM = [
 	"other tool names above. Read only the review packet in your working directory, then call report_verdict once.",
 ].join("\n");
 
-/** The addendum for a job's kind, delivery and role: research, a board, a PR or local ship job, or a reviewer. */
-export function nativeAddendum(kind: string | undefined, delivery: string | undefined, role?: string): string {
+/** The addendum for a job's kind, delivery and role: research, a board, a PR or local ship job, or a reviewer.
+ * `web`: a planner-role worker also names WebSearch and WebFetch (WP4). */
+export function nativeAddendum(kind: string | undefined, delivery: string | undefined, role?: string, web = false): string {
 	if (role === "gate-reviewer") return NATIVE_REVIEW_ADDENDUM;
-	if (kind !== "ship") return delivery === "board" ? NATIVE_BOARD_ADDENDUM : NATIVE_ADDENDUM;
+	if (kind !== "ship") {
+		const addendum = delivery === "board" ? NATIVE_BOARD_ADDENDUM : NATIVE_ADDENDUM;
+		return web ? addendum.replace("(Read, Grep, Glob, Bash, Write)", "(Read, Grep, Glob, Bash, Write, WebSearch, WebFetch)") : addendum;
+	}
 	return delivery === "local" ? NATIVE_LOCAL_SHIP_ADDENDUM : NATIVE_SHIP_ADDENDUM;
 }
 
 /**
  * Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir,
- * not the argv or env.
+ * not the argv or env. `web` (the role activates pi-web-access) sets CP_NATIVE_WEB=1 for the worker.
  */
-export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env" | "shutdownGraceMs"> {
+export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string, options: { web?: boolean } = {}): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env" | "shutdownGraceMs"> {
 	const runDir = env.CP_RUN_DIR;
 	if (!runDir) throw new NativeDriverError("the Claude CLI worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
+	const web = options.web === true && env.CP_ROLE === "planner";
 	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
-	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env.CP_KIND, env.CP_DELIVERY, env.CP_ROLE)}\n`, { mode: 0o600 });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env.CP_KIND, env.CP_DELIVERY, env.CP_ROLE, web)}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
+	const { CP_NATIVE_WEB: _inherited, ...rest } = env;
 	// A reported run waits up to NATIVE_REPORTED_GRACE_MS for its result after stdin ends; a SIGTERM would cut it.
-	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file }, shutdownGraceMs: NATIVE_SHUTDOWN_GRACE_MS };
+	return {
+		piBin: process.execPath,
+		argv: [WORKER_ENTRY],
+		env: { ...rest, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file, ...(web ? { CP_NATIVE_WEB: "1" } : {}) },
+		shutdownGraceMs: NATIVE_SHUTDOWN_GRACE_MS,
+	};
 }
 
 /**
