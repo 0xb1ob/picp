@@ -26,9 +26,8 @@ export interface DriverContext {
 	reserve?: boolean;
 	/** Native workers live in this parent that the fleet does not list (reviewers, N4h); each holds the native slot. */
 	nativeLive?: readonly string[];
-	/** The selected profile's name and the per-job skill count: both can make a job ineligible for native. */
+	/** The selected profile's name: `ops` makes a job ineligible for native. */
 	profile?: string;
-	skills?: number;
 }
 
 type Capacity = Parameters<typeof resolveWithCapacity>[3];
@@ -72,7 +71,7 @@ export async function resolveDriverRoute(
 	nativeModelId(picked.model);
 	assertNativeEffort(picked.thinking);
 	const selection = { home: ctx.home, jobId: ctx.jobId, driver: "claude" as const, kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs: ctx.jobs,
-		...(ctx.profile !== undefined ? { profile: ctx.profile } : {}), ...(ctx.skills !== undefined ? { skills: ctx.skills } : {}) };
+		...(ctx.profile !== undefined ? { profile: ctx.profile } : {}) };
 	let selected: ReturnType<typeof nativeSelectionRefusal> | undefined;
 	let note: string | undefined;
 	let model: string | undefined;

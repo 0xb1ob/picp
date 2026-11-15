@@ -174,8 +174,9 @@ test("S1 fallback: switch off, CLI missing or too old, and a denied primary run 
 
 // Scenario: Given claude_research is on and an S planner row prefers claude
 //   When an ops:pull job or a job naming per-job skills is previewed through cp_dispatch dry_run
-//   Then each routes to pi as ineligible with its reason named, while a plain planner job still routes claude
-test("J1 eligibility: the ops profile and per-job skills fall back to pi as ineligible", { skip, timeout: 300_000 }, async (t) => {
+//   Then the ops job routes to pi as ineligible with its reason named, while a plain planner job and the skills job
+//   (WP6: the brief note names each SKILL.md) route claude
+test("J1 eligibility: the ops profile falls back to pi as ineligible; per-job skills route claude", { skip, timeout: 300_000 }, async (t) => {
 	const h = await routedHome(t, []);
 	h.toggle(true);
 	const dir = join(h.b.agent.path, "skills", "tdd-x");
@@ -192,8 +193,7 @@ test("J1 eligibility: the ops profile and per-job skills fall back to pi as inel
 	assert.equal(decisions[0]?.driver, "claude", decisions[0]?.driver_reason);
 	assert.equal(decisions[1]?.driver, "pi");
 	assert.equal(decisions[1]?.driver_reason, "ineligible: the ops profile needs ssh/scp, which the native Bash policy refuses");
-	assert.equal(decisions[2]?.driver, "pi");
-	assert.equal(decisions[2]?.driver_reason, "ineligible: per-job skills load only on pi (`--skill`)");
+	assert.equal(decisions[2]?.driver, "claude", decisions[2]?.driver_reason);
 	assert.equal(h.claude.requests.length, 0, "a preview reached the native model");
 });
 

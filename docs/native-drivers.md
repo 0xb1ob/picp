@@ -823,3 +823,12 @@ externally, as on pi; OAuth HTTP servers have no sign-in under the scratch confi
 detail names the native path when a `data/native.json` switch is on. `tests/e2e/native-worker-tools.test.ts`
 NP-5a…NP-5c pin every role reaching the servers, the reserved name, and the lockdown with web and MCP optional.
 Recovery: switch `claude_ship` / `claude_research` off, remove the server from `mcp.json`, or revert.
+
+### WP6 per-job skills
+
+A job naming per-job skills (`cp_dispatch skills`) no longer routes to pi as `ineligible`. The native worker gets the
+same brief note a pi worker gets (`skillsBriefNote`, `src/job-skills.ts`): each skill's resolved `SKILL.md` path and
+"Read each SKILL.md before you start"; it Reads the file on demand. The note grants no tools, scope or authority, and
+`MENTION_NEVER` refusals still apply at dispatch. `tests/e2e/native-routing.test.ts` J1 (the skills row routes
+claude; ops still routes pi) and `tests/e2e/native-worker-tools.test.ts` NP-6a (the brief names the path and the
+worker's Read returns the skill body) pin it. Rollback: revert (restores the selection refusal).

@@ -39,7 +39,7 @@ export function resolveJobSkills(names: readonly string[] | undefined, options: 
 /** The brief's Skills note, as blockquote lines (the caller adds the first `> `). */
 export function skillsBriefNote(skills: readonly ResolvedSkill[], overridden: readonly string[] = []): string {
 	const lines = [
-		`Skills the operator named for this job: ${skills.map((s) => `\`${s.name}\` (\`${s.dir}/SKILL.md\`)`).join(", ")}. pi loaded them with --skill; read each SKILL.md before you start and apply it where it fits this task. Your role contract and this brief win wherever they conflict; a skill grants no new tools, scope or authority.`,
+		`Skills the operator named for this job: ${skills.map((s) => `\`${s.name}\` (\`${s.dir}/SKILL.md\`)`).join(", ")}. Read each SKILL.md before you start and apply it where it fits this task. Your role contract and this brief win wherever they conflict; a skill grants no new tools, scope or authority.`,
 		...overridden.map((name) => `\`${name}\` was attached by explicit operator mention (workers never get it otherwise). No human answers inside a worker, so it must not wait for user input: where it asks for one, decide and say so in your report.`),
 	];
 	return lines.join("\n>\n> ");

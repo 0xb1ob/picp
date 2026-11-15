@@ -46,7 +46,7 @@ test("pi-subagents and rpiv-ask-user-question are refused even by mention, with 
 test("the brief note names each skill, adds the no-user-input line for an override, and passes the brief scan", () => {
 	const skills = [{ name: "tdd-x", dir: "/s/tdd-x" }, { name: "writing-plans", dir: "/s/writing-plans" }];
 	const plain = skillsBriefNote(skills);
-	assert.match(plain, /^Skills the operator named for this job: `tdd-x` \(`\/s\/tdd-x\/SKILL\.md`\), `writing-plans` \(`\/s\/writing-plans\/SKILL\.md`\)\. pi loaded them with --skill/);
+	assert.match(plain, /^Skills the operator named for this job: `tdd-x` \(`\/s\/tdd-x\/SKILL\.md`\), `writing-plans` \(`\/s\/writing-plans\/SKILL\.md`\)\. Read each SKILL\.md before you start/);
 	assert.match(plain, /a skill grants no new tools, scope or authority\.$/);
 	assert.equal(plain.includes("explicit operator mention"), false);
 	const note = skillsBriefNote(skills, ["writing-plans"]);
