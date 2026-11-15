@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { paths } from "../../src/contracts.ts";
@@ -396,7 +396,8 @@ test("NP-2c: a planner runs scripts and reaches the network but writes only its 
 test("NP-2d: push scope holds in every literal shape", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const pushes = ["git push", "git push origin HEAD:other", "sh -c \"git push origin HEAD:main\"", "git -c x=y push", "GIT_DIR=../o git push", "cd .. && git push",
-		"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin HEAD:main"];
+		"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin HEAD:main",
+		"X=push git --config-env=alias.p=X p origin HEAD:main", "git send-pack origin HEAD:refs/heads/main"];
 	const h = await nativeWorkerHome(t, [
 		calls(bash("git commit -q --allow-empty -m np2d")),
 		calls(...pushes.map(bash)),
@@ -439,12 +440,13 @@ test("NP-2e: pi's pattern guards still run first", { skip: NATIVE, timeout: 300_
 	assert.equal(accepted(h.b.home, id), 1);
 });
 
-// Scenario: Given a native planner, When it globs the Claude settings, runs env, expands the provider token or runs
-//   declare -p, Then each is refused and the settings env never reaches the model.
+// Scenario: Given a native planner, When it globs the Claude settings, runs env, expands the provider token, runs
+//   declare -p or cds to ~<user> and reads .claude/, Then each is refused and the settings env never reaches the model.
 test("NP-2f: secret and env-dump shapes stay denied", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const h = await nativeWorkerHome(t, [
-		calls({ name: "Bash", input: () => ({ command: `cat ${h.fakeHome}/.cla*/settings.json` }) }, bash("env"), bash("echo $ANTHROPIC_AUTH_TOKEN"), bash("declare -p")),
+		calls({ name: "Bash", input: () => ({ command: `cat ${h.fakeHome}/.cla*/settings.json` }) }, bash("env"), bash("echo $ANTHROPIC_AUTH_TOKEN"), bash("declare -p"),
+			bash(`cd ~${userInfo().username} && cat .claude/.credentials.json`)),
 		calls({ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(id)), content: "# native\n" }) }),
 		calls({ name: REPORT_TOOL, input: () => researchReport(id, h.b.home) }),
 		done,
@@ -459,7 +461,8 @@ test("NP-2f: secret and env-dump shapes stay denied", { skip: NATIVE, timeout: 3
 	assert.match(results[1] ?? "", /^\[error\] Refused: a native planner's Bash an environment dump \(`env`\) is denied/, all);
 	assert.match(results[2] ?? "", /^\[error\] Refused: a native planner's Bash expanding \$ANTHROPIC_AUTH_TOKEN/, all);
 	assert.match(results[3] ?? "", /^\[error\] Refused: a native planner's Bash an environment dump \(`declare -p`\) is denied/, all);
-	assert.equal((await h.denials(id)).count, 4);
+	assert.match(results[4] ?? "", /^\[error\] Refused: /, all);
+	assert.equal((await h.denials(id)).count, 5);
 	assert.equal(h.claude.requests.some((request) => JSON.stringify(request.body).includes(FAKE_CLAUDE_AUTH_TOKEN)), false, "a secret reached the model");
 	assert.equal(accepted(h.b.home, id), 1);
 });
@@ -475,7 +478,7 @@ test("NP-2g: Bash honours exclude_paths", { skip: NATIVE, timeout: 300_000 }, as
 		calls(
 			bash("echo x > .github/workflows/x.yml"), bash("echo x | tee .github/workflows/y.yml"), bash("cp README.md .github/workflows/z.yml"),
 			bash("echo k > secrets/k"), bash("echo A=1 > .env.local"),
-			bash("tar -cf src.tar src"), bash("tar -xf src.tar -C .github/workflows"),
+			bash("tar -cf src.tar src"), bash("tar -xf src.tar -C .github/workflows"), bash("unzip -d .github/workflows src.zip"),
 			// The workflow is edited on disk as the model asks, so the refused checkout is what would have reverted it.
 			{ name: "Bash", input: () => (writeFileSync(ci(), "edited\n"), { command: "git checkout -- .github/workflows/ci.yml" }) },
 			bash("echo x > src/ok.txt"),
@@ -492,7 +495,7 @@ test("NP-2g: Bash honours exclude_paths", { skip: NATIVE, timeout: 300_000 }, as
 		assert.equal(existsSync(join(wt(), file)), false, `file exists: ${file}; denials ${JSON.stringify(denied)}`);
 	}
 	assert.equal(readFileSync(ci(), "utf8"), "edited\n");
-	assert.equal(denied.count, 7, JSON.stringify(denied));
+	assert.equal(denied.count, 8, JSON.stringify(denied));
 	assert.ok(denied.lines.every((line) => / an excluded path /.test(line)), JSON.stringify(denied));
 	assert.equal(existsSync(join(wt(), ".github", "workflows", "src")), false, "tar extracted into .github/workflows");
 	assert.equal(readFileSync(join(wt(), "src", "ok.txt"), "utf8"), "x\n");

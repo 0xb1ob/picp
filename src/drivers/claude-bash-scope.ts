@@ -155,8 +155,11 @@ function dumpRefusal(name: string, args: readonly string[]): string | undefined 
 	return dump ? denied(`an environment dump (\`${[name, ...args].join(" ")}\`)`) : undefined;
 }
 
-function secretWord(word: Word, base: string, { secrets, home }: BashScope): boolean {
+function secretWord(word: Word, here: string | undefined, { secrets, home, worktree }: BashScope): boolean {
 	const text = word.text.replace(/^~(?=$|\/)/, home);
+	// Off a known worktree cwd (`cd ~user`, `cd /home/x`), a relative `.claude` may be a home's: refuse the name itself.
+	if (!inWorktree(here, worktree) && /\.claude|\.config\/claude/.test(text)) return true;
+	const base = here ?? worktree;
 	if (/^[.~]|\//.test(text) && secretPathIn(text, base, secrets)) return true;
 	if (!word.glob || /[$`]/.test(text)) return false;
 	// A glob expands after this check, so its matches are checked through their links (a planted link to a secret).
@@ -209,6 +212,9 @@ function gitRefusal(args: readonly Word[], assigns: readonly Word[], here: strin
 			dir = d === undefined || d.open || (dir === undefined && !isAbsolute(d.text)) ? undefined : resolve(dir ?? "/", d.text);
 		} else if (text === "-c") {
 			if (/^alias\./i.test(args[++i]?.text ?? "")) return denied("`git -c alias.…` (an alias can rename a refused verb)");
+		} else if (text === "--config-env" || text.startsWith("--config-env=")) {
+			const pair = text === "--config-env" ? args[++i]?.text ?? "" : text.slice("--config-env=".length);
+			if (/^alias\./i.test(pair)) return denied("`git --config-env alias.…` (an alias can rename a refused verb)");
 		} else if (text === "--git-dir" || text === "--work-tree" || text === "--namespace") {
 			const value = args[++i];
 			if (value && text !== "--namespace") places.push(value);
@@ -232,12 +238,15 @@ function gitRefusal(args: readonly Word[], assigns: readonly Word[], here: strin
 	const second = denied(`\`git ${sub}\` onto a second branch`, `this job works on ${scope.branch} only`);
 	if (sub === "switch" && (has(/^-(?:[cCd]|-(?:create|force-create|orphan|detach))/) || ops.some((w) => w.text !== scope.branch))) return second;
 	let paths: Word[] = [];
+	// A source rev can rewrite excluded paths when the root is named, so the root is allowed only without one.
+	let rev = sub === "restore" && values(rest, ["-s"], "--source").length > 0;
 	if (sub === "checkout") {
 		if (has(/^-(?:[bB]|-(?:orphan|detach))/)) return second;
 		const cut = rest.findIndex((w) => w.text === "--");
 		const before = operands(cut < 0 ? rest : rest.slice(0, cut));
 		paths = cut >= 0 ? rest.slice(cut + 1) : before.length > 0 && before.every((w) => !w.open && exists(resolve(dir ?? scope.worktree, w.text))) ? before : [];
 		if (paths.length === 0 && before.some((w) => w.text !== scope.branch)) return second;
+		rev = cut >= 0 && before.length > 0;
 	}
 	if (sub === "branch" && (has(BRANCH_WRITE) || (ops.length > 0 && !has(BRANCH_LIST)))) return second;
 	if (!impl && GIT_PLANNER.has(sub)) return denied(`\`git ${sub}\` (a planner never changes the repo or its history)`);
@@ -245,7 +254,7 @@ function gitRefusal(args: readonly Word[], assigns: readonly Word[], here: strin
 	const root = realpathSync(scope.worktree);
 	const notRoot = (w: Word) => w.open || realTarget(resolve(dir ?? scope.worktree, w.text)) !== root;
 	const restored = sub === "restore" ? operands(rest, ["-s", "--source"]) : sub === "checkout" ? paths : [];
-	const dests = sub === "rm" || sub === "mv" ? operands(rest) : restored.filter(notRoot);
+	const dests = sub === "rm" || sub === "mv" ? operands(rest) : restored.filter((w) => rev || notRoot(w));
 	// An expansion in a diff-family call may become `--output=<file>`, so it counts as an unresolved destination.
 	const expanding = /^(?:log|show|diff|format-patch|whatchanged|range-diff)$/.test(sub) ? rest.filter((w) => w.open && /[$`{]/.test(w.text)) : [];
 	const pager = sub === "grep" ? values(rest, ["-O"], "--open-files-in-pager")[0] : undefined;
@@ -280,8 +289,7 @@ function unwrap(words: readonly Word[]): { assigns: Word[]; words: Word[]; dump?
 }
 
 function commandRefusal(cmd: Cmd, here: string | undefined, scope: BashScope, level: number): string | undefined {
-	const base = here ?? scope.worktree;
-	if ([...cmd.words, ...cmd.dests, ...cmd.reads].some((word) => secretWord(word, base, scope))) return SECRET;
+	if ([...cmd.words, ...cmd.dests, ...cmd.reads].some((word) => secretWord(word, here, scope))) return SECRET;
 	const { assigns, words, dump, split, moved } = unwrap(cmd.words);
 	if (dump !== undefined) return dump;
 	const exported = EXPORTERS.has(words[0]?.text ?? "") ? words.slice(1) : [];
