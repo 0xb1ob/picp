@@ -12,6 +12,7 @@ import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { layoutForHome } from "../../src/contracts.ts";
 import type { BridgeRelay } from "../../src/cp-bridge.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
+import { recordOperatorSession } from "../../src/operator-session-log.ts";
 import { OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
 import { modelApplyFile } from "../../src/session-model-apply.ts";
 import { OPERATOR_BUILTIN_EXTENSIONS, runOperator } from "../../src/viewer/operator.ts";
@@ -236,6 +237,54 @@ test("NO-7: Restart session resumes the same claude session; Restart clean start
 	assert.match(latest!, /native-operator-\d+\.jsonl$/);
 	assert.notEqual(latest, first);
 	assert.notEqual(sessionIds(latest!)[0], sessionIds(first!)[0], "a new claude session");
+});
+
+/** One message through the operator, to its reply; resolves to the model call that carried it. */
+async function say(op: NativeOperator, text: string, reply: string) {
+	assert.equal((await op.send("send", { kind: "message", text })).ok, true);
+	const call = await op.seen(text);
+	await op.view("/api/sessions?view=you&transcript=1", (view) => JSON.stringify(view.entries).includes(reply), reply);
+	return call;
+}
+
+// Scenario: Given a Claude CLI operator that exchanged one message and was stopped (a reboot), When the dashboard's
+// Resume last session runs `cp-operator -c` (and `--continue`), Then the same record and claude session resume and the next
+// call carries the first message. Negative control: `cp-operator` with no flag starts a new record with no history.
+test("NO-15: cp-operator -c (Resume last session) resumes the newest Claude CLI record and its claude session", { timeout: 240_000 }, async (t) => {
+	const op = await nativeOperator(t, [{ kind: "text", text: "NO15 one" }, { kind: "text", text: "NO15 two" }, { kind: "text", text: "NO15 three" }, { kind: "text", text: "NO15 four" }]);
+	await say(op, "NO15-ONE", "NO15 one");
+	const [first] = records(op.state);
+	for (const [flag, text, reply] of [["-c", "NO15-TWO", "NO15 two"], ["--continue", "NO15-THREE", "NO15 three"]] as const) {
+		await op.stop();
+		await op.relaunch([flag]);
+		assert.ok(userTexts(await say(op, text, reply)).some((turn) => turn.includes("NO15-ONE")), `${flag}: the resumed call carries the first message`);
+		assert.deepEqual(records(op.state), [first], `${flag} keeps the record`);
+		assert.equal(sessionIds(first!).length, 1, `${flag}: one claude session`);
+	}
+
+	await op.stop();
+	await op.relaunch([]);
+	assert.ok(!userTexts(await say(op, "NO15-FOUR", "NO15 four")).some((turn) => /NO15-(ONE|TWO|THREE)/.test(turn)), "no flag starts clean");
+	const [latest, earlier] = records(op.state);
+	assert.equal(earlier, first);
+	assert.notEqual(latest, first);
+});
+
+// Scenario: Given the newest recorded operator session is a pi file, When `cp-operator -c` runs on the claude driver, Then it
+// starts a new record and says on stderr why, instead of silently dropping the flag.
+test("NO-15: -c with a pi session newest starts a new Claude CLI record and says so on stderr", { timeout: 240_000 }, async (t) => {
+	const op = await nativeOperator(t, [{ kind: "text", text: "NO15 one" }, { kind: "text", text: "NO15 two" }]);
+	await say(op, "NO15-ONE", "NO15 one");
+	const [first] = records(op.state);
+	await op.stop();
+	recordOperatorSession(join(op.state, "sessions"), join(op.home, "pi-session.jsonl"));
+	const lines: string[] = [];
+	const stderr = process.stderr.write;
+	process.stderr.write = ((chunk: string | Uint8Array) => { lines.push(String(chunk)); return true; }) as typeof stderr;
+	try { await op.relaunch(["-c"]); } finally { process.stderr.write = stderr; }
+	assert.ok(lines.some((line) => /^cp-operator: -c found no Claude CLI operator session to continue \(.*pi-session\.jsonl\); starting a new one\n$/.test(line)), lines.join(""));
+	assert.ok(!userTexts(await say(op, "NO15-TWO", "NO15 two")).some((turn) => turn.includes("NO15-ONE")), "a new session carries no history");
+	assert.notEqual(records(op.state).find((file) => file !== first && /native-operator-/.test(file)), undefined);
 });
 
 // Scenario: Given a restart marker the Claude CLI operator wrote for its native record, When the launcher relaunches

@@ -679,7 +679,7 @@ never under a name the parent picks (POC gap 11).
 `data/operator.json` `driver: "claude"` (default `pi`; Settings **Operator CLI** since O3, below) makes `runOperator`
 (`src/viewer/operator.ts`) start `src/drivers/claude-operator.ts` in place of `pi`. The pair must name an explicit
 `anthropic/claude-…` model (`operatorDriverSetting`, `nativeOperatorSpawn`); anything else refuses the launch by name.
-An absent file or `driver: "pi"` keeps today's argv. A `--session` resumes only a `native-operator-*` record.
+An absent file or `driver: "pi"` keeps today's argv. A `--session` resumes only a `native-operator-*` record. `-c`/`--continue` (dashboard Resume last session) resumes the newest recorded operator session when it is a `native-operator-*` record that still exists, else starts a new one with a stderr line.
 
 The entry mounts `extensions/cp-bridge` on the same headless host and turn engine as the native parent, so the
 dashboard control, relay outbox, ask and header guards, `cp_parent` (with `model_pick`) and image sends are the pi
