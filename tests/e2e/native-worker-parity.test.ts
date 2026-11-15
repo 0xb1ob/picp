@@ -243,6 +243,7 @@ test("NP-1b: gh_read refuses every write shape and every other repo before gh ru
 		[{ verb: "api", path: "repos/other/x/issues" }, "other/x"], [{ verb: "api", path: "/repos/other/x/issues" }, "other/x"],
 		[{ verb: "api", path: "https://api.github.com/repos/other/x/issues" }, "https://api.github.com/repos/other/x/issues"],
 		[{ verb: "repo view", args: ["other/x"] }, "other/x"], [{ verb: "pr list", args: ["--search", "repo:other/x"] }, "repo:other/x"],
+		[{ verb: "issue list", args: ["-Srepo:other/y"] }, "repo:other/y"], [{ verb: "pr list", args: ["-dS", "org:other"] }, "org:other"],
 	];
 	const h = await nativeWorkerHome(t, [
 		calls(...shapes.map(([input]) => ghRead(input))),

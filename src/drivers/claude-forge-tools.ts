@@ -102,15 +102,24 @@ function ghReadRefusal(verb: string, args: readonly string[], path: string | und
 		const short = !arg.startsWith("--") && arg.startsWith("-") ? [.../^-([A-Za-z]*)/.exec(arg)?.[1] ?? ""].find((c) => GH_REFUSED_SHORT.has(c)) : undefined;
 		const flag = long ?? (short === undefined ? undefined : `-${short}`);
 		if (flag !== undefined) return `gh_read never passes \`${flag}\` (in \`${arg}\`); ${REMEDY}.`;
-		const search = arg === "--search" || arg === "-S" ? args[i + 1] : arg.startsWith("--search=") ? arg.slice(9) : undefined;
-		if (search !== undefined && SEARCH_QUALIFIER.test(search)) return `gh_read never searches another repo, org or user (\`${search}\`); ${REMEDY}.`;
 		if (arg === "--") {
 			positionals.push(...args.slice(i + 1));
 			break;
 		}
-		if (arg.length > 1 && arg.startsWith("-")) {
-			if (arg.startsWith("--") ? GH_VALUE_LONG.has(arg) : arg.length === 2 && GH_VALUE_SHORT.has(arg[1] as string)) i++;
+		let search = arg === "--search" ? args[i + 1] : arg.startsWith("--search=") ? arg.slice(9) : undefined;
+		if (arg.startsWith("--")) {
+			if (GH_VALUE_LONG.has(arg)) i++;
+		} else if (arg.length > 1 && arg.startsWith("-")) {
+			// As pflag: the first value letter takes the rest of the bundle, or the next word (`-dSrepo:x/y`, `-dS q`).
+			const letters = /^-([A-Za-z]*)/.exec(arg)?.[1] ?? "";
+			const at = [...letters].findIndex((c) => GH_VALUE_SHORT.has(c));
+			if (at >= 0) {
+				const attached = arg.slice(2 + at);
+				const value = attached === "" ? args[++i] : attached;
+				if (letters[at] === "S") search = value;
+			}
 		} else positionals.push(arg);
+		if (search !== undefined && SEARCH_QUALIFIER.test(search)) return `gh_read never searches another repo, org or user (\`${search}\`); ${REMEDY}.`;
 	}
 	const extra = positionals.slice(verb === "release view" ? 1 : 0)[0];
 	if (extra !== undefined) {
