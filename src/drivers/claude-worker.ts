@@ -196,6 +196,7 @@ async function turn(prompt: string): Promise<Turn> {
 		...(implementer ? { providerEnv: commitIdentityEnv(worktree) } : {}),
 		systemPrompt,
 		prompt,
+		web: env.CP_NATIVE_WEB === "1",
 		signal: abort.signal,
 		onMessage: relay,
 		maxTurns,

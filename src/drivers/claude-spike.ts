@@ -58,9 +58,20 @@ import { detectWorkerHistoryRewrite, workerHistoryRefusal } from "../worker-hist
 import { workerHostGuard } from "../worker-host-guard.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
+import { WEB_TOOLS, webEgressRefusal } from "../web-egress.ts";
 import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
 import { forgeTools } from "./claude-forge-tools.ts";
-import { FORGE_TOOL_NAMES, nativeRole, RESEARCH_TOOLS, reviewerReadGuard, roleForgeTools, roleMcpTools, roleTools, writeScopeGuard } from "./claude-roles.ts";
+import {
+	FORGE_TOOL_NAMES,
+	NATIVE_WEB_TOOLS,
+	nativeRole,
+	RESEARCH_TOOLS,
+	reviewerReadGuard,
+	roleForgeTools,
+	roleMcpTools,
+	roleTools,
+	writeScopeGuard,
+} from "./claude-roles.ts";
 import { VERDICT_TOOL, type VerdictState, verdictServer } from "./claude-verdict.ts";
 import { shipBashRefusal } from "./claude-ship-policy.ts";
 import { checkSurface, type Lockdown } from "./claude-lockdown.ts";
@@ -154,6 +165,9 @@ export function normalizeToolCall(toolName: string, input: unknown): NormalizedC
 	if (toolName === "Edit") return { name: "edit", input: { path: args.file_path } };
 	if (toolName === "Grep") return { name: "grep", input: { pattern: args.pattern, path: args.path } };
 	if (toolName === "Glob") return { name: "find", input: { pattern: args.pattern, path: args.path } };
+	// WP4: the CLI's web tools in pi-web-access's vocabulary, so webEgressRefusal checks them as it does on pi.
+	if (toolName === "WebFetch") return { name: "fetch_content", input: { url: args.url, prompt: args.prompt } };
+	if (toolName === "WebSearch") return { name: "web_search", input: { query: args.query, allowed_domains: args.allowed_domains, blocked_domains: args.blocked_domains } };
 	if (toolName === REPORT_TOOL) return { name: "report_result", input: args };
 	if (toolName === VERDICT_TOOL) return { name: "report_verdict", input: args };
 	const forge = FORGE_TOOL_NAMES.find((name) => toolName === `mcp__picp__${name}`);
@@ -163,12 +177,13 @@ export function normalizeToolCall(toolName: string, input: unknown): NormalizedC
 
 /**
  * picp's worker-reporter `tool_call` refusals, in the same order, plus the role's Bash and write scope and secret
- * paths.
+ * paths. `web`: the run offers the CLI's web tools, which pass `webEgressRefusal`; without it they are refused.
  */
 export function spikeGuards(
 	job: SpikeJob,
 	secrets: readonly string[] = secretPaths(null, [homedir(), userInfo().homedir]),
 	role: Role = job.role,
+	web = false,
 ): SpikeGuard[] {
 	const native = nativeRole(role);
 	const writeScope = writeScopeGuard(job, secrets, native);
@@ -200,6 +215,10 @@ export function spikeGuards(
 	return [
 		(call) => (WORKER_FORBIDDEN_TOOLS.includes(call.name) ? `${call.name} is a parent-only tool.` : undefined),
 		bash,
+		(call) => {
+			if (!WEB_TOOLS.includes(call.name)) return undefined;
+			return web ? webEgressRefusal(call.name, call.input) : `Refused: a native ${native} has no web tools; only the planner role does.`;
+		},
 		writeScope,
 		...(native === "reviewer" ? [reviewerReadGuard(job)] : []),
 		(call) => {
@@ -339,6 +358,8 @@ export interface SpikeRunOptions {
 	thinking?: string;
 	maxTurns?: number;
 	tools?: readonly string[];
+	/** WP4: a planner-role run also gets WebSearch and WebFetch under `webEgressRefusal`; other roles ignore it. */
+	web?: boolean;
 	extraGuards?: readonly SpikeGuard[];
 	hostEnv?: NodeJS.ProcessEnv;
 	timeoutMs?: number;
@@ -422,8 +443,9 @@ async function runInScratch(
 	const secrets = secretPaths(settingsPath, [homedir(), userInfo().homedir]);
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const state: ReportState = { refusals: [], attempts: 0 };
-	const tools = options.tools ?? roleTools(options.job.role);
 	const native = nativeRole(options.job.role);
+	const web = options.web === true && native === "research";
+	const tools = options.tools ?? roleTools(options.job.role, { web });
 	// The lockdown expects the role's MCP surface: a reviewer's server holds report_verdict alone.
 	const mcpTools = native === "reviewer" ? [VERDICT_TOOL] : [REPORT_TOOL, ...roleMcpTools(options.job.role)];
 	const forge = native === "reviewer" ? [] : forgeTools(options.job, hostEnv).filter((t) => roleForgeTools(options.job.role).includes(t.name));
@@ -495,7 +517,7 @@ async function runInScratch(
 		mcpServers: { picp: native === "reviewer" ? verdictServer(options.job, state) : reportServer(options.job, state, forge) },
 		tools: [...tools],
 		// No bare allow rules: they shadow canUseTool, and the PreToolUse hook already allows every guarded call.
-		disallowedTools: ["Agent", "Task", "WebFetch", "WebSearch"],
+		disallowedTools: ["Agent", "Task", ...(web ? [] : NATIVE_WEB_TOOLS)],
 		agents: {},
 		plugins: [],
 		skills: [],
@@ -503,7 +525,7 @@ async function runInScratch(
 		canUseTool,
 		hooks: {
 			PreToolUse: [
-				{ hooks: [preToolUseHook([...spikeGuards(options.job, secrets), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
+				{ hooks: [preToolUseHook([...spikeGuards(options.job, secrets, options.job.role, web), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
 			],
 			// A report already on file (an earlier run's) is one this run cannot replace: nothing to ask for.
 			...(native === "reviewer" ? {} : { Stop: [{ hooks: [stopHook(() => state.accepted !== undefined || existsSync(join(options.job.runDir, ENVELOPE_FILE)), () => liveTasks.size)] }] }),
@@ -515,7 +537,9 @@ async function runInScratch(
 		...nativeEffortOptions(options.thinking),
 		...(options.resume === undefined ? {} : { resume: options.resume.sessionId }),
 	};
-	const expectedTools = [...tools, ...mcpTools];
+	// The CLI may leave the web tools out (K1: availability under the scratch config), so they are optional, not expected.
+	const optionalTools = web ? NATIVE_WEB_TOOLS : [];
+	const expectedTools = [...tools.filter((name) => !optionalTools.includes(name)), ...mcpTools];
 	try {
 		const q = query({ prompt: input(), options: sdkOptions });
 		for await (const message of q) {
@@ -528,7 +552,7 @@ async function runInScratch(
 				initModel = message.model;
 				sessionId = message.session_id;
 				coldStartMs = Date.now() - started;
-				checking = checkSurface(q, message, expectedTools).then((lockdown) => {
+				checking = checkSurface(q, message, expectedTools, { optionalTools }).then((lockdown) => {
 					if (lockdown.verdict === "refused") abort.abort();
 					release(lockdown.refusal);
 					return lockdown;
