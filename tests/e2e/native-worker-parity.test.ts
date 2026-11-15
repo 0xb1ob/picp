@@ -39,6 +39,7 @@ function scriptedGh(t: TestContext, h: Awaited<ReturnType<typeof nativeWorkerHom
 		'case "$1 $2" in',
 		"\t\"issue view\") printf 'np1 issue %s body\\n' \"$3\" ;;",
 		"\t\"pr view\") printf 'np1 pr %s body\\n' \"$3\" ;;",
+		"\t\"repo view\") echo o/r ;;",
 		"\t\"api \"*) printf '[{\"body\":\"np1 comment from %s\"}]\\n' \"$2\" ;;",
 		"\t*) echo \"np1 gh: unscripted gh $*\" >&2; exit 1 ;;",
 		"esac",
@@ -227,16 +228,21 @@ test("NP-1a: a native planner and implementer read issues and other PRs with gh_
 	}
 });
 
-// Scenario: Given gh_read, When the model passes -X POST (or any other write, host, repo or browser shape, or a graphql
-//   path), Then the call is refused by name and gh never ran for it.
-test("NP-1b: gh_read refuses every write shape before gh runs", { skip: NATIVE, timeout: 300_000 }, async (t) => {
+// Scenario: Given gh_read in repo o/r, When the model passes -X POST (or any other write, host, repo, browser or watch
+//   flag, a bundled -iXPOST, a graphql path, or another repo by api path, URL, positional or search qualifier), Then
+//   the call is refused by name and gh never ran for it; only the repo resolution `gh repo view` ran.
+test("NP-1b: gh_read refuses every write shape and every other repo before gh runs", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const issues = (args: string[]) => ({ verb: "api", path: "repos/o/r/issues", args });
 	const shapes: Array<[Record<string, unknown>, string]> = [
 		[issues(["-X", "POST"]), "-X"], [issues(["--method", "PUT"]), "--method"], [issues(["-f", "a=b"]), "-f"], [issues(["-F", "a=b"]), "-F"],
 		[issues(["--raw-field", "a=b"]), "--raw-field"], [issues(["--input", "f"]), "--input"], [issues(["-H", "x"]), "-H"],
 		[issues(["--hostname", "h"]), "--hostname"], [issues(["--repo", "o/x"]), "--repo"], [{ verb: "api", path: "/graphql" }, "/graphql"],
-		[{ verb: "pr view", args: ["--web"] }, "--web"],
+		[{ verb: "pr view", args: ["--web"] }, "--web"], [issues(["-iXPOST"]), "-X"],
+		[{ verb: "run view", run_id: "42", args: ["--watch"] }, "--watch"], [{ verb: "pr checks", args: ["-w"] }, "-w"],
+		[{ verb: "api", path: "repos/other/x/issues" }, "other/x"], [{ verb: "api", path: "/repos/other/x/issues" }, "other/x"],
+		[{ verb: "api", path: "https://api.github.com/repos/other/x/issues" }, "https://api.github.com/repos/other/x/issues"],
+		[{ verb: "repo view", args: ["other/x"] }, "other/x"], [{ verb: "pr list", args: ["--search", "repo:other/x"] }, "repo:other/x"],
 	];
 	const h = await nativeWorkerHome(t, [
 		calls(...shapes.map(([input]) => ghRead(input))),
@@ -249,7 +255,8 @@ test("NP-1b: gh_read refuses every write shape before gh runs", { skip: NATIVE, 
 	id = job.id;
 	const ends = await h.run([job.dispatch("Try every gh_read shape."), h.awaitEnvelope(id)]);
 	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
-	assert.deepEqual(ghCalls().filter((line) => /^api |--web/.test(line)), [], "gh ran for a refused shape");
+	const resolve = "repo view --json nameWithOwner --jq .nameWithOwner";
+	assert.deepEqual(ghCalls().filter((line) => line !== resolve), [], "gh ran for a refused shape");
 	const results = toolResults(h.claude.requests);
 	shapes.forEach(([, flag], i) => {
 		const escaped = flag.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");

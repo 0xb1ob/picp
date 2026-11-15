@@ -161,7 +161,7 @@ export const NATIVE_SHIP_ADDENDUM = [
 	"tools (git_push, git_fetch, pr_create, pr_edit, gh_read) and report_result; ignore any other tool names above.",
 	"Commit with git in Bash, push only with git_push, open the draft PR with pr_create (never gh in Bash), then call",
 	"report_result once with head_sha = git rev-parse HEAD. gh_read reads this repo: pr view|list|diff|checks, issue",
-	"view|list, run view|list, release view|list, repo view, and api GET of a path (no graphql).",
+	"view|list, run view|list, release view|list, repo view, and api GET of repos/<owner>/<repo>/... of this repo only.",
 ].join("\n");
 
 /** Delivery `local` (N4i): picp integrates the branch itself, so the worker commits and never pushes or opens a PR. */
