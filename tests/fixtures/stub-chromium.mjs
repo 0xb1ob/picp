@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A `chromium` stand-in (WP2): writes an 8-byte PNG header to `--screenshot=<path>`, the way a headless screenshot
-// lands a file.
+// lands a file, and `<path>.env` with the PLAYWRIGHT_BROWSERS_PATH it was started with (WP3).
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
@@ -12,4 +12,5 @@ if (!shot) {
 const file = resolve(shot);
 mkdirSync(dirname(file), { recursive: true });
 writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+writeFileSync(`${file}.env`, process.env.PLAYWRIGHT_BROWSERS_PATH ?? "");
 process.stdout.write(`Written to file ${file}\n`);

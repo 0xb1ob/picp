@@ -834,6 +834,20 @@ the passwd home stays usable by OpenSSH, mitigated by `GIT_SSH_COMMAND=false` un
 `tests/e2e/native-worker-parity.test.ts` NP-2a…NP-2g pin it at the consumer; `tests/claude-ship-policy.test.ts` keeps
 the adversarial lexer table.
 
+### WP3 child env
+
+The CLI child of a native worker now gets, beyond `buildChildEnv`'s allow-list, what a pi worker's Bash relies on
+(`nativeWorkerChildEnv` in `src/drivers/claude-roles.ts`, passed as `SpikeRunOptions.childEnv`): pi's
+`NONINTERACTIVE_WORKER_ENV` (`GIT_EDITOR`, `PAGER`, `GIT_TERMINAL_PROMPT=0`, …); the job identity `CP_JOB_ID`,
+`CP_KIND`, `CP_DELIVERY`, `CP_ROLE`, `CP_WORKTREE`, `CP_ARTIFACT_PATH`, `CP_BASE_BRANCH` when set; and the host's
+`PLAYWRIGHT_BROWSERS_PATH`, `PUPPETEER_CACHE_DIR`, `PUPPETEER_EXECUTABLE_PATH`, `CHROME_PATH`, `NODE_EXTRA_CA_CERTS`,
+`SSL_CERT_FILE` and the six `HTTP(S)_PROXY`/`NO_PROXY` spellings when set. `PLAYWRIGHT_BROWSERS_PATH` defaults to
+`<passwd home>/.cache/ms-playwright` when unset and that dir exists, since the child's `HOME` is scratch. Never
+`CP_HOME`, `CP_RUN_DIR`, `GH_*`, `SSH_AUTH_SOCK` or a secret-named key; a proxy value containing `@` (embedded
+credentials) is dropped, with one stderr line naming the keys, never the value. A CA override lets the child trust a
+custom CA, as pi's workers already do. `tests/e2e/native-worker-parity.test.ts` NP-3a pins it through the spawned env
+key names and the child's own output. Rollback: revert (the child is back to the allow-list).
+
 ### WP4 web tools (planner role)
 
 A native planner-role worker (profiles `planner` and `qa`, any profile whose packages activate `pi-web-access`) gets the

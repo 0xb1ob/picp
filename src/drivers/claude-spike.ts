@@ -369,6 +369,8 @@ export interface SpikeRunOptions {
 	prompt: string;
 	/** Explicit provider variables for the child (a fake model's base URL and synthetic token). */
 	providerEnv?: Record<string, string>;
+	/** WP3: named variables merged after the built child env (`nativeWorkerChildEnv`); never a whole host env. */
+	childEnv?: Record<string, string>;
 	/** The operator's Claude settings path, which claude itself reads and picp never opens; null passes none. */
 	userSettings?: string | null;
 	model?: string;
@@ -532,7 +534,7 @@ async function runInScratch(
 		cwd: options.job.worktree,
 		pathToClaudeCodeExecutable: claude.path,
 		spawnClaudeCodeProcess,
-		env: buildChildEnv(dirs, hostEnv, options.providerEnv),
+		env: { ...buildChildEnv(dirs, hostEnv, options.providerEnv), ...options.childEnv },
 		settingSources: [],
 		...(settingsPath === null ? {} : { settings: settingsPath }),
 		// Binds as allowManagedHooksOnly: settings-file and project hooks never run; picp's SDK callback still does.

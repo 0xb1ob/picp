@@ -1,9 +1,12 @@
 /** N4c: the native tool set and the Edit/Write scope per role: planner (research), implementer and (N4h) reviewer. */
 import { existsSync, mkdirSync } from "node:fs";
+import { userInfo } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { paths, type Role } from "../contracts.ts";
 import { liveGrants, MandateStore } from "../mandate.ts";
 import { loadMandateDefaults } from "../mandate-defaults.ts";
+import { SECRET_ENV_NAME } from "../web-egress.ts";
+import { NONINTERACTIVE_WORKER_ENV } from "../worker-manager.ts";
 import { secretPathIn } from "./claude-bash-policy.ts";
 import { worktreePathRefusal } from "./claude-bash-scope.ts";
 import type { SpikeGuard, SpikeJob } from "./claude-spike.ts";
@@ -53,6 +56,30 @@ export const FORGE_TOOL_NAMES = ["git_push", "git_fetch", "pr_create", "pr_edit"
 export const roleForgeTools = (role: Role): readonly string[] =>
 	({ implementer: FORGE_TOOL_NAMES, research: ["gh_read"], reviewer: [] })[nativeRole(role)];
 export const roleMcpTools = (role: Role): readonly string[] => roleForgeTools(role).map((name) => `mcp__picp__${name}`);
+
+const CHILD_IDENTITY = ["CP_JOB_ID", "CP_KIND", "CP_DELIVERY", "CP_ROLE", "CP_WORKTREE", "CP_ARTIFACT_PATH", "CP_BASE_BRANCH"] as const;
+const CHILD_TOOL_VARS = [
+	"PLAYWRIGHT_BROWSERS_PATH", "PUPPETEER_CACHE_DIR", "PUPPETEER_EXECUTABLE_PATH", "CHROME_PATH", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+] as const;
+
+/** WP3: a native worker's CLI child beyond `buildChildEnv`: pi's non-interactive variables, the job identity and the
+ * host's named tool-cache, CA and proxy variables. Never CP_HOME, CP_RUN_DIR, GH_*, SSH_AUTH_SOCK or a secret-named
+ * key; a proxy URL with credentials (`@`) is dropped, naming the keys once through `warn`. */
+export function nativeWorkerChildEnv(env: NodeJS.ProcessEnv, warn: (line: string) => void = (line) => void process.stderr.write(`[claude cli] ${line}\n`)): Record<string, string> {
+	const child: Record<string, string> = { ...NONINTERACTIVE_WORKER_ENV };
+	const dropped: string[] = [];
+	for (const key of [...CHILD_IDENTITY, ...CHILD_TOOL_VARS]) {
+		const value = env[key];
+		if (!value || SECRET_ENV_NAME.test(key)) continue;
+		if (/_proxy$/i.test(key) && value.includes("@")) dropped.push(key);
+		else child[key] = value;
+	}
+	if (dropped.length > 0) warn(`${dropped.join(", ")} not passed to the CLI child: a proxy URL with embedded credentials`);
+	const browsers = join(userInfo().homedir, ".cache", "ms-playwright");
+	if (child.PLAYWRIGHT_BROWSERS_PATH === undefined && existsSync(browsers)) child.PLAYWRIGHT_BROWSERS_PATH = browsers;
+	return child;
+}
 
 /** The home's `exclude_paths` and every live grant's exclusions, read by the worker process, never the CLI child. */
 export function implementerExclusions(home: string): string[] {
