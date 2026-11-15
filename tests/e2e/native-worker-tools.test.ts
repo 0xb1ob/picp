@@ -1,9 +1,10 @@
 /**
  * Claude/pi worker parity (WP4+) through the real `cp_dispatch` of a pi parent (mock model), fake-claude as the CLI on
- * CI, only boundary services faked. NP-4*: the planner role's web tools; NP-5*: user MCP servers and the lockdown.
+ * CI, only boundary services faked. NP-4*: the planner role's web tools; NP-5*: user MCP servers and the lockdown;
+ * NP-6a: per-job skills.
  */
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
@@ -11,7 +12,7 @@ import { LAYOUT, paths } from "../../src/contracts.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { VERDICT_TOOL } from "../../src/drivers/claude-verdict.ts";
 import { type ClaudeStep, type ClaudeToolUse, FAKE_NATIVE_MODEL, type RecordedClaudeRequest, toolResults } from "../harness/claude-mock-provider.ts";
-import { readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { readRunEvents, REPO_ROOT, type ScriptStep, waitFor } from "../harness/index.ts";
 import { NATIVE, nativeWorkerHome, startFakeWeb } from "../harness/native-worker.ts";
 
 const calls = (...uses: ClaudeToolUse[]): ClaudeStep => ({ kind: "tool_use", calls: uses });
@@ -246,4 +247,36 @@ test("NP-5c: the lockdown still refuses an extra tool, MCP server and plugin whi
 	assert.deepEqual(run?.extra, { tools: 1, mcpServers: 1, skills: 0, plugins: 1, agents: 0, slashCommands: 0, hooks: 0, outputStyle: 0 }, JSON.stringify(run));
 	assert.deepEqual(probeCalls(log), [], "no MCP tool ran before the lockdown");
 	assert.equal(accepted(h.b.home, job.id), 0);
+});
+
+// Scenario: Given cp_dispatch skills ["tdd-x"] on a claude row, When the job runs, Then it runs native (no `ineligible`
+//   refusal), its brief names tdd-x/SKILL.md, and its Read returns the skill body. Catches the per-job skills refusal.
+test("NP-6a: a native job with a per-job skill reads its SKILL.md", { skip: NATIVE, timeout: 300_000 }, async (t) => {
+	let id = "";
+	const body = "---\nname: tdd-x\ndescription: does tdd-x\n---\nnp6 skill body: write the failing test first.\n";
+	let skillFile = "";
+	const h = await nativeWorkerHome(t, [
+		calls({ name: "Read", input: () => ({ file_path: skillFile }) }),
+		calls({ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(id)), content: "# native\n" }) }),
+		calls({ name: REPORT_TOOL, input: () => researchReport(id, h.b.home) }),
+		done,
+	]);
+	const dir = join(h.b.agent.path, "skills", "tdd-x");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, "SKILL.md"), body);
+	skillFile = join(realpathSync(dir), "SKILL.md");
+	const job = await h.job("research");
+	id = job.id;
+	const step = job.dispatch("Name the package.");
+	const withSkill: ScriptStep = { kind: "tool_calls", calls: step.kind === "tool_calls" ? step.calls.map((call) => ({ ...call, args: { ...(call.args as Record<string, unknown>), skills: ["tdd-x"] } })) : [] };
+	const ends = await h.run([withSkill, h.awaitEnvelope(id)]);
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const first = h.claude.requests.find(isModelCall);
+	const brief = JSON.stringify(first?.body.messages ?? "");
+	assert.ok(brief.includes(skillFile), "the brief names the SKILL.md path");
+	assert.match(brief, /Read each SKILL\.md before you start/);
+	assert.equal(toolResults(h.claude.requests)[0], body);
+	const [run] = await h.runs(id);
+	assert.deepEqual([run?.lockdown, run?.denials, run?.report], ["ok", 0, true], JSON.stringify(run));
+	assert.equal(accepted(h.b.home, id), 1);
 });

@@ -52,8 +52,6 @@ export interface NativeSelection {
 	env?: NodeJS.ProcessEnv;
 	/** The worker profile's name; `ops` never runs native. */
 	profile?: string;
-	/** How many per-job skills the dispatch names; any runs pi. */
-	skills?: number;
 }
 
 /** The switch a job's role/kind/delivery falls under, or undefined when no native class takes it (N4f). Research
@@ -77,7 +75,6 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local, answer, board or pipeline), ship (role implementer, delivery pr or local) and gate-reviewer jobs run native; this is ${input.kind}/${input.role}/${input.delivery}` };
 	if (nativeClass === undefined) return ineligible;
 	if (input.profile === "ops") return { category: "ineligible", why: "the ops profile needs ssh/scp, which the native Bash policy refuses" };
-	if ((input.skills ?? 0) > 0) return { category: "ineligible", why: "per-job skills load only on pi (`--skill`)" };
 	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
 	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs), input.jobId, config.max_concurrent);
