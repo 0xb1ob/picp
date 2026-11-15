@@ -1,6 +1,7 @@
 /**
  * Claude/pi worker parity: native jobs through the real `cp_dispatch` of a pi parent (mock model), with fake-claude as
- * the CLI on CI. NP-0a…NP-0e pin the guards every parity PR keeps; NP-1* the forge reads; NP-2* the Bash scope.
+ * the CLI on CI. NP-0a…NP-0e pin the guards every parity PR keeps; NP-1* the forge reads; NP-2* the Bash scope;
+ * NP-3a the child env.
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -40,16 +41,18 @@ function stubBin(t: TestContext, h: Home, name: string, fixture: string): void {
 	h.installStubBin(name, join(dir, name));
 }
 
-/** A scripted forge `gh` first on the workers' PATH: logs and answers reads; the hermetic stub answers the rest. */
-function scriptedGh(t: TestContext, h: Awaited<ReturnType<typeof nativeWorkerHome>>): () => string[] {
+/** A scripted forge `gh` first on the workers' PATH: logs and answers reads (`repos`: each read's GH_REPO); the
+ * hermetic stub answers the rest. */
+function scriptedGh(t: TestContext, h: Awaited<ReturnType<typeof nativeWorkerHome>>): (() => string[]) & { repos: () => string[] } {
 	const dir = mkdtempSync(join(tmpdir(), "cp-np1-gh-"));
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const log = join(dir, "calls.log");
+	const [log, repoLog] = [join(dir, "calls.log"), join(dir, "repos.log")];
 	const rest = h.env.PATH.split(delimiter).slice(1).join(delimiter);
 	writeFileSync(join(dir, "gh"), [
 		"#!/bin/sh",
 		`case "$*" in "--version"|"api user --jq .login") PATH='${rest}' exec gh "$@" ;; esac`,
 		`printf '%s\\n' "$*" >> '${log}'`,
+		`printf '%s\\n' "$GH_REPO" >> '${repoLog}'`,
 		'case "$1 $2" in',
 		"\t\"issue view\") printf 'np1 issue %s body\\n' \"$3\" ;;",
 		"\t\"pr view\") printf 'np1 pr %s body\\n' \"$3\" ;;",
@@ -60,7 +63,8 @@ function scriptedGh(t: TestContext, h: Awaited<ReturnType<typeof nativeWorkerHom
 		"",
 	].join("\n"), { mode: 0o755 });
 	h.installStubBin("gh", join(dir, "gh"));
-	return () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : []);
+	const lines = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean) : []);
+	return Object.assign(() => lines(log), { repos: () => lines(repoLog) });
 }
 
 test("NP-0a: a native research job reports through fake-claude and tears down", { skip: NATIVE, timeout: 300_000 }, async (t) => {
@@ -215,8 +219,12 @@ test("NP-0e: exclude_paths hold for Edit and Write; a write outside them lands",
 test("NP-1a: a native planner and implementer read issues and other PRs with gh_read", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	for (const kind of ["research", "ship"] as const) {
 		let id = "";
+		// A GitHub origin pins GH_REPO; an upstream remote marked as gh's set-default (gh-resolved) must not win.
+		const remotes = () => [["remote", "set-url", "origin", "https://github.com/o/r.git"], ["remote", "add", "upstream", "https://github.com/other/x.git"],
+			["config", "remote.upstream.gh-resolved", "base"]].forEach((args) => execFileSync("git", args, { cwd: h.worktree(id) }));
 		const h = await nativeWorkerHome(t, [
-			calls(ghRead({ verb: "issue view", number: 7 }), ghRead({ verb: "pr view", number: 9 }), ghRead({ verb: "api", path: "repos/o/r/pulls/9/comments" }), bash("gh issue view 7")),
+			calls({ name: "mcp__picp__gh_read", input: () => (remotes(), { verb: "issue view", number: 7 }) }, ghRead({ verb: "pr view", number: 9 }),
+				ghRead({ verb: "api", path: "repos/o/r/pulls/9/comments" }), bash("gh issue view 7")),
 			...(kind === "research" ? [calls({ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(id)), content: "# native\n" }) })] : []),
 			calls({ name: REPORT_TOOL, input: () => (kind === "research" ? researchReport(id, h.b.home) : blocked(id)) }),
 			done,
@@ -238,6 +246,7 @@ test("NP-1a: a native planner and implementer read issues and other PRs with gh_
 		const reads = ghCalls();
 		for (const read of ["pr view 9", "api repos/o/r/pulls/9/comments"]) assert.ok(reads.includes(read), `${kind}: ${read} not in ${JSON.stringify(reads)}`);
 		assert.equal(reads.filter((line) => line === "issue view 7").length, 1, `${kind}: gh_read ran it once; Bash gh never did`);
+		assert.deepEqual(ghCalls.repos(), reads.map(() => "o/r"), `${kind}: every gh_read ran with the origin's GH_REPO`);
 		assert.equal(accepted(h.b.home, id), 1, kind);
 	}
 });
@@ -499,5 +508,42 @@ test("NP-2g: Bash honours exclude_paths", { skip: NATIVE, timeout: 300_000 }, as
 	assert.ok(denied.lines.every((line) => / an excluded path /.test(line)), JSON.stringify(denied));
 	assert.equal(existsSync(join(wt(), ".github", "workflows", "src")), false, "tar extracted into .github/workflows");
 	assert.equal(readFileSync(join(wt(), "src", "ok.txt"), "utf8"), "x\n");
+	assert.equal(accepted(h.b.home, id), 1);
+});
+
+// Scenario: Given PLAYWRIGHT_BROWSERS_PATH on the host, When a native worker starts a headless browser, Then the browser
+//   sees that path; it merges with no editor wait and reads its job id; no GH token, secret-named variable or
+//   credentialed proxy reaches the child. Negative control: the whole host env as childEnv puts GH_TOKEN in its keys.
+test("NP-3a: the CLI child gets pi's non-interactive env, the job identity and named tool variables only", { skip: NATIVE, timeout: 300_000 }, async (t) => {
+	let id = "";
+	const wt = () => h.worktree(id);
+	const identity = { GIT_AUTHOR_NAME: "np3a", GIT_AUTHOR_EMAIL: "np3a@test.invalid", GIT_COMMITTER_NAME: "np3a", GIT_COMMITTER_EMAIL: "np3a@test.invalid" };
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: wt(), encoding: "utf8", env: { ...process.env, ...identity } }).trim();
+	// The side branch is planted as the model asks, so the worktree exists; the worker's own Bash may not branch.
+	const side = () => (git("branch", "np3a-side", git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "np3a side")), { command: "git merge --no-ff -m m np3a-side" });
+	const h = await nativeWorkerHome(t, [
+		calls({ name: "Bash", input: side }, bash("printf '%s' \"$CP_JOB_ID\" > src/id.txt"), bash("chromium --headless --screenshot=shots/a.png about:blank")),
+		calls({ name: REPORT_TOOL, input: () => blocked(id) }),
+		done,
+	], { files: { "src/x.ts": "export const x = 1;\n" } });
+	stubBin(t, h, "chromium", STUB_CHROMIUM);
+	const job = await h.job("ship");
+	id = job.id;
+	const ends = await h.run([job.dispatch("Merge the side branch and take a screenshot."), h.awaitEnvelope(id)],
+		{ PLAYWRIGHT_BROWSERS_PATH: "/x", HTTPS_PROXY: "http://u:p@h:1", GH_TOKEN: "np3a-synthetic-gh-token", FOO_TOKEN: "np3a-synthetic-foo-token" });
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const all = toolResults(h.claude.requests).join("\n---\n");
+	const denied = await h.denials(id);
+	assert.equal(denied.count, 0, JSON.stringify(denied));
+	assert.equal(git("log", "-1", "--format=%P").split(" ").length, 2, `HEAD is the merge commit: ${all}`);
+	assert.equal(git("log", "-1", "--format=%s"), "m");
+	assert.equal(readFileSync(join(wt(), "src", "id.txt"), "utf8"), id, all);
+	assert.equal(readFileSync(join(wt(), "shots", "a.png.env"), "utf8"), "/x", all);
+	const keys = h.spawnedEnvKeys(id);
+	if (keys !== undefined) {
+		for (const key of ["GIT_EDITOR", "CP_JOB_ID", "PLAYWRIGHT_BROWSERS_PATH"]) assert.ok(keys.includes(key), `${key} missing: ${JSON.stringify(keys)}`);
+		const leaked = ["GH_TOKEN", "FOO_TOKEN", "HTTPS_PROXY", "SSH_AUTH_SOCK", "CP_HOME", "CP_RUN_DIR"].filter((key) => keys.includes(key));
+		assert.deepEqual(leaked, [], JSON.stringify(keys));
+	}
 	assert.equal(accepted(h.b.home, id), 1);
 });

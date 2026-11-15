@@ -14,7 +14,7 @@ import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sd
 import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
 import { estimatedRunUsage, liveUsageUpdate, NATIVE_REPORTED_GRACE_MS, NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage, noteStreamedUsage, type StreamedUsage } from "./claude-usage.ts";
 import { commitIdentityEnv } from "./claude-forge-tools.ts";
-import { implementerArtifactPath, implementerExclusions, nativeRole } from "./claude-roles.ts";
+import { implementerArtifactPath, implementerExclusions, nativeRole, nativeWorkerChildEnv } from "./claude-roles.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
 import { VERDICT_TOOL } from "./claude-verdict.ts";
 import { agentDirOf, type ClaudeMcpServers, claudeMcpSection, claudeMcpServers, readUserMcpServers } from "../worker-mcp.ts";
@@ -129,6 +129,7 @@ function briefFor(jobId: string): string {
 	return existsSync(file) ? `${readFileSync(file, "utf8").trimEnd()}\n\n` : "";
 }
 
+let childEnv: Record<string, string> | undefined;
 let userMcp: { mcp: ClaudeMcpServers; section: string } | undefined;
 /** WP5: the agent dir's mcp.json, read once per process; each skipped server is one stderr line and a run event. */
 function loadUserMcp(): { mcp: ClaudeMcpServers; section: string } {
@@ -207,7 +208,7 @@ async function turn(prompt: string): Promise<Turn> {
 			job_id: jobId, kind, role, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, ...(artifactPath ? { artifactPath } : {}),
 			...(implementer ? { excludePaths: implementerExclusions(env.CP_HOME ?? "") } : {}),
 		},
-		...(implementer ? { providerEnv: commitIdentityEnv(worktree) } : {}),
+		childEnv: { ...(childEnv ??= nativeWorkerChildEnv(env)), ...(implementer ? commitIdentityEnv(worktree) : {}) },
 		systemPrompt,
 		prompt,
 		web: env.CP_NATIVE_WEB === "1",

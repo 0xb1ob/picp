@@ -289,17 +289,23 @@ function unwrap(words: readonly Word[]): { assigns: Word[]; words: Word[]; dump?
 	return { assigns, words: rest, ...(env && rest.length === 0 && split === undefined ? { dump: denied("an environment dump (`env`)") } : {}), ...(split ? { split } : {}), ...(moved ? { moved } : {}) };
 }
 
-function commandRefusal(cmd: Cmd, here: string | undefined, scope: BashScope, level: number): string | undefined {
+/** `home`: a HOME/XDG_CONFIG_HOME assignment an enclosing `sh -c`/`eval`/`env -S`/`find -exec` hands this command. */
+function commandRefusal(cmd: Cmd, here: string | undefined, scope: BashScope, level: number, home?: string): string | undefined {
 	if ([...cmd.words, ...cmd.dests, ...cmd.reads].some((word) => secretWord(word, here, scope))) return SECRET;
 	const { assigns, words, dump, split, moved } = unwrap(cmd.words);
 	if (dump !== undefined) return dump;
 	const exported = EXPORTERS.has(words[0]?.text ?? "") ? words.slice(1) : [];
-	// HOME/XDG_CONFIG_HOME pick git's global config (an alias file): refused on git, bare or exported.
-	const homeScoped = words.length === 0 || exported.length > 0 || basename(words[0]?.text ?? "") === "git";
+	// HOME/XDG_CONFIG_HOME pick git's global config (an alias file): refused on git, bare, exported or inherited.
+	const isGit = basename(words[0]?.text ?? "") === "git";
+	const homeScoped = words.length === 0 || exported.length > 0 || isGit;
 	const config = [...assigns, ...exported].find((w) => GIT_CONFIG_ENV.test(w.text) || (homeScoped && HOME_ENV.test(w.text)));
-	if (config !== undefined) return denied(`setting ${config.text.split("=")[0]} (git config from the env, such as an alias for a refused verb)`);
+	const inherited = isGit && config === undefined ? home : undefined;
+	if (config !== undefined || inherited !== undefined) {
+		return denied(`setting ${inherited ?? config?.text.split("=")[0]} (git config from the env, such as an alias for a refused verb)`);
+	}
+	home ??= assigns.find((w) => HOME_ENV.test(w.text))?.text.split("=")[0];
 	const at = moved ? undefined : here;
-	if (split !== undefined) return scriptRefusal(split, at, scope, level + 1);
+	if (split !== undefined) return scriptRefusal(split, at, scope, level + 1, home);
 	const [first, ...args] = words;
 	if (first === undefined) return cmd.dests.map((w) => destRefusal(w, at, scope)).find(Boolean);
 	if (first.open) return denied(`an unresolved command name (${first.text})`, "name the command literally");
@@ -310,11 +316,11 @@ function commandRefusal(cmd: Cmd, here: string | undefined, scope: BashScope, le
 		const flag = args.findIndex((w) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(w.text));
 		const script = flag < 0 ? undefined : operands(args.slice(flag + 1))[0];
 		if (script !== undefined) {
-			const inner = scriptRefusal(script.text, at, scope, level + 1);
+			const inner = scriptRefusal(script.text, at, scope, level + 1, home);
 			if (inner !== undefined) return inner;
 		}
 	}
-	if (name === "eval") return scriptRefusal(args.map((w) => w.text).join(" "), at, scope, level + 1) ?? cmd.dests.map((w) => destRefusal(w, at, scope)).find(Boolean);
+	if (name === "eval") return scriptRefusal(args.map((w) => w.text).join(" "), at, scope, level + 1, home) ?? cmd.dests.map((w) => destRefusal(w, at, scope)).find(Boolean);
 	if (name === "scp" || name === "rsync") return denied(`\`${name}\` (it can copy across the network)`, "copy files with cp or mv");
 	if (name === "gh") {
 		return denied("`gh` (no credentials in this run; read GitHub with the gh_read tool)", scope.role === "implementer" ? "open and edit this job's PR with pr_create and pr_edit" : undefined);
@@ -344,7 +350,7 @@ function commandRefusal(cmd: Cmd, here: string | undefined, scope: BashScope, le
 			if (/^-(?:exec|execdir|ok|okdir)$/.test(text)) {
 				const stop = args.findIndex((w, j) => j > i && (w.text === ";" || w.text === "+"));
 				const sub = args.slice(i + 1, stop < 0 ? args.length : stop).flatMap((w) => (w.text === "{}" ? roots : [w]));
-				const inner = commandRefusal({ words: sub, dests: [], reads: [], sep: "", depth: 0 }, at, scope, level);
+				const inner = commandRefusal({ words: sub, dests: [], reads: [], sep: "", depth: 0 }, at, scope, level, home);
 				if (inner !== undefined) return inner;
 			}
 		}
@@ -368,7 +374,7 @@ function cdTarget(cmd: Cmd, here: string | undefined): { dir: string | undefined
 }
 
 /** One shell script: unquoted heredoc substitutions, then `$(…)` scripts, then each command with its tracked cwd. */
-function scriptRefusal(script: string, cwd: string | undefined, scope: BashScope, level: number): string | undefined {
+function scriptRefusal(script: string, cwd: string | undefined, scope: BashScope, level: number, home?: string): string | undefined {
 	if (level > 3) return denied("a shell nested more than three deep");
 	const nested: string[] = [];
 	const blanked = script.replace(HEREDOC_BODY_RE, (match: string, head: string, quoted: string) => {
@@ -379,7 +385,7 @@ function scriptRefusal(script: string, cwd: string | undefined, scope: BashScope
 	// A substitution runs where its command runs; once any cd moves the shell, that dir is unknown here.
 	const moves = cmds.some((cmd) => /^(?:cd|pushd|popd)$/.test(unwrap(cmd.words).words[0]?.text ?? ""));
 	for (const inner of nested) {
-		const why = scriptRefusal(inner, moves ? undefined : cwd, scope, level + 1);
+		const why = scriptRefusal(inner, moves ? undefined : cwd, scope, level + 1, home);
 		if (why !== undefined) return why;
 	}
 	let [here, sure, depth, prev] = [cwd, true, 0, ""];
@@ -387,7 +393,7 @@ function scriptRefusal(script: string, cwd: string | undefined, scope: BashScope
 	for (const cmd of cmds) {
 		for (; depth < cmd.depth; depth++) stack.push([here, sure]);
 		for (; depth > cmd.depth; depth--) [here, sure] = stack.pop() ?? [undefined, true];
-		const why = commandRefusal(cmd, here, scope, level);
+		const why = commandRefusal(cmd, here, scope, level, home);
 		if (why !== undefined) return why;
 		// A cd in a pipeline or the background is unknown; after a conditional one, only an `&&` chain keeps the dir.
 		const cd = cdTarget(cmd, here);
