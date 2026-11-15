@@ -1,0 +1,1 @@
+- Claude CLI worker parity WP6 (cp-parity-p6-i4dg): a job naming per-job skills (`cp_dispatch skills`) now runs native instead of routing to pi as `ineligible`; the worker gets pi's brief note naming each `SKILL.md` and Reads it before it starts. `tests/e2e/native-routing.test.ts` J1 and `tests/e2e/native-worker-tools.test.ts` NP-6a pin it.
