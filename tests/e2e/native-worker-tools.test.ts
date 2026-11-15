@@ -119,7 +119,14 @@ test("NP-4c: web stays planner-role only: implementer and reviewer get none, a q
 		home: h.b.home, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentEnv: { ...process.env, ...h.b.agent.env, ...h.env },
 		modelRegistry: () => ({ find: (provider: string, id: string) => ({ provider, id }), hasConfiguredAuth: (m: { provider: string; id: string }) => `${m.provider}/${m.id}` !== FAKE_NATIVE_MODEL }),
 	}));
-	const panel = await post.qualityPass().runAndWait({ jobId: qa.id, task: "Name the package.", config: { verify: true, voters: 1, threshold: 1 } });
+	// The voter's native selection resolves `claude` on this process's PATH, not parentEnv's: without fake-claude
+	// there, a host with no installed claude (CI) falls back to pi, which cannot serve the native model.
+	const path = process.env.PATH;
+	process.env.PATH = h.env.PATH;
+	t.after(() => void (process.env.PATH = path));
+	const panel = await post.qualityPass().runAndWait({ jobId: qa.id, task: "Name the package.", config: { verify: true, voters: 1, threshold: 1 } }).finally(() => {
+		process.env.PATH = path;
+	});
 	const votes = panel?.verify?.votes ?? [];
 	assert.deepEqual(votes.map((vote) => [vote.model, vote.sound]), [[FAKE_NATIVE_MODEL, true]], JSON.stringify(votes));
 	const modelCalls = h.claude.requests.filter(isModelCall);
