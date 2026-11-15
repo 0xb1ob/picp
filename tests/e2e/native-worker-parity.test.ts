@@ -397,7 +397,7 @@ test("NP-2d: push scope holds in every literal shape", { skip: NATIVE, timeout: 
 	let id = "";
 	const pushes = ["git push", "git push origin HEAD:other", "sh -c \"git push origin HEAD:main\"", "git -c x=y push", "GIT_DIR=../o git push", "cd .. && git push",
 		"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin HEAD:main",
-		"X=push git --config-env=alias.p=X p origin HEAD:main", "git send-pack origin HEAD:refs/heads/main"];
+		"X=push git --config-env=alias.p=X p origin HEAD:main", "git send-pack origin HEAD:refs/heads/main", "HOME=/tmp/np2d git p origin HEAD:main"];
 	const h = await nativeWorkerHome(t, [
 		calls(bash("git commit -q --allow-empty -m np2d")),
 		calls(...pushes.map(bash)),

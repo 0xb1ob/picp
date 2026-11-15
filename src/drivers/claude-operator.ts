@@ -65,7 +65,9 @@ function guard(toolName: string, input: unknown): string | undefined {
 	const scoped = operatorToolRefusal(call.name, call.input, cwd, () => resolveOperatorTarget());
 	if (scoped) return scoped;
 	if (call.name === "bash") {
-		const hit = bashSecretHit(String(call.input.command ?? ""), cwd, secrets, homedir());
+		const command = String(call.input.command ?? "");
+		// The operator's Bash has no cd tracking, so any literal `.claude` stays refused (`cd ~ && cat .claude/…`).
+		const hit = /\.claude\b/.exec(command)?.[0] ?? bashSecretHit(command, cwd, secrets, homedir());
 		return hit === undefined ? undefined : refused("Bash", hit);
 	}
 	const paths = call.name === "find" ? [call.input.path, call.input.pattern] : [call.input.path];

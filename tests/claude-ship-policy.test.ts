@@ -68,7 +68,8 @@ test("implementer guards: pushes, escapes, secrets, env dumps, .git and exclusio
 				"git http-push x", "scp README.md h:x", "rsync README.md ../x", "unzip -d ../x a.zip", "tar -xf a.tar -C .github/workflows",
 				"tar -xf a.tar --directory=../x", "cd ~op && cat .claude/.credentials.json", "cd /usr && cat .config/claude/x",
 				"X=push git --config-env=alias.p=X p origin HEAD:main", "X=push git --config-env alias.p=X p", "git checkout HEAD~1 -- .",
-				"git restore -s HEAD~1 .", "git restore --source=HEAD~1 .",
+				"git restore -s HEAD~1 .", "git restore --source=HEAD~1 .", "HOME=/tmp/h git p", "XDG_CONFIG_HOME=/tmp/x git p",
+				"export HOME=/tmp/h; git p", "HOME=/tmp/h; git p",
 			].map(bash),
 			write("Edit", join(worktree, ".env")), write("Write", ".github/workflows/x.yml"), write("Write", "../x"), write("Write", "out/x"),
 			write("Write", "dangling.md"), write("Write", ".git/hooks/pre-commit"), write("Edit", join(worktree, ".git", "config")),
@@ -86,7 +87,7 @@ test("implementer guards: pushes, escapes, secrets, env dumps, .git and exclusio
 				"git checkout HEAD~1 -- src/x.ts", "git log --oneline | head -5", "cat <<'EOF'\n$(git push)\nEOF", "ls 2>&1 | wc -l",
 				"git branch --show-current", "ps aux", `echo x > ${root}/art/notes.md`, "cd src && echo x > a.txt", "npx prettier --check .",
 				"git restore .", "git checkout -- .", "ls .claude && rg -n '\\.claude' src", "tar -xf a.tar -C src", "unzip -d /tmp/cp-unzip-unit a.zip",
-				"git add .claude/x", "ls .claude-plugin", "cd src && ls ../.claude",
+				"git add .claude/x", "ls .claude-plugin", "cd src && ls ../.claude", "HOME=/tmp/h npm test",
 			].map(bash),
 			write("Edit", join(worktree, "src", "x.ts")), write("Write", "src/new.ts"), ["Read", { file_path: join(worktree, "README.md") }],
 		];

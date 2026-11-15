@@ -109,6 +109,7 @@ const GIT_NETWORK = new Set([
 ]);
 /** Env handing git config past `-c` (an alias can rename a refused verb): refused as an assignment or export. */
 const GIT_CONFIG_ENV = /^GIT_CONFIG(?:_\w*)?(?:=|$)/;
+const HOME_ENV = /^(?:HOME|XDG_CONFIG_HOME)=/;
 const EXPORTERS = new Set(["export", "declare", "typeset", "local", "readonly"]);
 const GIT_PLANNER = new Set([
 	"add", "commit", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash", "clean", "rm", "mv", "cherry-pick", "revert", "tag", "am",
@@ -293,7 +294,9 @@ function commandRefusal(cmd: Cmd, here: string | undefined, scope: BashScope, le
 	const { assigns, words, dump, split, moved } = unwrap(cmd.words);
 	if (dump !== undefined) return dump;
 	const exported = EXPORTERS.has(words[0]?.text ?? "") ? words.slice(1) : [];
-	const config = [...assigns, ...exported].find((w) => GIT_CONFIG_ENV.test(w.text));
+	// HOME/XDG_CONFIG_HOME pick git's global config (an alias file): refused on git, bare or exported.
+	const homeScoped = words.length === 0 || exported.length > 0 || basename(words[0]?.text ?? "") === "git";
+	const config = [...assigns, ...exported].find((w) => GIT_CONFIG_ENV.test(w.text) || (homeScoped && HOME_ENV.test(w.text)));
 	if (config !== undefined) return denied(`setting ${config.text.split("=")[0]} (git config from the env, such as an alias for a refused verb)`);
 	const at = moved ? undefined : here;
 	if (split !== undefined) return scriptRefusal(split, at, scope, level + 1);

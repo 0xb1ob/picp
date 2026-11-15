@@ -93,6 +93,7 @@ const guardScript = (paths: { state: string; settings: string; workspace: string
 		{ name: "Read", input: () => ({ file_path: paths.settings }) },
 		{ name: "mcp__cp__cp_dispatch", input: { job_id: "cp-none" } },
 		{ name: "Write", input: () => ({ file_path: join(paths.workspace, "no3.md"), content: "NO3-NOTE" }) },
+		{ name: "Bash", input: { command: "cd ~ && cat .claude/settings.json" } },
 	] },
 	{ kind: "text", text: "NO3 done" },
 ];
@@ -102,18 +103,21 @@ async function guarded(t: TestContext, settingsEnv: Record<string, string> = {})
 	const op = await nativeOperator(t, guardScript(paths), { settingsEnv });
 	Object.assign(paths, { state: op.state, settings: op.settings, workspace: join(op.home, layoutForHome("multi", op.home).operatorWorkspace) });
 	assert.equal((await op.send("send", { kind: "message", text: "NO3-GO" })).ok, true);
-	const results = await waitFor(() => toolResults(op.provider.requests), (seen) => seen.length >= 4, { timeoutMs: 60_000, what: "four tool results" });
+	const results = await waitFor(() => toolResults(op.provider.requests), (seen) => seen.length >= 5, { timeoutMs: 60_000, what: "five tool results" });
 	return { paths, results };
 }
 
 // Scenario: Given the D2 guards, When the operator's model calls Write into state/, Read of the passed settings file,
-// cp_dispatch and Write under the operator workspace, Then the first three are refused and the last one runs.
+// cp_dispatch, Write under the operator workspace and Bash `cd ~ && cat .claude/settings.json`, Then the first three
+// and the Bash read are refused and the workspace Write runs.
 test("NO-3: Write outside the operator's scope, a settings Read and a fleet tool are denied; a workspace Write runs", { timeout: 180_000 }, async (t) => {
 	const { paths, results } = await guarded(t);
 	assert.match(results[0]!, /^\[error\] Refused: write \S+: the operator session writes only under /);
 	assert.match(results[1]!, /^\[error\] Refused: the operator's Read never touches the Claude settings/);
 	assert.equal(results[2], "[error] Refused: mcp__cp__cp_dispatch is not one of the operator's tools.");
 	assert.doesNotMatch(results[3]!, /^\[error\]/);
+	// The operator's Bash has no cd tracking: a relative `.claude` after `cd ~` must still be refused (review 4).
+	assert.match(results[4]!, /^\[error\] Refused: the operator's Bash never touches the Claude settings/);
 	assert.equal(existsSync(join(paths.state, "x")), false);
 	assert.equal(readFileSync(join(paths.workspace, "no3.md"), "utf8"), "NO3-NOTE");
 });
