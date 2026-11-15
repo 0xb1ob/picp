@@ -23,7 +23,7 @@ type Json = Record<string, any>;
 export type NativeOperator = Awaited<ReturnType<typeof nativeOperator>>;
 
 /** `settingsEnv` reaches fake-claude through the settings file (its test knobs); `env` the launcher and operator. */
-export async function nativeOperator(t: TestContext, script: ClaudeStep[], options: { settingsEnv?: Record<string, string>; env?: Record<string, string>; seed?: (home: string) => void } = {}) {
+export async function nativeOperator(t: TestContext, script: ClaudeStep[], options: { settingsEnv?: Record<string, string>; env?: Record<string, string>; seed?: (home: string) => void; argv?: string[] } = {}) {
 	const provider = await startClaudeMockProvider(script);
 	const scratch = createScratchHome();
 	const home = scratch.path;
@@ -46,7 +46,8 @@ export async function nativeOperator(t: TestContext, script: ClaudeStep[], optio
 	const viewer = createViewer({ home, stateDir: state, host: "127.0.0.1", port: 0, requireTailnet: true, log: () => {}, operatorStart: { tmux: null, herdr: null } });
 	await new Promise<void>((done) => viewer.listen(0, "127.0.0.1", done));
 	const port = (viewer.address() as AddressInfo).port;
-	const exited = runOperator([], { viewer: { home, host: "127.0.0.1", port: 1 }, relaunchFile: join(fakeHome, "relaunch.json") });
+	const launch = (argv: readonly string[]) => runOperator(argv, { viewer: { home, host: "127.0.0.1", port: 1 }, relaunchFile: join(fakeHome, "relaunch.json") });
+	let exited = launch(options.argv ?? []);
 	let record: ControlRecord | undefined;
 	const stop = async () => {
 		if (record) try { process.kill(record.pid, "SIGTERM"); } catch { /* already gone */ }
@@ -89,5 +90,13 @@ export async function nativeOperator(t: TestContext, script: ClaudeStep[], optio
 		if (next.state !== "ok") throw new Error("no dashboard control");
 		record = next.record;
 	};
-	return { home, state, settings, provider, record, calls, seen, get, view, send, reconnect, stop };
+	/** After `stop()`: launches `cp-operator <argv>` again on the same home and adopts its control record. */
+	const relaunch = async (argv: readonly string[]) => {
+		const old = record!.pid;
+		exited = launch(argv);
+		const next = await waitFor(() => readControlRecord(state), (row) => row.state === "ok" && row.record.pid !== old, { timeoutMs: 60_000, what: "the relaunched operator's dashboard control" });
+		if (next.state !== "ok") throw new Error("no dashboard control");
+		record = next.record;
+	};
+	return { home, state, settings, provider, record, calls, seen, get, view, send, reconnect, relaunch, stop };
 }
