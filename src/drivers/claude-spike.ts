@@ -369,8 +369,9 @@ export interface SpikeRunOptions {
 	prompt: string;
 	/** Explicit provider variables for the child (a fake model's base URL and synthetic token). */
 	providerEnv?: Record<string, string>;
-	/** WP3: named variables merged after the built child env (`nativeWorkerChildEnv`); never a whole host env. */
-	childEnv?: Record<string, string>;
+	/** WP3: named variables merged after the built child env (`nativeWorkerChildEnv`); never a whole host env.
+	 * An undefined value unsets a built key (WP7: GIT_SSH_COMMAND for `ops`). */
+	childEnv?: Record<string, string | undefined>;
 	/** The operator's Claude settings path, which claude itself reads and picp never opens; null passes none. */
 	userSettings?: string | null;
 	model?: string;

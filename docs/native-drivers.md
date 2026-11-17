@@ -844,12 +844,12 @@ The CLI child of a native worker now gets, beyond `buildChildEnv`'s allow-list, 
 `PLAYWRIGHT_BROWSERS_PATH`, `PUPPETEER_CACHE_DIR`, `PUPPETEER_EXECUTABLE_PATH`, `CHROME_PATH`, `NODE_EXTRA_CA_CERTS`,
 `SSL_CERT_FILE` and the six `HTTP(S)_PROXY`/`NO_PROXY` spellings when set. `PLAYWRIGHT_BROWSERS_PATH` defaults to
 `<passwd home>/.cache/ms-playwright` when unset and that dir exists, since the child's `HOME` is scratch. Never
-`CP_HOME`, `CP_RUN_DIR`, `GH_*`, `SSH_AUTH_SOCK` or a secret-named key; a proxy value containing `@` (embedded
-credentials) is dropped, with one stderr line naming the keys, never the value. A CA override lets the child trust a
-custom CA, as pi's workers already do. `tests/e2e/native-worker-parity.test.ts` NP-3a pins it through the spawned env
-key names and the child's own output. NP-1a now also pins `GH_REPO`: with a GitHub origin, an `upstream` remote and
-gh's set-default on that upstream, every `gh_read` runs with the origin's repo. Rollback: revert (the child is back to
-the allow-list).
+`CP_HOME`, `CP_RUN_DIR`, `GH_*`, `SSH_AUTH_SOCK` (the `ops` profile alone gets it, WP7) or a secret-named key; a
+proxy value containing `@` (embedded credentials) is dropped, with one stderr line naming the keys, never the value.
+A CA override lets the child trust a custom CA, as pi's workers already do. `tests/e2e/native-worker-parity.test.ts`
+NP-3a pins it through the spawned env key names and the child's own output. NP-1a now also pins `GH_REPO`: with a
+GitHub origin, an `upstream` remote and gh's set-default on that upstream, every `gh_read` runs with the origin's
+repo. Rollback: revert (the child is back to the allow-list).
 
 ### WP4 web tools (planner role)
 
@@ -885,5 +885,17 @@ A job naming per-job skills (`cp_dispatch skills`) no longer routes to pi as `in
 same brief note a pi worker gets (`skillsBriefNote`, `src/job-skills.ts`): each skill's resolved `SKILL.md` path and
 "Read each SKILL.md before you start"; it Reads the file on demand. The note grants no tools, scope or authority, and
 `MENTION_NEVER` refusals still apply at dispatch. `tests/e2e/native-routing.test.ts` J1 (the skills row routes
-claude; ops still routes pi) and `tests/e2e/native-worker-tools.test.ts` NP-6a (the brief names the path and the
-worker's Read returns the skill body) pin it. Rollback: revert (restores the selection refusal).
+claude; since WP7 the ops row does too) and `tests/e2e/native-worker-tools.test.ts` NP-6a (the brief names the path
+and the worker's Read returns the skill body) pin it. Rollback: revert (restores the selection refusal).
+
+### WP7 ops profile
+
+An `ops:<class>` job (profile `ops`, role planner) no longer routes to pi as `ineligible`. The dispatch sets
+`CP_NATIVE_PROFILE=<profile name>` (`nativeSpawnOptions`, from the worker manager), and `nativeWorkerChildEnv` gives the
+`ops` child alone the host's `SSH_AUTH_SOCK` (when set) and unsets `buildChildEnv`'s `GIT_SSH_COMMAND=false`; every
+other profile keeps both as before. Every `ssh` is still appended to the job's `host-audit.jsonl` and a key or `*.pem`
+read is still refused (`workerHostGuard`); the research write scope applies, so README and other repo writes stay
+refused. The native Bash scope still refuses `scp` and `rsync`, so a native ops job copies with `ssh … > <artifact
+dir>/…`. `tests/e2e/native-routing.test.ts` J1 (the ops row routes claude) and `tests/e2e/native-worker-tools.test.ts`
+NP-7a (a stub `ssh` sees the agent, one audit row, the key read and README write refused; a plain planner beside it
+gets no agent and keeps `GIT_SSH_COMMAND`) pin it. Recovery: revert (ops goes back to pi by the selection refusal).

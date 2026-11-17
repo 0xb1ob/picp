@@ -129,7 +129,12 @@ function briefFor(jobId: string): string {
 	return existsSync(file) ? `${readFileSync(file, "utf8").trimEnd()}\n\n` : "";
 }
 
-let childEnv: Record<string, string> | undefined;
+let childEnv: Record<string, string | undefined> | undefined;
+/** WP3: the CLI child's named env, built once per process; a dropped proxy is one stderr line and a run event. */
+const workerChildEnv = (): Record<string, string | undefined> => (childEnv ??= nativeWorkerChildEnv(env, env.CP_NATIVE_PROFILE, (line) => {
+	process.stderr.write(`[claude cli] ${line}\n`);
+	write({ type: "native_env_dropped", line });
+}));
 let userMcp: { mcp: ClaudeMcpServers; section: string } | undefined;
 /** WP5: the agent dir's mcp.json, read once per process; each skipped server is one stderr line and a run event. */
 function loadUserMcp(): { mcp: ClaudeMcpServers; section: string } {
@@ -208,7 +213,7 @@ async function turn(prompt: string): Promise<Turn> {
 			job_id: jobId, kind, role, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, ...(artifactPath ? { artifactPath } : {}),
 			...(implementer ? { excludePaths: implementerExclusions(env.CP_HOME ?? "") } : {}),
 		},
-		childEnv: { ...(childEnv ??= nativeWorkerChildEnv(env)), ...(implementer ? commitIdentityEnv(worktree) : {}) },
+		childEnv: { ...workerChildEnv(), ...(implementer ? commitIdentityEnv(worktree) : {}) },
 		systemPrompt,
 		prompt,
 		web: env.CP_NATIVE_WEB === "1",

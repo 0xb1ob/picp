@@ -15,6 +15,7 @@ import { paths } from "../../src/contracts.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { type ClaudeStep, type ClaudeToolUse, FAKE_CLAUDE_AUTH_TOKEN, toolResults } from "../harness/claude-mock-provider.ts";
 import { readRunEvents } from "../harness/index.ts";
+import { REAL_CLAUDE } from "../harness/native-parent.ts";
 import { NATIVE, nativeWorkerHome } from "../harness/native-worker.ts";
 
 const calls = (...uses: ClaudeToolUse[]): ClaudeStep => ({ kind: "tool_use", calls: uses });
@@ -400,13 +401,15 @@ test("NP-2c: a planner runs scripts and reaches the network but writes only its 
 });
 
 // Scenario: Given a native implementer with a local commit, When it runs sh -c "git push origin HEAD:main" or any
-//   other literal push shape (an env-config alias `git p` included), Then it is refused and no origin ref moves.
+//   other literal push shape (an env-config alias `git p`, a HOME handed to sh -c's git), Then it is refused and no
+//   origin ref moves.
 //   Negative control: skip the `sh -c` re-scan or the GIT_CONFIG_* refusal and the local-path origin takes main.
 test("NP-2d: push scope holds in every literal shape", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const pushes = ["git push", "git push origin HEAD:other", "sh -c \"git push origin HEAD:main\"", "git -c x=y push", "GIT_DIR=../o git push", "cd .. && git push",
 		"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin HEAD:main",
-		"X=push git --config-env=alias.p=X p origin HEAD:main", "git send-pack origin HEAD:refs/heads/main", "HOME=/tmp/np2d git p origin HEAD:main"];
+		"X=push git --config-env=alias.p=X p origin HEAD:main", "git send-pack origin HEAD:refs/heads/main", "HOME=/tmp/np2d git p origin HEAD:main",
+		"HOME=/tmp/np2d sh -c 'git p origin HEAD:main'"];
 	const h = await nativeWorkerHome(t, [
 		calls(bash("git commit -q --allow-empty -m np2d")),
 		calls(...pushes.map(bash)),
@@ -539,7 +542,11 @@ test("NP-3a: the CLI child gets pi's non-interactive env, the job identity and n
 	assert.equal(git("log", "-1", "--format=%s"), "m");
 	assert.equal(readFileSync(join(wt(), "src", "id.txt"), "utf8"), id, all);
 	assert.equal(readFileSync(join(wt(), "shots", "a.png.env"), "utf8"), "/x", all);
+	const dropped = readRunEvents(h.b.home, id).filter((event) => event.type === "native_env_dropped").map((event) => (event.payload as { line: string }).line);
+	assert.deepEqual(dropped, ["HTTPS_PROXY not passed to the CLI child: a proxy URL with embedded credentials"]);
 	const keys = h.spawnedEnvKeys(id);
+	// Only the real CLI (CP_E2E_REAL_CLAUDE=1) records no keys; under fake-claude a missing log is a failure.
+	assert.ok(keys !== undefined || REAL_CLAUDE, "fake-claude recorded no spawned env keys");
 	if (keys !== undefined) {
 		for (const key of ["GIT_EDITOR", "CP_JOB_ID", "PLAYWRIGHT_BROWSERS_PATH"]) assert.ok(keys.includes(key), `${key} missing: ${JSON.stringify(keys)}`);
 		const leaked = ["GH_TOKEN", "FOO_TOKEN", "HTTPS_PROXY", "SSH_AUTH_SOCK", "CP_HOME", "CP_RUN_DIR"].filter((key) => keys.includes(key));
