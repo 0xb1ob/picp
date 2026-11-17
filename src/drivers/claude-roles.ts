@@ -63,8 +63,8 @@ const CHILD_TOOL_VARS = [
 	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 ] as const;
 
-/** WP3: the CLI child's env beyond `buildChildEnv`: pi's non-interactive variables, the job identity, named tool/CA/proxy
- * variables; never CP_HOME, CP_RUN_DIR, GH_* or a secret-named key; a proxy URL with `@` is dropped (one `warn` line).
+/** WP3: the CLI child's env beyond `buildChildEnv`: pi's non-interactive vars, the job identity, named tool/CA/proxy
+ * vars; never CP_HOME, CP_RUN_DIR, GH_* or a secret-named key; a proxy URL with `@` is dropped (one warn line).
  * WP7: profile `ops` alone gets the host SSH_AUTH_SOCK and unsets buildChildEnv's GIT_SSH_COMMAND (undefined). */
 export function nativeWorkerChildEnv(env: NodeJS.ProcessEnv, profile?: string, warn: (line: string) => void = (line) => void process.stderr.write(`[claude cli] ${line}\n`)): Record<string, string | undefined> {
 	const child: Record<string, string | undefined> = { ...NONINTERACTIVE_WORKER_ENV };

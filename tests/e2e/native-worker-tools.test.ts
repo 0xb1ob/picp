@@ -287,9 +287,9 @@ test("NP-6a: a native job with a per-job skill reads its SKILL.md", { skip: NATI
 const STUB_SSH = join(REPO_ROOT, "tests/fixtures/stub-ssh.mjs");
 const KEY_READ = /^\[error\] Refused: a worker never reads a private ssh key, a \.ssh directory or a \*\.pem file \(`~\/\.ssh\/id_ed25519`\)\./;
 
-// Scenario: Given an ops:pull job on the Claude CLI and a parent SSH_AUTH_SOCK, When it runs ssh, reads ~/.ssh/id_ed25519
-//   and redirects into README.md, Then ssh runs with the agent and is written to host-audit.jsonl, while the key read and
-//   the write are refused. Negative control: a plain planner in the same home gets no agent and keeps
+// Scenario: Given an ops:pull job on the Claude CLI and a parent SSH_AUTH_SOCK, When it runs ssh, reads
+//   ~/.ssh/id_ed25519 and redirects into README.md, Then ssh runs with the agent and lands in host-audit.jsonl, while
+//   the key read and the write are refused. Negative control: a plain planner in the same home gets no agent and keeps
 //   GIT_SSH_COMMAND=false; dropping workerHostGuard fails on the missing audit row.
 test("NP-7a: an ops job runs ssh natively, audited; key reads and repo writes stay refused", { skip: NATIVE, timeout: 420_000 }, async (t) => {
 	const ids = { ops: "", plain: "" };
