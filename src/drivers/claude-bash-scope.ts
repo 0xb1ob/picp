@@ -10,7 +10,7 @@ import { SECRET_ENV_NAME } from "../web-egress.ts";
 import { HEREDOC_BODY_RE } from "../worker-credential-guard.ts";
 import { type Cmd, extract, lexCommands, operands, values, type Word } from "./claude-bash-lex.ts";
 import { bashSecretHit, secretPathIn } from "./claude-bash-policy.ts";
-import type { SpikeJob } from "./claude-spike.ts";
+import type { SpikeJob } from "./native-guards.ts";
 
 export interface BashScope {
 	role: "research" | "implementer";

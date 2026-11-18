@@ -3,7 +3,7 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { type JobContext, LenientGateReviewSchema, verdictReporter } from "../../extensions/worker-reporter/index.ts";
 import { type GateReview, validate } from "../contracts.ts";
-import type { SpikeJob } from "./claude-spike.ts";
+import type { SpikeJob } from "./native-guards.ts";
 
 export const VERDICT_TOOL = "mcp__picp__report_verdict";
 

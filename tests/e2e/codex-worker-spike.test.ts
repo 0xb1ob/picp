@@ -1,6 +1,6 @@
 /**
- * Codex C0 spike CX-0a…0h through `runCodexSpike` on tests/fixtures/fake-codex.ts (no `codex` needed). No product entry
- * point selects codex before C1, so the spike's own entry is the boundary. Each case checks the synthetic Codex home is
+ * Codex CX-0a…0j (C0) and CX-1d/1g/1h (C1a) through `runCodexSpike` on tests/fixtures/fake-codex.ts. No entry point
+ * selects codex yet, so the run core's own entry is the boundary. Each case checks the synthetic Codex home is
  * untouched and no OPENAI_* or CODEX_* key but CODEX_HOME reached an app-server child.
  */
 import assert from "node:assert/strict";
@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
 import { isPidAlive } from "../../src/fleet.ts";
-import { codexHookTrust, codexSpawnArgs, type CodexSpikeResult } from "../../src/drivers/codex-spike.ts";
+import { codexHookTrust, codexPermissionProfile, codexSpawnArgs, type CodexSpikeResult, type CodexToolEvent } from "../../src/drivers/codex-spike.ts";
 import { resolveCodexContainment } from "../../src/drivers/codex-containment.ts";
 import { spawnCodexRpc } from "../../src/drivers/codex-rpc.ts";
 import {
@@ -24,6 +24,7 @@ import {
 	fakeScopes,
 	fakeSpawns,
 	fakeThreadTotal,
+	OUTSIDE_SENTINEL,
 	spawnSpikeDriver,
 } from "../harness/codex-mock.ts";
 
@@ -105,8 +106,9 @@ test("CX-0b: a denied command does not run, at the hook layer or, with the hook 
 test("CX-0c: a killed, timed-out or unreachable hook lets nothing run, and a failed hook stops the report tool", { timeout: 180_000 }, async (t) => {
 	// Control: the fake fails open, so a hook exiting 1 with approvals off does run its command.
 	const control = fixture(t, { turns: [[{ kind: "shell", command: "echo control-ran" }]] });
-	const env = { PATH: `${join(control.root, "bin")}:${process.env.PATH ?? ""}`, HOME: control.root, CODEX_HOME: control.codexHome };
-	const args = { hookCommand: `'${process.execPath}' '${HOOK_FAIL}' exit1` };
+	const env = { PATH: `${control.bin}:${process.env.PATH ?? ""}`, HOME: control.root, CODEX_HOME: control.codexHome };
+	const profile = codexPermissionProfile({ worktree: control.worktree, tmp: join(control.root, "tmp") });
+	const args = { hookCommand: `'${process.execPath}' '${HOOK_FAIL}' exit1`, profile };
 	const containment = resolveCodexContainment(env);
 	const trust = await codexHookTrust("codex", codexSpawnArgs(args), control.worktree, env, containment);
 	const rpc = spawnCodexRpc({ command: "codex", args: codexSpawnArgs({ ...args, trust }), cwd: control.worktree, env, containment });
@@ -122,7 +124,7 @@ test("CX-0c: a killed, timed-out or unreachable hook lets nothing run, and a fai
 
 	for (const [mode, extra] of [["kill", {}], ["stall", { hookTimeoutSec: 1, hookClientTimeoutMs: 5_000 }]] as const) {
 		const sentinel = join(control.root, `ran-${mode}`);
-		const fx = fixture(t, { turns: [[{ kind: "shell", command: `touch ${sentinel}`, hook: mode }, { kind: "shell", command: "cat README.md" }]] });
+		const fx = fixture(t, { knobs: { modelMs: 500 }, turns: [[{ kind: "shell", command: `touch ${sentinel}`, hook: mode }, { kind: "shell", command: "cat README.md" }]] });
 		const result = await fx.run(extra);
 		assert.equal(existsSync(sentinel), false, mode);
 		assert.deepEqual(fakeExecuted(fx.stateDir), [], mode);
@@ -130,7 +132,7 @@ test("CX-0c: a killed, timed-out or unreachable hook lets nothing run, and a fai
 		assert.equal(result.hookFailed, true, mode);
 		assert.deepEqual(result.denials.map((d) => d.layer), ["approval"], mode);
 		assert.match(result.denials[0]?.reason ?? "", /no hook verdict/);
-		assert.equal(result.outcome, "interrupted", mode);
+		assert.equal(result.outcome, "stopped", mode);
 		assertClean(fx, result);
 	}
 
@@ -279,5 +281,90 @@ test("CX-0j: no user scope, no Codex: the run is refused before any app-server s
 	assert.match(result.error ?? "", /could not contain codex app-server.*Failed to connect to user scope bus.*never runs Codex uncontained/s);
 	assert.deepEqual(fakeSpawns(fx.stateDir).filter((each) => each.argv[0] === "app-server"), []);
 	assert.deepEqual(fakeExecuted(fx.stateDir), []);
+	assertClean(fx, result);
+});
+
+const reportStep = (fx: CodexFixture) => ({ kind: "tool" as const, tool: "report_result", arguments: report(fx) });
+const allScopesKilled = (fx: CodexFixture) =>
+	until(() => fakeScopes(fx.stateDir).filter((each) => each.killed !== undefined).length === fakeScopes(fx.stateDir).filter((each) => each.started).length, "every scope killed", 10_000);
+
+test("CX-1g: a dead hook and an auto-approved read outside the worktree: the file is not read and the run is killed", { timeout: 120_000 }, async (t) => {
+	// E11: a user allow rule runs `cat` with no approval; with picp's hook killed only the kernel profile is left. Without
+	// the profile flags the cat runs; with `turn/interrupt` instead of the scope kill the app-server exits with code 0.
+	const fx = fixture(t, { turns: [] });
+	const outsideFile = join(fx.outside, "secret.txt");
+	fx.setScript({ knobs: { autoApprove: ["cat"], modelMs: 1_000 }, turns: [[{ kind: "shell", command: `cat ${outsideFile}`, hook: "kill" }, { kind: "shell", command: "cat README.md" }, reportStep(fx)]] });
+	const events: string[] = [];
+	const result = await fx.run({ onMessage: (method, params) => events.push(`${method} ${JSON.stringify(params)}`) });
+	assert.deepEqual(fakeExecuted(fx.stateDir), []);
+	assert.ok(events.some((each) => each.includes("Permission denied")), "the kernel stand-in answered the read");
+	const toolResults = join(fx.stateDir, "tool-results.jsonl");
+	for (const where of [JSON.stringify(result), ...events, existsSync(toolResults) ? readFileSync(toolResults, "utf8") : ""]) {
+		assert.ok(!where.includes(OUTSIDE_SENTINEL), "the outside file's content reached picp");
+	}
+	assert.equal(result.hookFailed, true);
+	assert.equal(result.outcome, "stopped");
+	assert.equal(result.exit?.signal, "SIGKILL", JSON.stringify(result.exit));
+	assert.match(result.error ?? "", /^Refused: (picp's hook failed|the Codex CLI ran commandExecution without asking picp)/);
+	assert.equal(result.report, undefined);
+	assert.equal(existsSync(join(fx.runDir, "envelope.json")), false);
+	await allScopesKilled(fx);
+	assertClean(fx, result);
+});
+
+test("CX-1h: a command the CLI ran without asking picp kills the run, and no later step runs", { timeout: 120_000 }, async (t) => {
+	const fx = fixture(t, { turns: [] });
+	fx.setScript({ knobs: { autoApprove: ["cat"], modelMs: 1_000 }, turns: [[{ kind: "shell", command: "cat README.md" }, { kind: "shell", command: "echo second-step" }, reportStep(fx)]] });
+	const result = await fx.run();
+	assert.equal(result.bypass, "commandExecution");
+	assert.equal(result.outcome, "stopped");
+	assert.equal(result.hookFailed, false);
+	assert.equal(result.error, "Refused: the Codex CLI ran commandExecution without asking picp; the run was killed.");
+	assert.deepEqual(fakeExecuted(fx.stateDir), ["cat README.md"]);
+	assert.equal(result.exit?.signal, "SIGKILL", JSON.stringify(result.exit));
+	assert.equal(result.report, undefined);
+	await allScopesKilled(fx);
+	assertClean(fx, result);
+});
+
+test("CX-1d: an enabled feature, a differing profile read-back or web search on refuses the run; a clean run holds every flag", { timeout: 120_000 }, async (t) => {
+	const step = { kind: "shell" as const, command: "cat README.md" };
+	for (const [knobs, why, before] of [
+		[{ features: { view_image: true } }, /loaded a surface picp did not pass \(features 1\)/, "thread/start"],
+		[{ profileReadback: "extraRoot" }, /the thread's sandbox is not picp's profile/, "turn/start"],
+		[{ webSearch: "live" }, /hosted web search reads back live/, "thread/start"],
+	] as const) {
+		const fx = fixture(t, { knobs, turns: [[step]] });
+		const result = await fx.run();
+		assert.equal(result.outcome, "refused", JSON.stringify(knobs));
+		assert.match(result.error ?? "", why);
+		assert.doesNotMatch(result.error ?? "", /view_image|\//, "counts only: no feature name or path");
+		const methods = fakeRpcMethods(fx.stateDir);
+		assert.ok(!methods.includes(before) && !methods.includes("turn/start"), methods.join(","));
+		assert.deepEqual(fakeExecuted(fx.stateDir), []);
+		assertClean(fx, result);
+	}
+
+	// The clean run also pins E10's cwd rule (a `workdir` outside the worktree is denied at the hook) and `onTool`.
+	const fx = fixture(t, { turns: [] });
+	fx.setScript({ turns: [[step, { kind: "shell", command: "cat secret.txt", workdir: fx.outside }, reportStep(fx)]] });
+	const tools: CodexToolEvent[] = [];
+	const result = await fx.run({ onTool: (event) => tools.push(event) });
+	assert.equal(result.outcome, "completed", result.error);
+	assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal);
+	assert.equal(result.lockdown?.extra.features, 0);
+	assert.equal(result.report?.job_id, JOB);
+	assert.deepEqual(fakeExecuted(fx.stateDir), ["cat README.md"]);
+	assert.deepEqual(result.denials.map((d) => d.layer), ["hook"]);
+	assert.match(result.denials[0]?.reason ?? "", /runs in its worktree only/);
+	const servers = fakeSpawns(fx.stateDir).filter((each) => each.argv[0] === "app-server");
+	assert.equal(servers.length, 2, "the trust probe and the run");
+	for (const server of servers) {
+		assert.ok(server.argv.includes('web_search="disabled"'), "D4: hosted web search off on every app-server");
+		assert.ok(server.argv.includes('default_permissions="picp_planner"'), "the profile on every app-server");
+		for (const feature of ["view_image", "goals", "sleep_tool", "unified_exec_tty"]) assert.ok(server.argv.join(" ").includes(`--disable ${feature}`), feature);
+	}
+	assert.deepEqual(tools.map((each) => `${each.phase} ${each.name}${each.isError === undefined ? "" : ` ${each.isError}`}`),
+		["start bash", "end bash false", "start report_result", "end report_result false"]);
 	assertClean(fx, result);
 });

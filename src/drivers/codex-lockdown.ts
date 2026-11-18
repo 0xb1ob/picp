@@ -1,9 +1,17 @@
 /**
- * The Codex surface lockdown: before any thread the CLI must list only picp's trusted hook, no MCP server and only
- * its pinned built-in skills; after `thread/start` the read-back must hold. Any miss refuses the run. Counts only.
+ * The Codex surface lockdown: before any thread only picp's trusted hook, no MCP server, the pinned skills, picp's
+ * features off and web search disabled; after `thread/start` the profile read-back. Any miss refuses. Counts only.
  */
 import { resolve } from "node:path";
-import type { HooksListResponse, ListMcpServerStatusResponse, SkillsListResponse, ThreadStartResponse } from "./codex-protocol.ts";
+import { CODEX_OFF_FEATURES, CODEX_PROFILE } from "./codex-launch.ts";
+import type {
+	ConfigReadResponse,
+	ExperimentalFeature,
+	HooksListResponse,
+	ListMcpServerStatusResponse,
+	SkillsListResponse,
+	ThreadStartResponse,
+} from "./codex-protocol.ts";
 
 /** The `system`-scope skills codex 0.170.0 loads under SURFACE_FLAGS, as the live smoke LS-2 listed them (X5). */
 export const CODEX_BUILTIN_SKILLS: readonly string[] = ["imagegen", "openai-docs", "review-agent", "skill-creator", "skill-installer"];
@@ -16,11 +24,17 @@ export interface CodexSurface {
 	mcpServers: ListMcpServerStatusResponse;
 	skills: SkillsListResponse;
 	builtinSkills?: readonly string[];
+	/** Every page of `experimentalFeature/list`. */
+	features: ExperimentalFeature[];
+	config: ConfigReadResponse;
+	/** What picp passed: the profile id and the roots it made writable. */
+	profile: { id: string; writableRoots: readonly string[] };
 	/** Present once `thread/start` (or `thread/resume`) answered. */
 	thread?: { response: ThreadStartResponse; cwd: string };
 }
 
-export interface CodexSurfaceCounts { hooks: number; mcpServers: number; skills: number; instructionSources: number }
+/** `features`: seen counts the enabled ones; extra counts picp's off-list enabled or unlisted, and `hooks` not enabled. */
+export interface CodexSurfaceCounts { hooks: number; mcpServers: number; skills: number; instructionSources: number; features: number }
 
 export interface CodexLockdown {
 	verdict: "ok" | "refused";
@@ -38,12 +52,18 @@ export function codexLockdownVerdict(surface: CodexSurface): CodexLockdown {
 	const ours = hooks.filter((hook) => hook.handlerType === "command" && hook.command === surface.hookCommand);
 	const skills = surface.skills.data.flatMap((entry) => entry.skills);
 	const sources = surface.thread?.response.instructionSources ?? [];
-	const seen = { hooks: hooks.length, mcpServers: surface.mcpServers.data.length, skills: skills.length, instructionSources: sources.length };
+	const enabled = new Map(surface.features.map((feature) => [feature.name, feature.enabled]));
+	const wrongFeatures = CODEX_OFF_FEATURES.filter((name) => enabled.get(name) !== false).length + (enabled.get("hooks") === true ? 0 : 1);
+	const seen = {
+		hooks: hooks.length, mcpServers: surface.mcpServers.data.length, skills: skills.length, instructionSources: sources.length,
+		features: surface.features.filter((feature) => feature.enabled).length,
+	};
 	const extra = {
 		hooks: hooks.length - ours.length,
 		mcpServers: surface.mcpServers.data.length,
 		skills: skills.filter((skill) => skill.scope !== "system" || !builtin.includes(skill.name)).length,
 		instructionSources: sources.length,
+		features: wrongFeatures,
 	};
 	const loaded = Object.entries(extra).filter(([, count]) => count > 0);
 	const hook = ours[0];
@@ -55,18 +75,34 @@ export function codexLockdownVerdict(surface: CodexSurface): CodexLockdown {
 		...(hook !== undefined && hook.trustStatus !== "trusted" ? [`picp's hook is not trusted (${hook.trustStatus})`] : []),
 		...(hook !== undefined && (!hook.enabled || hook.isManaged || hook.source !== "sessionFlags" || hook.eventName !== "preToolUse") ? ["picp's hook is not an enabled session-flag preToolUse hook"] : []),
 		...(hookErrors > 0 ? [`the hook listing has ${hookErrors} errors`] : []),
-		...threadReasons(surface.thread),
+		...webSearchReasons(surface.config),
+		...threadReasons(surface.thread, surface.profile),
 	];
 	if (reasons.length === 0) return { verdict: "ok", seen, extra };
 	return { verdict: "refused", seen, extra, refusal: `Refused: the Codex CLI lockdown failed: ${reasons.join("; ")}. The run was stopped before any tool ran.` };
 }
 
-function threadReasons(thread: CodexSurface["thread"]): string[] {
+/** D4: hosted web search reads back `disabled`, set by picp's own session flag. */
+function webSearchReasons(config: ConfigReadResponse): string[] {
+	const value = config.config.web_search;
+	const origin = config.origins.web_search?.name.type;
+	return value === "disabled" && origin === "sessionFlags" ? [] : [`hosted web search reads back ${String(value)} from ${String(origin)}, not disabled from picp's flag`];
+}
+
+const sameRoots = (a: readonly string[], b: readonly string[]): boolean =>
+	JSON.stringify(a.map((path) => resolve(path)).sort()) === JSON.stringify(b.map((path) => resolve(path)).sort());
+
+function threadReasons(thread: CodexSurface["thread"], profile: CodexSurface["profile"]): string[] {
 	if (thread === undefined) return [];
 	const { response, cwd } = thread;
+	const sandbox = response.sandbox;
 	return [
 		...(response.approvalPolicy !== "untrusted" ? [`the thread's approval policy is ${String(response.approvalPolicy)}, not untrusted`] : []),
-		...(response.sandbox?.type !== "readOnly" ? ["the thread's sandbox is not read-only"] : []),
+		...(response.approvalsReviewer !== "user" ? ["the thread's approvals are not routed to picp"] : []),
+		...(response.activePermissionProfile?.id !== profile.id || profile.id !== CODEX_PROFILE ? [`the thread's permission profile is not ${CODEX_PROFILE}`] : []),
+		...(sandbox?.type !== "workspaceWrite" || sandbox.networkAccess !== false || sandbox.excludeSlashTmp !== true || !sameRoots(sandbox.writableRoots ?? [], profile.writableRoots)
+			? ["the thread's sandbox is not picp's profile (its writable roots, network or tmp exclusion differ)"]
+			: []),
 		...(resolve(response.cwd) !== resolve(cwd) ? ["the thread runs outside the worktree"] : []),
 	];
 }

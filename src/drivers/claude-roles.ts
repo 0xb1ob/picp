@@ -9,7 +9,7 @@ import { SECRET_ENV_NAME } from "../web-egress.ts";
 import { NONINTERACTIVE_WORKER_ENV } from "../worker-manager.ts";
 import { secretPathIn } from "./claude-bash-policy.ts";
 import { worktreePathRefusal } from "./claude-bash-scope.ts";
-import type { SpikeGuard, SpikeJob } from "./claude-spike.ts";
+import type { SpikeGuard, SpikeJob } from "./native-guards.ts";
 
 export type NativeRole = "research" | "implementer" | "reviewer";
 const TOOLS: Record<NativeRole, readonly string[]> = {
