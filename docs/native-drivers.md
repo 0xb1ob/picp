@@ -974,6 +974,8 @@ its argv from there and runs in the systemd user scope.
   user allow rule (`<CODEX_HOME>/rules/*.rules`) approves runs **unsandboxed** when the profile has no deny entry
   (it read a file outside the worktree with a killed hook), and inside the sandbox when it has one. This corrects the
   plan's E12/E13 reading. The app-server cannot turn rules off (`--ignore-rules` exits 2) and no feature does.
+  A release dir that is or holds `$HOME`, the passwd home or `CODEX_HOME` would open them to every command, so
+  `codexReleaseDir` throws and the run never starts (CX-1k).
 - **Surface.** `SURFACE_FLAGS` also disable `view_image`, `goals`, `sleep_tool` and `unified_exec_tty`. The lockdown
   reads every page of `experimentalFeature/list` (those nine features off, `hooks` on) and `config/read`
   (`web_search` `disabled` from `sessionFlags`, D4) before any thread, and after `thread/start` requires
@@ -987,7 +989,14 @@ its argv from there and runs in the systemd user scope.
   `inProgress` with no process before it asks), a `fileChange` not declined, an `imageView`, `subAgentActivity`,
   `collabAgentToolCall`, `mcpToolCall`, `webSearch`, `imageGeneration` or `sleep` item, or a `thread/started` for
   another thread kills the scope: `bypass: <type>`, outcome `stopped`. A home with allow rules therefore fails each
-  run at its first rule-approved command, by name.
+  run at its first rule-approved command, by name. It keys on the item id; LS-4o-I runs `runCodexSpike` itself on
+  the real CLI (mock model, a synthetic API-key login in a throwaway Codex home) and shows the hook's `tool_use_id`,
+  the approval `itemId` and the tool `callId` are one id: a hook denial and an accepted command end `completed`, no
+  bypass, every ticket matched by id.
+- **Deferred to C1b: `fileChange` order.** The tripwire still kills on any `fileChange` item not `declined`,
+  `inProgress` included. A C1a planner declines every patch, so this only ends a run that tried one. C1b's plan must
+  show the real-CLI order of `fileChange` items and must not kill on a pre-approval `inProgress` item, as
+  `commandExecution` already does not.
 - `onTool` reports each shell and dynamic tool call once per phase, for C1b's worker.
 
 Kill-criteria verdicts (CI: `tests/e2e/codex-worker-spike.test.ts`; real CLI: `CP_LIVE_TESTS=1
@@ -998,7 +1007,7 @@ Codex home, zero tokens):
 | KC | Criterion | CI (fake) | Real CLI |
 |---|---|---|---|
 | 1 | a forbidden action executes | held (CX-0b; CX-1d: a `workdir` outside is denied at the hook) | held (LS-4o-W: an accepted outside `workdir` cannot read its file) |
-| 2 | a hook crash, timeout or missing socket lets a tool have an effect | held (CX-0c, now `stopped`; CX-1g: allow rule plus killed hook, the outside read is refused and the run killed; CX-1h: an unasked command kills the run) | held (LS-4o-R offline: rule-approved read with a killed hook fails, 0 approvals; LS-4 live, one turn: killed hook, approval accepted, the sandbox refused the read) |
+| 2 | a hook crash, timeout or missing socket lets a tool have an effect | held (CX-0c, now `stopped`; CX-1g: allow rule plus killed hook, the outside read is refused and the run killed; CX-1h: an unasked command kills the run) | held (LS-4o-R offline: rule-approved read with a killed hook fails, 0 approvals; LS-4 live, one turn: killed hook, approval accepted, the sandbox refused the read; LS-4o-I: a hook denial through `runCodexSpike` is no bypass) |
 | 2 (R2) | a sub-agent acts outside the profile or survives the kill | not modelled (fake-codex has no sub-agents) | held (LS-4o-V2 offline: on `gpt-6.2-sol` with every call allowed, the spawned sub-agent's outside read fails in the same profile, and after the scope kill pgrep finds 0 sleeps, sandboxes or app-servers) |
 | 6 | an extra loaded surface is not refused | held (CX-1d: an enabled `view_image`, a differing profile read-back, `web_search` live) | held (LS-4o-V/S: lockdown `ok` on real read-backs, no `view_image` or web-search tool offered; LS-4o-T: tty refused) |
 
