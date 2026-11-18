@@ -262,6 +262,7 @@ async function shellStep(step: Extract<Step, { kind: "shell" }>, turnId: string)
 	const base = { type: "commandExecution", id: itemId, command: step.command, cwd, commandActions: [] };
 	const rule = (knobs.autoApprove ?? []).includes(step.command.trim().split(/\s+/)[0] ?? "");
 	if (thread?.policy !== "never" && !rule) {
+		notify("item/started", { threadId: thread?.id, turnId, item: { ...base, status: "inProgress", processId: null } });
 		const answer = (await ask("item/commandExecution/requestApproval", { itemId, threadId: thread?.id, turnId, command: step.command, cwd, startedAtMs: Date.now() })) as { decision?: unknown } | undefined;
 		if (answer?.decision !== "accept") {
 			notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: "declined" } });

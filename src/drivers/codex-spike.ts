@@ -495,8 +495,10 @@ class CodexRun {
 	private tripwire(item: ItemNotification["item"] | undefined): void {
 		if (item === undefined) return;
 		const status = "status" in item ? item.status : undefined;
+		// 0.170.0 announces a command `inProgress` with no process before it asks; a process or an end means it ran.
+		const ran = item.type === "commandExecution" && (status !== "inProgress" || item.processId != null);
 		const unasked = item.type === "commandExecution"
-			? status !== "declined" && !this.acceptedItems.has(item.id) && !this.hookDenied.has(item.id)
+			? ran && status !== "declined" && !this.acceptedItems.has(item.id) && !this.hookDenied.has(item.id)
 			: item.type === "fileChange" ? status !== "declined" : UNGATED_ITEMS.includes(item.type);
 		if (unasked) this.kill(item.type);
 	}
