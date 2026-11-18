@@ -490,3 +490,36 @@ async function subAgentPass(t: TestContext, extraArgs: string[]): Promise<void> 
 	assert.ok(seen.killed, "the sub-agent's sleep never started; the kill was not measured");
 	await assertNoSurvivor(t, seen.root, n, `sub-agent scope kill (${pass})`);
 }
+
+test("LS-4o-I (offline): through runCodexSpike, a hook denial and an accepted command share ids with the CLI, so no bypass", { skip, timeout: 200_000 }, async (t) => {
+	// The tripwire keys on the item id; C0's X2 measured tool_use_id == approval itemId == callId. If the real CLI's ids
+	// differed, the accepted `cat` would read as unasked and the run would die as a bypass. Synthetic key, mock model.
+	const s = scratch(t);
+	const codexHome = join(s.root, "codex-home");
+	mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+	execFileSync(CODEX as string, ["login", "--with-api-key"], { input: "picp-synthetic-not-a-key\n", env: { PATH: process.env.PATH ?? "", HOME: join(s.root, "home"), CODEX_HOME: codexHome }, stdio: ["pipe", "ignore", "ignore"] });
+	const denied = join(s.root, "ls4o-i-denied");
+	const report = { job_id: JOB, kind: "research", status: "done", summary: "live smoke ok", artifact_path: s.artifactPath, plan_summary: { goal: "g", approach: ["a"], acceptance: ["x"], risk: "r", touched: ["t"] } };
+	const provider = await startCodexMockProvider([
+		{ calls: [{ name: "exec_command", arguments: { cmd: `touch ${denied}` } }] },
+		{ calls: [{ name: "exec_command", arguments: { cmd: "cat README.md" } }] },
+		{ calls: [{ name: "report_result", arguments: report }] },
+		{ message: "done" },
+	]);
+	try {
+		writeFileSync(join(codexHome, "config.toml"), `model_provider = "mock"\n[model_providers.mock]\nname = "mock"\nbase_url = ${JSON.stringify(provider.url)}\nwire_api = "responses"\nrequires_openai_auth = true\n`);
+		writeFileSync(join(s.worktree, "README.md"), "live smoke readme\n");
+		const result = await s.run("go", { codexHome, model: "gpt-picp-mock", deleteThread: true });
+		t.diagnostic(summary(result));
+		assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal);
+		assert.equal(result.bypass, undefined, `the run was killed as a bypass: ${result.error}`);
+		assert.equal(result.outcome, "completed", result.error);
+		assert.deepEqual(result.denials.map((d) => d.layer), ["hook"]);
+		assert.equal(existsSync(denied), false);
+		assert.ok(JSON.stringify(provider.requests).includes("live smoke readme"), "the accepted cat ran");
+		assert.equal(result.report?.job_id, JOB);
+		assert.deepEqual(result.ticketMatch, { id: 2, payload: 0, none: 0 }, "the hook's tool_use_id is the approval itemId and the tool callId");
+	} finally {
+		await provider.close();
+	}
+});
