@@ -66,9 +66,12 @@ export interface CodexProfileRoots {
 }
 export interface CodexProfile { config: string[]; writableRoots: string[] }
 
-/** The allow-list profile: system paths and picp's roots read, the artifact dir and scratch tmp written, nothing else. */
+/**
+ * The allow-list profile: system paths and picp's roots read, the artifact dir and scratch tmp written, nothing else.
+ * The `/` deny keeps the sandbox on for a command a user allow rule approves; without one 0.170.0 runs it unsandboxed.
+ */
 export function codexPermissionProfile(roots: CodexProfileRoots): CodexProfile {
-	const access = new Map<string, "read" | "write">([[":minimal", "read"]]);
+	const access = new Map<string, "read" | "write" | "deny">([["/", "deny"], [":minimal", "read"]]);
 	for (const path of [roots.worktree, roots.gitDir, roots.codexDir]) if (path !== undefined) access.set(resolve(path), "read");
 	for (const path of [roots.artifactDir, roots.tmp]) if (path !== undefined) access.set(resolve(path), "write");
 	const filesystem = [...access].map(([path, mode]) => `${toml(path)}=${toml(mode)}`).join(",");

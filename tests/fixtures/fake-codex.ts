@@ -90,9 +90,11 @@ Object.assign(FEATURES, knobs.features ?? {});
 const webSearchFlag = /^web_search="([^"]*)"$/.exec(configs.find((c) => c.startsWith("web_search=")) ?? "")?.[1];
 const profileId = /^default_permissions="([^"]*)"$/.exec(configs.find((c) => c.startsWith("default_permissions=")) ?? "")?.[1];
 const profileFlag = configs.find((c) => profileId !== undefined && c.startsWith(`permissions.${profileId}=`)) ?? "";
-const profileRoots = [...profileFlag.matchAll(/("(?:[^"\\]|\\.)*")=("read"|"write")/g)].map((m) => ({ path: JSON.parse(m[1] as string) as string, mode: JSON.parse(m[2] as string) as string }));
+const profileRoots = [...profileFlag.matchAll(/("(?:[^"\\]|\\.)*")=("read"|"write"|"deny")/g)].map((m) => ({ path: JSON.parse(m[1] as string) as string, mode: JSON.parse(m[2] as string) as string }));
 const MINIMAL = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/dev"];
-const roots = profileRoots.flatMap((root) => (root.path === ":minimal" ? MINIMAL : [root.path]));
+const roots = profileRoots.filter((root) => root.mode !== "deny").flatMap((root) => (root.path === ":minimal" ? MINIMAL : [root.path]));
+/** 0.170.0 runs a rule-approved command unsandboxed unless the profile holds a deny entry (C1a probe). */
+const ruleKeepsSandbox = profileRoots.some((root) => root.mode === "deny");
 const inProfile = (path: string) => roots.some((root) => resolve(path) === root || resolve(path).startsWith(`${root}${sep}`));
 /** The lexical stand-in for the kernel: an absolute path or workdir outside the profile's roots is denied. */
 const kernelDenies = (command: string, cwd: string): string | undefined =>
@@ -267,7 +269,7 @@ async function shellStep(step: Extract<Step, { kind: "shell" }>, turnId: string)
 		}
 	}
 	const processId = `proc_${counter}`;
-	const denied = kernelDenies(step.command, cwd);
+	const denied = rule && !ruleKeepsSandbox ? undefined : kernelDenies(step.command, cwd);
 	if (denied !== undefined) {
 		notify("item/started", { threadId: thread?.id, turnId, item: { ...base, status: "inProgress", processId } });
 		notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: "failed", exitCode: 1, aggregatedOutput: `${denied}: Permission denied\n` } });
