@@ -215,6 +215,7 @@ test("LS-3c (KC4): a resumed run counts only its own usage", { skip, timeout: 40
 });
 
 const nonce = () => `300.${process.pid}${Date.now() % 100_000}`;
+// Started means the sleep itself runs (`^sleep`): a driver child's argv carries the prompt and would match early.
 const SLEEP = (n: string) => `Run the shell command \`sleep ${n}\` and wait for it.`;
 
 /** KC5 after the case's own end: no sleep of this nonce, no sandbox and no app-server of this scratch dir. */
@@ -231,7 +232,7 @@ test("LS-3d (KC5): an interrupted sandboxed sleep does not survive the stop", { 
 	const n = nonce();
 	const abort = new AbortController();
 	const running = s.run(SLEEP(n), { signal: abort.signal, deleteThread: true });
-	const started = await until(() => pgrep(`sleep ${n}`) > 0, 120_000);
+	const started = await until(() => pgrep(`^sleep ${n}`) > 0, 120_000);
 	abort.abort();
 	const result = await running;
 	t.diagnostic(`${summary(result)} leftovers ${JSON.stringify(result.leftovers)}`);
@@ -246,7 +247,7 @@ test("LS-3d2 (KC5): a SIGKILLed driver leaves no app-server, sandbox or sleep", 
 	const options = s.options(SLEEP(n));
 	const driver = spawnSpikeDriver(options);
 	t.after(() => driver.kill("SIGKILL"));
-	const started = await until(() => pgrep(`sleep ${n}`) > 0, 120_000);
+	const started = await until(() => pgrep(`^sleep ${n}`) > 0, 120_000);
 	driver.kill("SIGKILL");
 	assert.ok(started, "the model never ran the sleep; KC5 was not measured");
 	await assertNoSurvivor(t, s.root, n, "driver SIGKILL");
@@ -260,7 +261,7 @@ test("LS-3d3 (KC5): an app-server that exits on its own mid-command leaves no sa
 	const n = nonce();
 	let appServer: number | undefined;
 	const running = s.run(SLEEP(n), { onAppServer: (pid) => (appServer = pid) });
-	const started = await until(() => pgrep(`sleep ${n}`) > 0, 120_000);
+	const started = await until(() => pgrep(`^sleep ${n}`) > 0, 120_000);
 	if (appServer !== undefined) process.kill(appServer, "SIGTERM");
 	const result = await running;
 	t.diagnostic(summary(result));

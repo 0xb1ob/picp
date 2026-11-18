@@ -930,7 +930,7 @@ Kill-criteria verdicts (CI: `tests/e2e/codex-worker-spike.test.ts` on the fake; 
 | 2 | a hook crash, timeout or missing socket lets a tool run | held (CX-0c) | held by picp's approval decline and ticket (LS-3b) |
 | 3 | the report tool accepts another job | held (CX-0a) | not run (no CLI part) |
 | 4 | usage is double-counted across resume | held (CX-0f) | held (LS-3c) |
-| 5 | a command process survives teardown | held (CX-0g, CX-0h) | **fired** (LS-3d) |
+| 5 | a command process survives teardown | held (CX-0g, CX-0h, CX-0i, CX-0j) | fired in the first run; held under the scope (LS-3d stop, LS-3d2 driver SIGKILL, LS-3d3 own exit) |
 | 6 | an extra loaded surface is not refused | held (CX-0d, CX-0e) | held (LS-3e: the operator's MCP server refused) |
 
 Live answers: X1 the hook runs before the approval; X2 the hook's `tool_use_id` equals the approval `itemId` and the
@@ -940,8 +940,21 @@ so picp's decline and ticket are the gate; X5 the `system` skills are `imagegen`
 `skill-creator`, `skill-installer`, and no instruction source loaded in an empty worktree; X9 the hook reaches the
 socket. **X8 (KC5):** an interrupted foreground `sleep` is listed by `thread/backgroundTerminals/list` with a
 `processId` but no `osPid`; `…/terminate` answers `{terminated: true}`, yet the `codex-linux-sandbox` wrapper (its own
-session) and its child outlive the stop and the app-server's exit. picp may kill only a pid the app-server reported or
-its own child, so it has nothing to kill: C1 must not start until that is resolved (a CLI fix, or a decision to end the
-app-server's descendants by pid). Not run: X3 (the `picp_planner` permission profile; C0 runs `sandbox: "read-only"`,
-so the artifact is not writable by the shell and the lexical Bash scope plus `codexSecretGuard` are the only bar on
-reading the Codex home), X6 beyond the read-back, X10. Fake fidelity gap: the fake always reports an `osPid`.
+session) and its child outlive the stop and the app-server's exit. The CLI reports no pid that picp could kill.
+Not run: X3 (the `picp_planner` permission profile; C0 runs `sandbox: "read-only"`, so the artifact is not writable
+by the shell and the lexical Bash scope plus `codexSecretGuard` are the only bar on reading the Codex home), X6
+beyond the read-back, X10.
+
+**Containment (the KC5 answer).** Every `codex app-server`, the trust probe included, runs in its own systemd user
+scope: `systemd-run --user --scope --collect --unit=picp-codex-<pid>-<rand>.scope -- node codex-contain.mjs <unit> --
+codex app-server …` (`src/drivers/codex-containment.ts`). The leader refuses to start Codex unless `/proc/self/cgroup`
+names its own scope and the scope has `cgroup.kill`. It reports the kill file on fd 3 and writes `1` to it when the
+app-server exits, when fd 3 closes (the driver died, even by SIGKILL) or on a signal. The driver writes it too after a
+stop or any exit. `spawnCodexRpc` sends no request before the scope reports in, so there is no uncontained path: no
+`systemd-run` on PATH (`CodexSpikeError.cli` `containment`), no user manager, or a failed scope check refuses the run.
+A PID namespace was probed first and does not nest: with `kernel.apparmor_restrict_unprivileged_userns=1`,
+codex-linux-sandbox's bwrap cannot create its namespace inside `unshare --user --pid` or `bwrap --unshare-pid`. Inside
+the scope, the sandbox still runs with writes denied. CI uses a boundary fake `systemd-run`
+(`tests/fixtures/fake-systemd-run.ts`): membership is an inherited env marker, and a fake kernel kills members when
+`cgroup.kill` reads `1`. fake-codex can omit `osPid` and answer `terminated: true` without killing, as 0.170.0 does.
+Host need for C1: a running systemd user manager (lingering) for the picp user.
