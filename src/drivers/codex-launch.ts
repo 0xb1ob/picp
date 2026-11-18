@@ -97,7 +97,7 @@ export function codexReleaseDir(codexPath: string): string | undefined {
 	return ["/usr", "/opt"].some((root) => dir === root || dir.startsWith(`${root}${sep}`)) ? undefined : dir;
 }
 
-/** `codex app-server` argv: the reduced surface, the permission profile, picp's hook, and its trust entry when known. */
+/** `codex app-server` argv: the reduced surface, the profile, picp's hook, and its trust entry when known. */
 export function codexSpawnArgs(options: {
 	hookCommand: string;
 	profile: CodexProfile;

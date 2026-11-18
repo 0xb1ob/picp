@@ -1,6 +1,6 @@
 /**
- * Codex live smoke and kill-criteria probes, operator-run: skipped unless CP_LIVE_TESTS=1 and `codex` is on PATH; the
- * live cases also need a sign-in, LS-4o runs on a loopback mock model (zero tokens). Fresh mkdtemp dir per case, threads
+ * Codex live smoke and kill-criteria probes, operator-run: skipped unless CP_LIVE_TESTS=1 and `codex` is on PATH; live
+ * cases also need a sign-in, LS-4o runs on a loopback mock model (zero tokens). Fresh mkdtemp dir per case, threads
  * deleted, counts and statuses only. picp passes the operator's Codex home as CODEX_HOME and never opens it.
  */
 import assert from "node:assert/strict";

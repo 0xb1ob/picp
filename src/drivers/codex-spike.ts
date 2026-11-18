@@ -491,7 +491,7 @@ class CodexRun {
 		}
 	}
 
-	/** Kills the scope on a tool the CLI ran without asking picp: an unaccepted command, an applied patch, an ungated tool. */
+	/** Kills the scope on a tool the CLI ran without asking picp: an unaccepted command or patch, an ungated tool. */
 	private tripwire(item: ItemNotification["item"] | undefined): void {
 		if (item === undefined) return;
 		const status = "status" in item ? item.status : undefined;

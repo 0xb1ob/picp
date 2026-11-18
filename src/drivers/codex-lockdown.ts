@@ -33,7 +33,7 @@ export interface CodexSurface {
 	thread?: { response: ThreadStartResponse; cwd: string };
 }
 
-/** `features`: seen counts the enabled ones; extra counts picp's off-list enabled or unlisted, and `hooks` not enabled. */
+/** `features`: seen counts enabled ones; extra counts picp's off-list enabled or unlisted, and `hooks` off. */
 export interface CodexSurfaceCounts { hooks: number; mcpServers: number; skills: number; instructionSources: number; features: number }
 
 export interface CodexLockdown {
