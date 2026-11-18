@@ -179,6 +179,8 @@ const R2_ALLOWED = [
 	"src/drivers/claude-operator.ts",
 	// N3c: the native worker's kept scratch dir (resume key's config dir), same rule; teardown removes it.
 	"src/drivers/claude-worker.ts",
+	// C0 spike: its scratch HOME, TMPDIR and hook socket sit outside the worktree and the home.
+	"src/drivers/codex-spike.ts",
 	"src/home.ts",
 	"src/pi-compat-probe.ts",
 	"src/projects.ts",
