@@ -1,0 +1,1 @@
+- C1a (unwired): the Codex run core confines every command with the `picp_planner` kernel profile (a `/` deny keeps rule-approved commands sandboxed), kills the run on a dead hook or any tool it ran without asking picp, reads back features, web search and the profile, and loads no Agent SDK (`src/drivers/native-guards.ts`).

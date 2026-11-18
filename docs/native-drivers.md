@@ -958,3 +958,54 @@ the scope, the sandbox still runs with writes denied. CI uses a boundary fake `s
 (`tests/fixtures/fake-systemd-run.ts`): membership is an inherited env marker, and a fake kernel kills members when
 `cgroup.kill` reads `1`. fake-codex can omit `osPid` and answer `terminated: true` without killing, as 0.170.0 does.
 Host need for C1: a running systemd user manager (lingering) for the picp user.
+
+### C1a gate hardening
+
+Still **unwired** (C1b wires research dispatch). The run core now closes the gaps the C1 plan measured, and moves the
+guard chain to `src/drivers/native-guards.ts` (no Agent SDK, no `zod`; `claude-spike.ts` re-exports it; the
+SDK-free ratchet in `tests/structure.test.ts` walks the run core's run-time imports). How picp starts an app-server
+lives in `src/drivers/codex-launch.ts`; every app-server, the trust probe and the smoke's bare servers included, takes
+its argv from there and runs in the systemd user scope.
+
+- **Kernel profile (`picp_planner`).** `-c permissions.picp_planner={filesystem={…}}` with `-c
+  default_permissions="picp_planner"`: `/` deny, `:minimal` read, the worktree, its git common dir and the codex
+  release dir (two levels above the real `codex` binary, unless under `/usr` or `/opt`) read, the artifact dir and the
+  scratch tmp write. `thread/start` sends no `sandbox`. The `/` deny is load-bearing: measured on 0.170.0, a command a
+  user allow rule (`<CODEX_HOME>/rules/*.rules`) approves runs **unsandboxed** when the profile has no deny entry
+  (it read a file outside the worktree with a killed hook), and inside the sandbox when it has one. This corrects the
+  plan's E12/E13 reading. The app-server cannot turn rules off (`--ignore-rules` exits 2) and no feature does.
+- **Surface.** `SURFACE_FLAGS` also disable `view_image`, `goals`, `sleep_tool` and `unified_exec_tty`. The lockdown
+  reads every page of `experimentalFeature/list` (those nine features off, `hooks` on) and `config/read`
+  (`web_search` `disabled` from `sessionFlags`, D4) before any thread, and after `thread/start` requires
+  `activePermissionProfile.id` `picp_planner`, a `workspaceWrite` sandbox whose writable roots are exactly the two
+  picp passed, no network, `excludeSlashTmp`, approvals routed to `user`, and `untrusted`.
+- **Working directory.** The hook verdict and the approval deny a call whose `cwd` is not the worktree (a model
+  `workdir` moves it, E10).
+- **A dead hook kills the run.** A `hook/completed` that is not `completed`, `blocked` or `running` writes
+  `cgroup.kill` (no `turn/interrupt`); the outcome is `stopped`, `hookFailed`.
+- **Tripwire.** A `commandExecution` that got a process or ended without picp's accept (0.170.0 announces it
+  `inProgress` with no process before it asks), a `fileChange` not declined, an `imageView`, `subAgentActivity`,
+  `collabAgentToolCall`, `mcpToolCall`, `webSearch`, `imageGeneration` or `sleep` item, or a `thread/started` for
+  another thread kills the scope: `bypass: <type>`, outcome `stopped`. A home with allow rules therefore fails each
+  run at its first rule-approved command, by name.
+- `onTool` reports each shell and dynamic tool call once per phase, for C1b's worker.
+
+Kill-criteria verdicts (CI: `tests/e2e/codex-worker-spike.test.ts`; real CLI: `CP_LIVE_TESTS=1
+XDG_RUNTIME_DIR=/run/user/$UID npm run test:one -- tests/e2e/codex-worker-live-smoke.test.ts`, codex-cli 0.170.0,
+2026-11-18; LS-4o runs the real CLI on a loopback mock model, `tests/harness/codex-mock-provider.ts`, with a throwaway
+Codex home, zero tokens):
+
+| KC | Criterion | CI (fake) | Real CLI |
+|---|---|---|---|
+| 1 | a forbidden action executes | held (CX-0b; CX-1d: a `workdir` outside is denied at the hook) | held (LS-4o-W: an accepted outside `workdir` cannot read its file) |
+| 2 | a hook crash, timeout or missing socket lets a tool have an effect | held (CX-0c, now `stopped`; CX-1g: allow rule plus killed hook, the outside read is refused and the run killed; CX-1h: an unasked command kills the run) | held (LS-4o-R offline: rule-approved read with a killed hook fails, 0 approvals; LS-4 live, one turn: killed hook, approval accepted, the sandbox refused the read) |
+| 6 | an extra loaded surface is not refused | held (CX-1d: an enabled `view_image`, a differing profile read-back, `web_search` live) | held (LS-4o-V/S: lockdown `ok` on real read-backs, no `view_image` or web-search tool offered; LS-4o-T: tty refused) |
+
+Negative controls run once and restored: without the `/` deny CX-1g fails on `executed.jsonl` and LS-4o-R on the
+sentinel reaching the model; with `codex-spike.ts` importing `claude-spike.ts` the ratchet names that edge.
+Residuals: **R1** a rule-approved command still starts with no approval; it runs inside the profile (reads only the
+worktree, its git dir and system paths; writes only the artifact dir and scratch tmp; no network) and kills the run.
+**R2** `gpt-6.2-sol` still offers `spawn_agent` (LS-4o-V); a healthy hook blocks it (E6) and the tripwire kills on its
+first item. U1 (LS-4, live): the operator's home asked an approval for `cat`, so no allow rule covered it.
+Known limits of the C1 planner: no network; it reads only the worktree, its git dir and system paths, so a brief
+pointing at another job's artifact or a tool under the home cannot be followed. Recovery: revert; nothing selects it.
