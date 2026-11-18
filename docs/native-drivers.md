@@ -899,3 +899,49 @@ refused. The native Bash scope still refuses `scp` and `rsync`, so a native ops 
 dir>/…`. `tests/e2e/native-routing.test.ts` J1 (the ops row routes claude) and `tests/e2e/native-worker-tools.test.ts`
 NP-7a (a stub `ssh` sees the agent, one audit row, the key read and README write refused; a plain planner beside it
 gets no agent and keeps `GIT_SSH_COMMAND`) pin it. Recovery: revert (ops goes back to pi by the selection refusal).
+
+## Codex CLI workers (C0–C8)
+
+### C0 spike
+
+`src/drivers/codex-spike.ts` (`runCodexSpike`) runs one planner turn on the user's installed `codex app-server`
+(floor `0.170.0`, `src/drivers/codex-cli.ts`) over LF-framed JSON-RPC (`codex-rpc.ts`, types in `codex-protocol.ts`).
+It is **unwired**: no production module imports it, no switch or rubric row selects codex, `data/*.json` is untouched.
+A host without `codex` runs CX-0 on the fake (`tests/fixtures/fake-codex.ts`, `tests/harness/codex-mock.ts`).
+
+Gates, each failing closed: the reduced surface (`SURFACE_FLAGS`) and a lockdown before any thread
+(`codex-lockdown.ts`: Codex home, sign-in, exactly picp's trusted session-flag hook, no MCP server, only the pinned
+`system` skills, then `untrusted` approvals, a `readOnly` sandbox read-back, the worktree as cwd and no instruction
+source); picp's `PreToolUse` hook (`codex-hook.mjs`, `node:` imports only) asks a unix socket in the run's scratch
+dir, where the worker runs `spikeGuards` plus `codexSecretGuard`; each allow leaves a ticket that the approval and
+dynamic-tool handlers require; a hook that fails marks the run `hook_failed` and interrupts the turn. The hook is
+trusted per run with a `-c hooks.state=…` flag whose key and hash come from a first `hooks/list` (no write to
+`CODEX_HOME`). `report_result` is a dynamic tool with the reporter's validators. Usage is the latest cumulative total
+minus a baseline (a resume's previous totals, else the CLI's replayed total), `cost_unknown` always. The outcome is
+the protocol state: an exit without `turn/completed` is `stopped` whatever the code. Scratch (`HOME`, `TMPDIR`,
+`hook.sock`) is a `mkdtemp` dir under the temp dir, removed when the run returns.
+
+Kill-criteria verdicts (CI: `tests/e2e/codex-worker-spike.test.ts` on the fake; live:
+`CP_LIVE_TESTS=1 npm run test:one -- tests/e2e/codex-worker-live-smoke.test.ts`, codex-cli 0.170.0, 2026-11-18):
+
+| KC | Criterion | CI (fake) | Live |
+|---|---|---|---|
+| 1 | a forbidden action executes | held (CX-0b) | held (LS-3a: denied at the hook, file absent) |
+| 2 | a hook crash, timeout or missing socket lets a tool run | held (CX-0c) | held by picp's approval decline and ticket (LS-3b) |
+| 3 | the report tool accepts another job | held (CX-0a) | not run (no CLI part) |
+| 4 | usage is double-counted across resume | held (CX-0f) | held (LS-3c) |
+| 5 | a command process survives teardown | held (CX-0g, CX-0h) | **fired** (LS-3d) |
+| 6 | an extra loaded surface is not refused | held (CX-0d, CX-0e) | held (LS-3e: the operator's MCP server refused) |
+
+Live answers: X1 the hook runs before the approval; X2 the hook's `tool_use_id` equals the approval `itemId` and the
+tool `callId` (every ticket matched by id); X4 a hook that exits 1, stalls past its timeout or is killed reports
+`hook/completed failed` and the CLI **fails open** (it still raises the approval and still calls the dynamic tool),
+so picp's decline and ticket are the gate; X5 the `system` skills are `imagegen`, `openai-docs`, `review-agent`,
+`skill-creator`, `skill-installer`, and no instruction source loaded in an empty worktree; X9 the hook reaches the
+socket. **X8 (KC5):** an interrupted foreground `sleep` is listed by `thread/backgroundTerminals/list` with a
+`processId` but no `osPid`; `…/terminate` answers `{terminated: true}`, yet the `codex-linux-sandbox` wrapper (its own
+session) and its child outlive the stop and the app-server's exit. picp may kill only a pid the app-server reported or
+its own child, so it has nothing to kill: C1 must not start until that is resolved (a CLI fix, or a decision to end the
+app-server's descendants by pid). Not run: X3 (the `picp_planner` permission profile; C0 runs `sandbox: "read-only"`,
+so the artifact is not writable by the shell and the lexical Bash scope plus `codexSecretGuard` are the only bar on
+reading the Codex home), X6 beyond the read-back, X10. Fake fidelity gap: the fake always reports an `osPid`.

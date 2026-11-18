@@ -180,8 +180,8 @@ test("LS-3d (KC5): an interrupted sleep does not survive the stop", { skip, time
 	abort.abort();
 	const result = await running;
 	t.diagnostic(summary(result));
-	const survivors = execFileSync("ps", ["-eo", "args"], { encoding: "utf8" }).split("\n").filter((line) => line.includes(nonce));
-	t.diagnostic(`leftovers ${result.leftovers.length}, survivors ${survivors.length}`);
+	const survivors = execFileSync("ps", ["-eo", "pid,pgid,args"], { encoding: "utf8" }).split("\n").filter((line) => line.includes(nonce));
+	t.diagnostic(`leftovers ${JSON.stringify(result.leftovers)}, survivors ${JSON.stringify(survivors.map((line) => line.trim().split(/\s+/).slice(0, 2)))}`);
 	assert.equal(survivors.length, 0, "KC5 fired: a command process survived the stop");
 });
 

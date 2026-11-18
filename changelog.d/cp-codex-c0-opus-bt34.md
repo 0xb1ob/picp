@@ -1,0 +1,1 @@
+- Codex CLI driver slice C0 (unwired spike): `runCodexSpike` on `codex app-server` with a surface lockdown, a socket-backed PreToolUse hook, hook tickets, `untrusted` approvals, a dynamic `report_result`, resume-safe usage and a process stop sequence; `tests/fixtures/fake-codex.ts`, CX-0a…0h e2e and an opt-in live smoke. No behaviour change: nothing selects codex.

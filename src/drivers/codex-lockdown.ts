@@ -5,8 +5,8 @@
 import { resolve } from "node:path";
 import type { HooksListResponse, ListMcpServerStatusResponse, SkillsListResponse, ThreadStartResponse } from "./codex-protocol.ts";
 
-/** The `system`-scope skills codex 0.170.0 loads under SURFACE_FLAGS; empty until the live smoke names them (X5). */
-export const CODEX_BUILTIN_SKILLS: readonly string[] = [];
+/** The `system`-scope skills codex 0.170.0 loads under SURFACE_FLAGS, as the live smoke LS-2 listed them (X5). */
+export const CODEX_BUILTIN_SKILLS: readonly string[] = ["imagegen", "openai-docs", "review-agent", "skill-creator", "skill-installer"];
 
 export interface CodexSurface {
 	codexHome: { passed: string; reported: string };
