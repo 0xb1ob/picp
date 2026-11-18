@@ -252,10 +252,10 @@ function runtimeClosure(roots: readonly string[]): { modules: Set<string>; hits:
 }
 
 test("SDK-free ratchet: no run-time import from the Codex run core reaches the Agent SDK, zod or claude-spike.ts", () => {
-	assert.deepEqual(runtimeClosure(["src/drivers/claude-spike.ts"]).hits.length > 0, true, "negative control: claude-spike.ts imports the SDK");
+	assert.ok(runtimeClosure(["src/drivers/claude-spike.ts"]).hits.length > 0, "negative control: claude-spike.ts imports the SDK");
 	const { modules, hits } = runtimeClosure(SDK_FREE_ROOTS);
-	assert.ok(modules.has("src/drivers/native-guards.ts"), "the walk reached the guard chain");
 	assert.deepEqual(hits, [], "move the import behind an SDK-free module (src/drivers/native-guards.ts holds the guard chain)");
+	assert.ok(modules.has("src/drivers/native-guards.ts"), "the walk reached the guard chain");
 });
 
 // cp-txbb: cp-daemon is the one runtime; systemd is one of its backends, named in one module. cp-rrye: the
