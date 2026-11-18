@@ -309,6 +309,8 @@ interface C1Session {
 	extraArgs?: string[];
 	model?: string;
 	prompt: string;
+	/** Polled every 250 ms; once true the scope is killed (`rpc.kill`, as the run core's tripwire does). */
+	killWhen?: () => boolean;
 }
 
 /**
@@ -330,7 +332,8 @@ async function c1Session(s: { root: string; worktree: string; artifactPath: stri
 	const spawn = { hookCommand, profile, hookTimeoutSec: 5 };
 	const trust = await codexHookTrust(CODEX as string, [...codexSpawnArgs(spawn), ...extra], s.worktree, env, containment);
 	const rpc = spawnCodexRpc({ command: CODEX as string, args: [...codexSpawnArgs({ ...spawn, trust }), ...extra], cwd: s.worktree, env, containment });
-	const seen = { approvals: 0, approvalCwds: [] as string[], notes: [] as string[], hooks: [] as string[], commands: [] as string[] };
+	const seen = { approvals: 0, approvalCwds: [] as string[], notes: [] as string[], hooks: [] as string[], commands: [] as string[], killed: false };
+	let threadId: string | undefined;
 	rpc.onRequest(CODEX_METHODS.commandApproval, (params) => {
 		seen.approvals++;
 		seen.approvalCwds.push(String((params as { cwd?: unknown }).cwd));
@@ -339,12 +342,17 @@ async function c1Session(s: { root: string; worktree: string; artifactPath: stri
 	rpc.onRequest(CODEX_METHODS.fileChangeApproval, () => ({ decision: "decline" }));
 	const done = new Promise<void>((ok) => rpc.onNotification(({ method, params }) => {
 		seen.notes.push(`${method} ${JSON.stringify(params)}`);
-		const p = params as { item?: { type?: string; status?: string }; run?: { status?: string } };
+		const p = params as { item?: { type?: string; status?: string }; run?: { status?: string }; threadId?: string };
 		if (method === CODEX_METHODS.hookCompleted) seen.hooks.push(String(p.run?.status));
 		if (method === CODEX_METHODS.itemCompleted && p.item?.type === "commandExecution") seen.commands.push(String(p.item.status));
-		if (method === CODEX_METHODS.turnCompleted) ok();
+		if (method === CODEX_METHODS.turnCompleted && p.threadId === threadId) ok();
 	}));
-	let threadId: string | undefined;
+	const killed = (async () => {
+		if (options.killWhen === undefined) return new Promise<void>(() => {});
+		while (!options.killWhen()) await sleep(250);
+		seen.killed = true;
+		rpc.kill();
+	})();
 	try {
 		await rpc.request(CODEX_METHODS.initialize, { clientInfo: { name: "picp-smoke", version: "0" }, capabilities: { experimentalApi: true } });
 		rpc.notify(CODEX_METHODS.initialized);
@@ -369,7 +377,7 @@ async function c1Session(s: { root: string; worktree: string; artifactPath: stri
 			profile: { id: CODEX_PROFILE, writableRoots: profile.writableRoots }, thread: { response: thread, cwd: s.worktree },
 		});
 		await rpc.request(CODEX_METHODS.turnStart, { threadId, input: [{ type: "text", text: options.prompt }] });
-		await Promise.race([done, sleep(150_000)]);
+		await Promise.race([done, killed, sleep(150_000)]);
 		return { ...seen, features, config, lockdown, outside };
 	} finally {
 		if (threadId !== undefined) await rpc.request(CODEX_METHODS.threadDelete, { threadId }).catch(() => undefined);
@@ -389,15 +397,21 @@ test("LS-4 (KC2, live, one turn): a killed hook, every approval accepted, a read
 });
 
 /** LS-4o: the real CLI on the loopback mock model with a throwaway Codex home; no login, no token. */
-async function offline(t: TestContext, turns: MockModelTurn[], options: Omit<C1Session, "codexHome" | "prompt"> & { rules?: string }) {
+async function offline(
+	t: TestContext, turns: MockModelTurn[], options: Omit<C1Session, "codexHome" | "prompt"> & { rules?: string; route?: (body: string, root: string) => MockModelTurn | undefined },
+) {
 	const s = scratch(t);
 	const codexHome = join(s.root, "codex-home");
 	mkdirSync(join(codexHome, "rules"), { recursive: true, mode: 0o700 });
 	if (options.rules !== undefined) writeFileSync(join(codexHome, "rules", "default.rules"), options.rules);
-	const provider = await startCodexMockProvider(turns.map((turn) => JSON.parse(JSON.stringify(turn).replaceAll("@ROOT", s.root)) as MockModelTurn));
+	const route = options.route;
+	const provider = await startCodexMockProvider(
+		turns.map((turn) => JSON.parse(JSON.stringify(turn).replaceAll("@ROOT", s.root)) as MockModelTurn),
+		route === undefined ? undefined : (body) => route(body, s.root),
+	);
 	try {
-		const seen = await c1Session(s, { ...options, codexHome, prompt: "go", extraArgs: provider.config });
-		return { ...seen, requests: provider.requests, sent: JSON.stringify(provider.requests) };
+		const seen = await c1Session(s, { ...options, codexHome, prompt: "go", extraArgs: [...provider.config, ...(options.extraArgs ?? [])] });
+		return { ...seen, root: s.root, requests: provider.requests, sent: JSON.stringify(provider.requests) };
 	} finally {
 		await provider.close();
 	}
@@ -435,3 +449,37 @@ test("LS-4o-T/W (offline): a tty exec is refused, and an accepted command with a
 	t.diagnostic(`workdir: approvals ${workdir.approvals}, approval cwd outside ${workdir.approvalCwds.some((cwd) => cwd.endsWith("/outside"))} (E10), commands ${JSON.stringify(workdir.commands)}`);
 	assert.ok(!workdir.sent.includes(OUTSIDE_SENTINEL), "KC1 fired: a workdir outside the worktree read its file");
 });
+
+test("LS-4o-V2 (R2, KC2/KC5, offline): a sub-agent's commands run under picp's profile, and the scope kill ends it", { skip, timeout: 300_000 }, async (t) => {
+	// A dead hook lets `spawn_agent` through on a v2 model (R2). The sub-agent's outside read must fail in the kernel and
+	// its held `sleep` must die with the scope picp kills: either failing fires KC2. The second pass measures whether
+	// `agents.max_threads=1` (0 is rejected) stops the spawn; picp sets it only once that pass shows it does.
+	for (const extraArgs of [[], ["-c", "agents.max_threads=1"]]) {
+		await subAgentPass(t, extraArgs);
+	}
+});
+
+async function subAgentPass(t: TestContext, extraArgs: string[]): Promise<void> {
+	const n = nonce();
+	const js = (code: string): MockModelTurn => ({ custom: [{ name: "exec", input: `// @exec: {"yield_time_ms": 120000}\n${code}` }] });
+	const route = (body: string, root: string): MockModelTurn | undefined => {
+		if (/"text":\s*"go"/.test(body) || !body.includes("SUBAGENT-TASK")) return undefined;
+		const outputs = (body.match(/"type":\s*"custom_tool_call_output"/g) ?? []).length;
+		if (outputs === 0) return js(`text(JSON.stringify(await tools.exec_command({ cmd: "cat ${root}/outside/secret.txt" })));`);
+		if (outputs === 1) return js(`text(JSON.stringify(await tools.exec_command({ cmd: "sleep ${n}", yield_time_ms: 120000 })));`);
+		return { message: "sub done" };
+	};
+	const spawnAgent = { name: "spawn_agent", namespace: "collaboration", arguments: { task_name: "probe", message: "SUBAGENT-TASK", fork_turns: "none" } };
+	const waitAgent = { name: "wait_agent", namespace: "collaboration", arguments: { timeout_ms: 120_000 } };
+	const seen = await offline(t, [{ calls: [spawnAgent] }, { calls: [waitAgent] }], { hook: "allow", model: "gpt-6.2-sol", route, extraArgs, killWhen: () => pgrep(`^sleep ${n}`) > 0 });
+	const started = seen.notes.some((note) => note.includes('"type":"subAgentActivity"'));
+	const subRead = seen.notes.some((note) => note.startsWith(CODEX_METHODS.itemCompleted) && note.includes("outside/secret.txt"));
+	const pass = extraArgs.length === 0 ? "default" : extraArgs.join(" ");
+	t.diagnostic(`${pass}: sub-agent started ${started}, its outside read completed ${subRead}, approvals ${seen.approvals}, commands ${JSON.stringify(seen.commands)}, killed ${seen.killed}`);
+	if (extraArgs.length > 0 && !started) return t.diagnostic(`${pass} stops the spawn on this CLI: set it in codexSpawnArgs`);
+	assert.ok(started, "the sub-agent never started; R2 was not measured");
+	assert.ok(subRead, "the sub-agent never ran its outside read; R2 was not measured");
+	assert.ok(!seen.sent.includes(OUTSIDE_SENTINEL) && seen.notes.every((note) => !note.includes(OUTSIDE_SENTINEL)), "KC2 fired: a sub-agent read outside the profile");
+	assert.ok(seen.killed, "the sub-agent's sleep never started; the kill was not measured");
+	await assertNoSurvivor(t, seen.root, n, `sub-agent scope kill (${pass})`);
+}
