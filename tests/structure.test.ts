@@ -181,6 +181,8 @@ const R2_ALLOWED = [
 	"src/drivers/claude-worker.ts",
 	// C0 spike: its scratch HOME, TMPDIR and hook socket sit outside the worktree and the home.
 	"src/drivers/codex-spike.ts",
+	// C1a: the guard chain moved out of claude-spike.ts keeps its default secret paths under the home.
+	"src/drivers/native-guards.ts",
 	"src/home.ts",
 	"src/pi-compat-probe.ts",
 	"src/projects.ts",
@@ -221,6 +223,39 @@ test("storage ratchet R1/R1b/R2: home paths come from LAYOUT, outside-the-home c
 	assertRatchet("R1", filesHitting(R1, [...runtime, "tests"]), R1_ALLOWED);
 	assertRatchet("R1b", filesHitting(R1B, runtime, (rel) => rel === "src/contracts/layout.ts" || rel.startsWith("src/viewer/")), []);
 	assertRatchet("R2", filesHitting(R2, runtime), R2_ALLOWED);
+});
+
+// C1a: the Codex driver never loads the Agent SDK. Static run-time imports only (`import type` erases); a bare package
+// is not followed, so the closure is of this repo's modules plus the package names they import.
+const SDK_FREE_ROOTS = ["src/drivers/codex-spike.ts"];
+const SDK_ONLY = /^(?:@anthropic-ai\/claude-agent-sdk|zod)(?:\/|$)|\/claude-spike\.ts$/;
+const IMPORT = /^\s*(?:import|export)\s+(?!type\s)(?:[^"';]*?\sfrom\s+)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/gm;
+
+function runtimeImports(rel: string): string[] {
+	const text = readFileSync(join(REPO_ROOT, rel), "utf8");
+	return [...text.matchAll(IMPORT)].map((m) => (m[1] ?? m[2]) as string).map((spec) => (spec.startsWith(".") ? relative(REPO_ROOT, join(REPO_ROOT, rel, "..", spec)) : spec));
+}
+
+function runtimeClosure(roots: readonly string[]): { modules: Set<string>; hits: string[] } {
+	const modules = new Set<string>();
+	const hits: string[] = [];
+	const queue = [...roots];
+	for (let rel = queue.shift(); rel !== undefined; rel = queue.shift()) {
+		if (modules.has(rel)) continue;
+		modules.add(rel);
+		for (const spec of runtimeImports(rel)) {
+			if (SDK_ONLY.test(spec)) hits.push(`${rel} -> ${spec}`);
+			else if (/\.(?:ts|mjs)$/.test(spec) && !spec.startsWith("node:") && !spec.includes("node_modules")) queue.push(spec);
+		}
+	}
+	return { modules, hits };
+}
+
+test("SDK-free ratchet: no run-time import from the Codex run core reaches the Agent SDK, zod or claude-spike.ts", () => {
+	assert.deepEqual(runtimeClosure(["src/drivers/claude-spike.ts"]).hits.length > 0, true, "negative control: claude-spike.ts imports the SDK");
+	const { modules, hits } = runtimeClosure(SDK_FREE_ROOTS);
+	assert.ok(modules.has("src/drivers/native-guards.ts"), "the walk reached the guard chain");
+	assert.deepEqual(hits, [], "move the import behind an SDK-free module (src/drivers/native-guards.ts holds the guard chain)");
 });
 
 // cp-txbb: cp-daemon is the one runtime; systemd is one of its backends, named in one module. cp-rrye: the
