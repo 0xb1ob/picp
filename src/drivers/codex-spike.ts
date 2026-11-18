@@ -25,6 +25,7 @@ import { assertBriefIsSafe } from "../worker-manager.ts";
 import { secretPaths } from "./claude-bash-policy.ts";
 import { type NormalizedCall, type SpikeGuard, type SpikeJob, spikeGuards } from "./claude-spike.ts";
 import { CodexSpikeError, codexLoginRefusal, defaultCodexHome, resolveCodex } from "./codex-cli.ts";
+import { CONTAIN_ENV_KEY, type CodexContainment, resolveCodexContainment } from "./codex-containment.ts";
 import { type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
 import {
 	CODEX_METHODS as M,
@@ -80,7 +81,7 @@ export function buildCodexChildEnv(
 		if (value === undefined) delete env[key];
 		else env[key] = value;
 	}
-	const bad = Object.keys(env).find((key) => /^OPENAI_/.test(key) || (/^CODEX_/.test(key) && key !== "CODEX_HOME") || SECRET_ENV_NAME.test(key));
+	const bad = Object.keys(env).find((key) => /^OPENAI_/.test(key) || (/^CODEX_/.test(key) && key !== "CODEX_HOME") || SECRET_ENV_NAME.test(key) || CONTAIN_ENV_KEY.test(key));
 	if (bad !== undefined) throw new CodexSpikeError(`the Codex child env may not carry ${bad}`);
 	return env;
 }
@@ -131,8 +132,10 @@ async function closeRpc(rpc: CodexRpc): Promise<CodexRpcExit & { killedByDriver:
 }
 
 /** Phase 1 of the trust handshake: the key and hash the CLI lists for picp's one session-flags hook. */
-export async function codexHookTrust(codex: string, args: readonly string[], cwd: string, env: Record<string, string>): Promise<{ key: string; currentHash: string }> {
-	const rpc = spawnCodexRpc({ command: codex, args, cwd, env });
+export async function codexHookTrust(
+	codex: string, args: readonly string[], cwd: string, env: Record<string, string>, containment: CodexContainment,
+): Promise<{ key: string; currentHash: string }> {
+	const rpc = spawnCodexRpc({ command: codex, args, cwd, env, containment });
 	try {
 		await initialize(rpc);
 		const listed = await rpc.request<HooksListResponse>(M.hooksList, { cwds: [cwd] });
@@ -206,6 +209,8 @@ export interface CodexSpikeOptions {
 	/** `baseline` is the previous run's `totals`; without it the CLI's replayed total is the baseline. */
 	resume?: { threadId: string; baseline?: CodexTokenTotals };
 	deleteThread?: boolean;
+	/** The run's app-server pid, once its scope is up and it answered `initialize`. */
+	onAppServer?: (pid: number) => void;
 }
 
 export type CodexDenial = { tool: string; reason: string; layer: "hook" | "approval" | "tool_call" };
@@ -243,6 +248,7 @@ export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSp
 	if (options.job.role !== "planner") throw new CodexSpikeError(`the Codex spike runs the planner role only, not ${options.job.role}`);
 	const hostEnv = options.hostEnv ?? process.env;
 	const codex = resolveCodex(hostEnv);
+	const containment = resolveCodexContainment(hostEnv);
 	assertBriefIsSafe(options.prompt, "spike prompt");
 	const scratch = options.scratchDir ?? mkdtempSync(join(tmpdir(), "cp-codex-spike-"));
 	try {
@@ -252,7 +258,7 @@ export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSp
 		const codexHome = options.codexHome ?? defaultCodexHome();
 		const login = await codexLoginRefusal(codex.path, { codexHome, home: dirs.home, pathEnv: hostEnv.PATH ?? "" });
 		if (login !== undefined) throw Object.assign(new CodexSpikeError(login), { cli: "auth" as const });
-		return await new CodexRun(options, codex, hostEnv, codexHome, dirs, join(scratch, "hook.sock")).run();
+		return await new CodexRun(options, codex, hostEnv, codexHome, dirs, join(scratch, "hook.sock"), containment).run();
 	} finally {
 		if (options.scratchDir === undefined) rmSync(scratch, { recursive: true, force: true });
 	}
@@ -287,9 +293,14 @@ class CodexRun {
 	private readonly codexHome: string;
 	private readonly dirs: { home: string; tmp: string };
 	private readonly socket: string;
+	private readonly containment: CodexContainment;
 
-	constructor(options: CodexSpikeOptions, codex: { path: string; version: string }, hostEnv: NodeJS.ProcessEnv, codexHome: string, dirs: { home: string; tmp: string }, socket: string) {
+	constructor(
+		options: CodexSpikeOptions, codex: { path: string; version: string }, hostEnv: NodeJS.ProcessEnv, codexHome: string,
+		dirs: { home: string; tmp: string }, socket: string, containment: CodexContainment,
+	) {
 		[this.options, this.codex, this.hostEnv, this.codexHome, this.dirs, this.socket] = [options, codex, hostEnv, codexHome, dirs, socket];
+		this.containment = containment;
 		const job = { ...options.job, tmp: dirs.tmp };
 		const secrets = [...secretPaths(null, [userInfo().homedir]), resolve(codexHome)];
 		this.guards = [...spikeGuards(job, secrets, "planner", false), codexSecretGuard(resolve(codexHome)), ...(options.extraGuards ?? [])];
@@ -513,8 +524,8 @@ class CodexRun {
 			signal?.addEventListener("abort", () => abort.abort(), { once: true });
 		}
 		try {
-			const trust = await codexHookTrust(this.codex.path, codexSpawnArgs(spawn), job.worktree, env);
-			const rpc = spawnCodexRpc({ command: this.codex.path, args: codexSpawnArgs({ ...spawn, trust }), cwd: job.worktree, env });
+			const trust = await codexHookTrust(this.codex.path, codexSpawnArgs(spawn), job.worktree, env, this.containment);
+			const rpc = spawnCodexRpc({ command: this.codex.path, args: codexSpawnArgs({ ...spawn, trust }), cwd: job.worktree, env, containment: this.containment });
 			this.rpc = rpc;
 			rpc.onNotification(({ method, params }) => this.onNotification(method, params));
 			rpc.onRequest(M.commandApproval, (params) => this.approveCommand(params as CommandApprovalParams));
@@ -526,6 +537,8 @@ class CodexRun {
 			try {
 				const init = await initialize(rpc);
 				coldStartMs = Date.now() - this.started;
+				const pid = rpc.appServerPid();
+				if (pid !== undefined) this.options.onAppServer?.(pid);
 				const [account, hooks, mcp, skills] = await Promise.all([
 					rpc.request<GetAccountResponse>(M.accountRead, {}),
 					rpc.request<HooksListResponse>(M.hooksList, { cwds: [job.worktree] }),

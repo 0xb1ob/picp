@@ -10,6 +10,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
 import { isPidAlive } from "../../src/fleet.ts";
 import { codexHookTrust, codexSpawnArgs, type CodexSpikeResult } from "../../src/drivers/codex-spike.ts";
+import { resolveCodexContainment } from "../../src/drivers/codex-containment.ts";
 import { spawnCodexRpc } from "../../src/drivers/codex-rpc.ts";
 import {
 	AUTH_SENTINEL,
@@ -20,8 +21,10 @@ import {
 	fakeHooks,
 	fakePids,
 	fakeRpcMethods,
+	fakeScopes,
 	fakeSpawns,
 	fakeThreadTotal,
+	spawnSpikeDriver,
 } from "../harness/codex-mock.ts";
 
 const JOB = "cp-codex-spike-e2e";
@@ -104,8 +107,9 @@ test("CX-0c: a killed, timed-out or unreachable hook lets nothing run, and a fai
 	const control = fixture(t, { turns: [[{ kind: "shell", command: "echo control-ran" }]] });
 	const env = { PATH: `${join(control.root, "bin")}:${process.env.PATH ?? ""}`, HOME: control.root, CODEX_HOME: control.codexHome };
 	const args = { hookCommand: `'${process.execPath}' '${HOOK_FAIL}' exit1` };
-	const trust = await codexHookTrust("codex", codexSpawnArgs(args), control.worktree, env);
-	const rpc = spawnCodexRpc({ command: "codex", args: codexSpawnArgs({ ...args, trust }), cwd: control.worktree, env });
+	const containment = resolveCodexContainment(env);
+	const trust = await codexHookTrust("codex", codexSpawnArgs(args), control.worktree, env, containment);
+	const rpc = spawnCodexRpc({ command: "codex", args: codexSpawnArgs({ ...args, trust }), cwd: control.worktree, env, containment });
 	const completed = new Promise<void>((done) => rpc.onNotification(({ method }) => method === "turn/completed" && done()));
 	await rpc.request("initialize", { clientInfo: { name: "control", version: "0" } });
 	const thread = await rpc.request<{ thread: { id: string } }>("thread/start", { cwd: control.worktree, approvalPolicy: "never" });
@@ -223,5 +227,57 @@ test("CX-0h: an app-server that exits 0 on SIGTERM mid-turn is a stop, not a suc
 	assert.match(result.error ?? "", /exited before turn\/completed/);
 	const [pid] = fakePids(fx.stateDir);
 	assert.equal(isPidAlive(pid as number), false);
+	assertClean(fx, result);
+});
+
+test("CX-0i: the scope kill ends a command the CLI lists with no osPid, on a stop, an own exit and a killed driver", { timeout: 180_000 }, async (t) => {
+	// LS-3d on 0.170.0: the interrupted command has no osPid and `terminate` says true but kills nothing. Only the
+	// cgroup scope can end it; without the scope kill each of the three ends below leaves the sleep alive.
+	const knobs = { osPid: "omit", terminate: "lie" };
+	const turns = [[{ kind: "shell" as const, command: "sleep 300", background: true }, { kind: "hold" as const, marker: "held" }]];
+	const held = (fx: CodexFixture) => until(() => existsSync(join(fx.stateDir, "held")) && fakeRpcMethods(fx.stateDir).includes("thread/backgroundTerminals/list"), "the held turn");
+	const appServer = (fx: CodexFixture) => fakeSpawns(fx.stateDir).filter((each) => each.argv[0] === "app-server").at(-1)?.pid as number;
+	const allDead = async (fx: CodexFixture, what: string) => {
+		const pids = [...fakePids(fx.stateDir), ...fakeSpawns(fx.stateDir).filter((each) => each.argv[0] === "app-server").map((each) => each.pid)];
+		await until(() => !pids.some(isPidAlive), `${what}: every command and app-server pid gone`, 10_000);
+		await until(() => fakeScopes(fx.stateDir).filter((each) => each.killed !== undefined).length === fakeScopes(fx.stateDir).filter((each) => each.started).length, `${what}: every scope killed`, 10_000);
+	};
+
+	const stop = fixture(t, { knobs, turns });
+	const abort = new AbortController();
+	const running = stop.run({ signal: abort.signal });
+	await held(stop);
+	abort.abort();
+	const stopped = await running;
+	assert.equal(stopped.outcome, "interrupted", stopped.error);
+	assert.ok(stopped.leftovers.length > 0 && stopped.leftovers.every((each) => each.osPid === undefined && each.terminated), JSON.stringify(stopped.leftovers));
+	await allDead(stop, "stop");
+	assertClean(stop, stopped);
+
+	const own = fixture(t, { knobs, turns });
+	const ownRun = own.run();
+	await held(own);
+	process.kill(appServer(own), "SIGTERM");
+	const exited = await ownRun;
+	assert.equal(exited.outcome, "stopped");
+	assert.deepEqual(exited.exit, { code: 0, signal: null, killedByDriver: false });
+	await allDead(own, "own exit");
+
+	const killed = fixture(t, { knobs, turns });
+	const driver = spawnSpikeDriver(killed.options());
+	t.after(() => driver.kill("SIGKILL"));
+	await held(killed);
+	driver.kill("SIGKILL");
+	await allDead(killed, "driver SIGKILL");
+	assertClean(killed);
+});
+
+test("CX-0j: no user scope, no Codex: the run is refused before any app-server starts", { timeout: 60_000 }, async (t) => {
+	const fx = fixture(t, { knobs: { containment: "fail" }, turns: [[{ kind: "shell", command: "cat README.md" }]] });
+	const result = await fx.run();
+	assert.equal(result.outcome, "refused");
+	assert.match(result.error ?? "", /could not contain codex app-server.*Failed to connect to user scope bus.*never runs Codex uncontained/s);
+	assert.deepEqual(fakeSpawns(fx.stateDir).filter((each) => each.argv[0] === "app-server"), []);
+	assert.deepEqual(fakeExecuted(fx.stateDir), []);
 	assertClean(fx, result);
 });

@@ -1,8 +1,12 @@
 /**
- * One `codex app-server` child spoken to in LF-framed JSON lines. A bad line or the child's exit rejects every
- * pending request; a server request with no handler gets a `-32601` error reply, never silence and never an accept.
+ * One `codex app-server`, always inside its own systemd scope, spoken to in LF-framed JSON lines. A bad line, a refused
+ * scope or the exit rejects every pending request; an unhandled server request gets a `-32601` reply, never an accept.
  */
 import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import type { Readable } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
+import { type CodexContainment, containedCommand, containmentRefusal } from "./codex-containment.ts";
 import type { JsonRpcNotification, RequestId } from "./codex-protocol.ts";
 
 export const RPC_TIMEOUT_MS = 30_000;
@@ -16,23 +20,28 @@ export class CodexRpcError extends Error {
 }
 
 export interface CodexRpc {
+	/** The scope's own child (`systemd-run`, then its leader); the app-server is that leader's child. */
 	pid: number | undefined;
+	appServerPid(): number | undefined;
 	request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;
 	notify(method: string, params?: unknown): void;
 	onNotification(listener: (message: JsonRpcNotification) => void): void;
 	onRequest(method: string, handler: (params: unknown) => unknown): void;
 	stderrTail(): string;
 	closeInput(): void;
+	/** Kills the whole scope once it is contained; before that, signals the own child. */
 	kill(signal?: NodeJS.Signals): void;
 	exited: Promise<CodexRpcExit>;
 }
 
-export interface CodexRpcOptions { command: string; args: readonly string[]; cwd: string; env: Record<string, string> }
+export interface CodexRpcOptions { command: string; args: readonly string[]; cwd: string; env: Record<string, string>; containment: CodexContainment }
 
 interface Pending { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
 
+/** Starts the app-server inside its own scope; no request is written until the scope leader reports it contained. */
 export function spawnCodexRpc(options: CodexRpcOptions): CodexRpc {
-	const child = spawn(options.command, [...options.args], { cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"] });
+	const wrapped = containedCommand(options.containment, options.command, options.args, options.env);
+	const child = spawn(wrapped.command, wrapped.args, { cwd: options.cwd, env: wrapped.env, stdio: ["pipe", "pipe", "pipe", "pipe"] });
 	const pending = new Map<RequestId, Pending>();
 	const handlers = new Map<string, (params: unknown) => unknown>();
 	const listeners: Array<(message: JsonRpcNotification) => void> = [];
@@ -110,26 +119,68 @@ export function spawnCodexRpc(options: CodexRpcOptions): CodexRpc {
 		stderr = (stderr + chunk).slice(-STDERR_TAIL);
 	});
 	child.stdin.on("error", () => {});
+	let killFile: string | undefined;
+	let appServerPid: number | undefined;
+	let relayed: CodexRpcExit | undefined;
+	let contained: () => void = () => {};
+	const ready = new Promise<void>((ok) => (contained = ok));
+	const killScope = () => {
+		if (killFile === undefined) return;
+		try {
+			writeFileSync(killFile, "1");
+		} catch {
+			// The scope is already gone.
+		}
+	};
+	const lifeline = child.stdio[3] as Readable;
+	let lines = "";
+	lifeline.setEncoding("utf8");
+	lifeline.on("error", () => {});
+	lifeline.on("data", (chunk: string) => {
+		lines += chunk;
+		for (let cut = lines.indexOf("\n"); cut >= 0; cut = lines.indexOf("\n")) {
+			let message: { contained?: { killFile?: unknown; pid?: unknown }; refused?: unknown; exit?: CodexRpcExit };
+			try {
+				message = JSON.parse(lines.slice(0, cut)) as typeof message;
+			} catch {
+				message = { refused: "its scope leader sent a line that is not JSON" };
+			}
+			lines = lines.slice(cut + 1);
+			const file = message.contained?.killFile;
+			if (typeof file === "string" && file.endsWith(`/${wrapped.unit}/cgroup.kill`)) {
+				killFile = file;
+				if (typeof message.contained?.pid === "number") appServerPid = message.contained.pid;
+				contained();
+			} else if (message.exit !== undefined) relayed = message.exit;
+			else failAll(containmentRefusal(String(message.refused ?? "an unexpected scope report")));
+		}
+	});
+	const lifelineClosed = new Promise<void>((done) => lifeline.once("close", () => done()));
 	const exited = new Promise<CodexRpcExit>((done) => {
-		child.once("exit", (code, signal) => {
-			failAll(`codex app-server exited (code ${code}, signal ${signal})`);
-			done({ code, signal });
-		});
-		child.once("error", (error) => {
-			failAll(`codex app-server failed to run (${error.message})`);
-			done({ code: child.exitCode, signal: child.signalCode, error: error.message });
-		});
+		const finish = async (exit: CodexRpcExit) => {
+			await Promise.race([lifelineClosed, sleep(2_000, undefined, { ref: false })]);
+			killScope();
+			const seen = relayed ?? exit;
+			if (killFile === undefined) failAll(containmentRefusal(`the scope never started; exit code ${exit.code}, signal ${exit.signal}${stderr ? `; stderr: ${stderr.slice(-300)}` : ""}`));
+			failAll(`codex app-server exited (code ${seen.code}, signal ${seen.signal})`);
+			done(seen);
+		};
+		child.once("exit", (code, signal) => void finish({ code, signal }));
+		child.once("error", (error) => void finish({ code: child.exitCode, signal: child.signalCode, error: error.message }));
 	});
 
 	return {
 		pid: child.pid,
+		appServerPid: () => appServerPid,
 		request<T>(method: string, params?: unknown, timeoutMs = RPC_TIMEOUT_MS): Promise<T> {
 			if (broken !== undefined) return Promise.reject(new CodexRpcError(broken));
 			const id = nextId++;
 			return new Promise<T>((resolve, reject) => {
 				const timer = setTimeout(() => failAll(`${method} got no answer in ${timeoutMs} ms`), timeoutMs);
 				pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
-				if (!write({ id, method, ...(params === undefined ? {} : { params }) })) failAll(`codex app-server input is closed (${method})`);
+				void ready.then(() => {
+					if (pending.has(id) && !write({ id, method, ...(params === undefined ? {} : { params }) })) failAll(`codex app-server input is closed (${method})`);
+				});
 			});
 		},
 		notify(method, params) {
@@ -146,7 +197,8 @@ export function spawnCodexRpc(options: CodexRpcOptions): CodexRpc {
 			child.stdin.end();
 		},
 		kill(signal = "SIGTERM") {
-			child.kill(signal);
+			if (killFile === undefined) child.kill(signal);
+			else killScope();
 		},
 		exited,
 	};

@@ -13,8 +13,8 @@ export const CODEX_VERSION_TIMEOUT_MS = 10_000;
 const LOGIN_TIMEOUT_MS = 10_000;
 
 export class CodexSpikeError extends Error {
-	/** No CLI on PATH, one below the floor, or one that is not signed in. */
-	cli?: "missing" | "version" | "auth";
+	/** No CLI on PATH, one below the floor, one that is not signed in, or no OS containment for it. */
+	cli?: "missing" | "version" | "auth" | "containment";
 }
 
 export function parseCodexVersion(output: string): string | undefined {

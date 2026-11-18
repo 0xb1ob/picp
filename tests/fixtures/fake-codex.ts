@@ -19,7 +19,12 @@ interface Knobs {
 	version?: string;
 	loginStatus?: number;
 	trust?: "ignore";
-	terminate?: "noop";
+	/** `lie` answers `terminated: true` and kills nothing, as 0.170.0 did for an interrupted sandboxed command. */
+	terminate?: "noop" | "lie";
+	/** `omit` lists background terminals with no `osPid`, as the real CLI does. */
+	osPid?: "omit";
+	/** `fail`: the stub systemd-run cannot reach a user manager (tests/fixtures/fake-systemd-run.ts). */
+	containment?: "fail";
 	usage?: boolean;
 	account?: "none";
 	extraHooks?: number;
@@ -152,10 +157,11 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
 		return {};
 	}
 	if (method === "thread/backgroundTerminals/list") {
-		return { data: [...terminals].map(([processId, t]) => ({ processId, osPid: t.pid, command: t.command, cwd: thread?.cwd ?? "", itemId: t.itemId })) };
+		return { data: [...terminals].map(([processId, t]) => ({ processId, ...(knobs.osPid === "omit" ? {} : { osPid: t.pid }), command: t.command, cwd: thread?.cwd ?? "", itemId: t.itemId })) };
 	}
 	if (method === "thread/backgroundTerminals/terminate") {
 		const entry = terminals.get(String(params.processId));
+		if (entry !== undefined && knobs.terminate === "lie") return { terminated: true };
 		if (entry === undefined || knobs.terminate === "noop") return { terminated: false };
 		try {
 			process.kill(entry.pid, "SIGKILL");

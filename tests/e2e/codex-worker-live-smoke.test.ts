@@ -5,13 +5,14 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { whichAll } from "../../src/doctor.ts";
 import { codexLoginRefusal, defaultCodexHome } from "../../src/drivers/codex-cli.ts";
+import { resolveCodexContainment } from "../../src/drivers/codex-containment.ts";
 import { CODEX_METHODS } from "../../src/drivers/codex-protocol.ts";
 import { spawnCodexRpc } from "../../src/drivers/codex-rpc.ts";
 import {
@@ -23,6 +24,7 @@ import {
 	runCodexSpike,
 	SURFACE_FLAGS,
 } from "../../src/drivers/codex-spike.ts";
+import { spawnSpikeDriver } from "../harness/codex-mock.ts";
 import { LIVE_TESTS_ENABLED } from "../harness/index.ts";
 
 const CODEX = whichAll("codex", process.env)[0];
@@ -32,19 +34,60 @@ const BUDGET = Number(process.env.CP_LIVE_TOKEN_BUDGET ?? 400_000);
 const HOOK_FAIL = new URL("../fixtures/codex-hook-fail.mjs", import.meta.url).pathname;
 let spent = 0;
 
-/** A fresh scratch dir with an empty worktree and a pre-written artifact; removed after the case. */
+const pgrep = (pattern: string): number => {
+	try {
+		return Number(execFileSync("pgrep", ["-fc", pattern], { encoding: "utf8" }).trim());
+	} catch {
+		return 0;
+	}
+};
+/** Codex processes by pgrep: host-wide app-servers and sandboxes, and any whose argv names this case's scratch dir. */
+const codexCounts = (root: string) => ({ appServer: pgrep("app-server"), sandbox: pgrep("codex-linux-sandbox"), ours: pgrep(root) });
+
+/** A fresh scratch dir with an empty worktree and a pre-written artifact; removed after the case, survivors counted. */
 function scratch(t: TestContext) {
 	const root = mkdtempSync(join(tmpdir(), "cp-codex-live-"));
-	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const before = codexCounts(root);
+	t.after(async () => {
+		let after = codexCounts(root);
+		for (let i = 0; i < 50 && (after.ours > 0 || after.appServer > before.appServer || after.sandbox > before.sandbox); i++) {
+			await sleep(100);
+			after = codexCounts(root);
+		}
+		t.diagnostic(`pgrep codex before ${JSON.stringify(before)} after ${JSON.stringify(after)}`);
+		rmSync(root, { recursive: true, force: true });
+		assert.ok(after.ours === 0 && after.appServer <= before.appServer && after.sandbox <= before.sandbox, "KC5 fired: a codex process outlived the case");
+	});
 	const worktree = join(root, "work");
 	const artifactPath = join(root, "artifacts", "report.md");
 	for (const dir of [worktree, join(root, "artifacts"), join(root, "home"), join(root, "tmp")]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	writeFileSync(artifactPath, "# Live smoke\n\nok\n");
-	const run = (prompt: string, extra: Partial<CodexSpikeOptions> = {}) => runCodexSpike({
+	const options = (prompt: string, extra: Partial<CodexSpikeOptions> = {}): CodexSpikeOptions => ({
 		job: { job_id: JOB, kind: "research", role: "planner", delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
-		prompt, timeoutMs: 170_000, ...extra,
+		prompt, timeoutMs: 170_000, scratchDir: join(root, "spike"), ...extra,
 	});
-	return { root, worktree, artifactPath, run };
+	const run = (prompt: string, extra: Partial<CodexSpikeOptions> = {}) => runCodexSpike(options(prompt, extra));
+	return { root, worktree, artifactPath, run, options };
+}
+
+/** Deletes a thread a killed or self-exited run could not, through its own contained app-server. */
+async function deleteThread(root: string, worktree: string, threadId: string | undefined): Promise<void> {
+	if (threadId === undefined) return;
+	const env = buildCodexChildEnv({ home: join(root, "home"), tmp: join(root, "tmp") }, process.env, defaultCodexHome());
+	const rpc = spawnCodexRpc({ command: CODEX as string, args: ["app-server", "--strict-config", ...SURFACE_FLAGS], cwd: worktree, env, containment: resolveCodexContainment() });
+	try {
+		await rpc.request(CODEX_METHODS.initialize, { clientInfo: { name: "picp-smoke", version: "0" }, capabilities: { experimentalApi: true } });
+		rpc.notify(CODEX_METHODS.initialized);
+		await rpc.request(CODEX_METHODS.threadDelete, { threadId }).catch(() => undefined);
+	} finally {
+		rpc.closeInput();
+		await rpc.exited;
+	}
+}
+
+async function until(check: () => boolean, ms: number): Promise<boolean> {
+	for (const deadline = Date.now() + ms; Date.now() < deadline; await sleep(250)) if (check()) return true;
+	return check();
 }
 
 async function live(t: TestContext): Promise<boolean> {
@@ -78,7 +121,7 @@ test("LS-1/LS-2: system skills and the method names exist on the installed codex
 	if (!(await live(t))) return;
 	const s = scratch(t);
 	const env = buildCodexChildEnv({ home: join(s.root, "home"), tmp: join(s.root, "tmp") }, process.env, defaultCodexHome());
-	const rpc = spawnCodexRpc({ command: CODEX as string, args: ["app-server", "--strict-config", ...SURFACE_FLAGS], cwd: s.worktree, env });
+	const rpc = spawnCodexRpc({ command: CODEX as string, args: ["app-server", "--strict-config", ...SURFACE_FLAGS], cwd: s.worktree, env, containment: resolveCodexContainment() });
 	try {
 		await rpc.request(CODEX_METHODS.initialize, { clientInfo: { name: "picp-smoke", version: "0" }, capabilities: { experimentalApi: true } });
 		rpc.notify(CODEX_METHODS.initialized);
@@ -90,7 +133,7 @@ test("LS-1/LS-2: system skills and the method names exist on the installed codex
 		await rpc.exited;
 	}
 	const schema = join(s.root, "schema");
-	const dump = spawnCodexRpc({ command: CODEX as string, args: ["app-server", "generate-json-schema", "--experimental", "--out", schema], cwd: s.root, env: { PATH: process.env.PATH ?? "", HOME: join(s.root, "home") } });
+	const dump = spawnCodexRpc({ command: CODEX as string, args: ["app-server", "generate-json-schema", "--experimental", "--out", schema], cwd: s.root, env: { PATH: process.env.PATH ?? "", HOME: join(s.root, "home") }, containment: resolveCodexContainment() });
 	dump.closeInput();
 	assert.equal((await dump.exited).code, 0);
 	const files = readdirSync(join(schema, "v2")).join("\n");
@@ -126,8 +169,9 @@ test("LS-3b (KC2): with failing hooks and every approval declined, no command an
 		const target = join(s.root, `ls3b-${mode}`);
 		const env = buildCodexChildEnv({ home: join(s.root, "home"), tmp: join(s.root, "tmp") }, process.env, defaultCodexHome());
 		const spawn = { hookCommand: `'${process.execPath}' '${HOOK_FAIL}' ${mode}`, hookTimeoutSec: 5 };
-		const trust = await codexHookTrust(CODEX as string, codexSpawnArgs(spawn), s.worktree, env);
-		const rpc = spawnCodexRpc({ command: CODEX as string, args: codexSpawnArgs({ ...spawn, trust }), cwd: s.worktree, env });
+		const containment = resolveCodexContainment();
+		const trust = await codexHookTrust(CODEX as string, codexSpawnArgs(spawn), s.worktree, env, containment);
+		const rpc = spawnCodexRpc({ command: CODEX as string, args: codexSpawnArgs({ ...spawn, trust }), cwd: s.worktree, env, containment });
 		const seen = { approvals: 0, toolCalls: 0, ran: 0, hooks: [] as string[] };
 		rpc.onRequest(CODEX_METHODS.commandApproval, () => (seen.approvals++, { decision: "decline" }));
 		rpc.onRequest(CODEX_METHODS.toolCall, () => (seen.toolCalls++, { contentItems: [{ type: "inputText", text: "declined" }], success: false }));
@@ -170,19 +214,60 @@ test("LS-3c (KC4): a resumed run counts only its own usage", { skip, timeout: 40
 	}
 });
 
-test("LS-3d (KC5): an interrupted sleep does not survive the stop", { skip, timeout: 300_000 }, async (t) => {
+const nonce = () => `300.${process.pid}${Date.now() % 100_000}`;
+const SLEEP = (n: string) => `Run the shell command \`sleep ${n}\` and wait for it.`;
+
+/** KC5 after the case's own end: no sleep of this nonce, no sandbox and no app-server of this scratch dir. */
+async function assertNoSurvivor(t: TestContext, root: string, n: string, how: string): Promise<void> {
+	await until(() => pgrep(`sleep ${n}`) === 0 && pgrep(root) === 0, 10_000);
+	const left = { sleep: pgrep(`sleep ${n}`), ours: pgrep(root), sandbox: pgrep("codex-linux-sandbox") };
+	t.diagnostic(`${how}: survivors ${JSON.stringify(left)}`);
+	assert.deepEqual([left.sleep, left.ours], [0, 0], `KC5 fired (${how}): a command process survived`);
+}
+
+test("LS-3d (KC5): an interrupted sandboxed sleep does not survive the stop", { skip, timeout: 300_000 }, async (t) => {
 	if (!(await live(t))) return;
 	const s = scratch(t);
-	const nonce = `300.${process.pid}${Date.now() % 100_000}`;
+	const n = nonce();
 	const abort = new AbortController();
-	const running = s.run(`Run the shell command \`sleep ${nonce}\` and wait for it.`, { signal: abort.signal, deleteThread: true });
-	await sleep(40_000);
+	const running = s.run(SLEEP(n), { signal: abort.signal, deleteThread: true });
+	const started = await until(() => pgrep(`sleep ${n}`) > 0, 120_000);
 	abort.abort();
 	const result = await running;
+	t.diagnostic(`${summary(result)} leftovers ${JSON.stringify(result.leftovers)}`);
+	assert.ok(started, "the model never ran the sleep; KC5 was not measured");
+	await assertNoSurvivor(t, s.root, n, "stop");
+});
+
+test("LS-3d2 (KC5): a SIGKILLed driver leaves no app-server, sandbox or sleep", { skip, timeout: 300_000 }, async (t) => {
+	if (!(await live(t))) return;
+	const s = scratch(t);
+	const n = nonce();
+	const options = s.options(SLEEP(n));
+	const driver = spawnSpikeDriver(options);
+	t.after(() => driver.kill("SIGKILL"));
+	const started = await until(() => pgrep(`sleep ${n}`) > 0, 120_000);
+	driver.kill("SIGKILL");
+	assert.ok(started, "the model never ran the sleep; KC5 was not measured");
+	await assertNoSurvivor(t, s.root, n, "driver SIGKILL");
+	const seen = JSON.parse(readFileSync(join(options.job.runDir, "driver.json"), "utf8")) as { threadId?: string };
+	await deleteThread(s.root, s.worktree, seen.threadId);
+});
+
+test("LS-3d3 (KC5): an app-server that exits on its own mid-command leaves no sandbox or sleep", { skip, timeout: 300_000 }, async (t) => {
+	if (!(await live(t))) return;
+	const s = scratch(t);
+	const n = nonce();
+	let appServer: number | undefined;
+	const running = s.run(SLEEP(n), { onAppServer: (pid) => (appServer = pid) });
+	const started = await until(() => pgrep(`sleep ${n}`) > 0, 120_000);
+	if (appServer !== undefined) process.kill(appServer, "SIGTERM");
+	const result = await running;
 	t.diagnostic(summary(result));
-	const survivors = execFileSync("ps", ["-eo", "pid,pgid,args"], { encoding: "utf8" }).split("\n").filter((line) => line.includes(nonce));
-	t.diagnostic(`leftovers ${JSON.stringify(result.leftovers)}, survivors ${JSON.stringify(survivors.map((line) => line.trim().split(/\s+/).slice(0, 2)))}`);
-	assert.equal(survivors.length, 0, "KC5 fired: a command process survived the stop");
+	assert.ok(started && appServer !== undefined, "the model never ran the sleep; KC5 was not measured");
+	assert.equal(result.outcome, "stopped");
+	await assertNoSurvivor(t, s.root, n, "own exit");
+	await deleteThread(s.root, s.worktree, result.threadId);
 });
 
 test("LS-3e (KC6): without the surface flags the operator's own surface is refused before any turn", { skip, timeout: 200_000 }, async (t) => {
