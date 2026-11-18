@@ -91,10 +91,25 @@ export function codexGitDir(worktree: string): string | undefined {
 	}
 }
 
-/** Two levels above the real codex binary, unless it is a system install the `:minimal` root already reads. */
-export function codexReleaseDir(codexPath: string): string | undefined {
+/**
+ * Two levels above the real codex binary, unless it is a system install the `:minimal` root already reads. A dir that
+ * is or holds a home or the Codex home would open it to the sandbox, so it throws and the driver does not start.
+ */
+export function codexReleaseDir(codexPath: string, guarded: { homes: ReadonlyArray<string | undefined>; codexHome: string }): string | undefined {
 	const dir = dirname(dirname(realpathSync(codexPath)));
-	return ["/usr", "/opt"].some((root) => dir === root || dir.startsWith(`${root}${sep}`)) ? undefined : dir;
+	if (["/usr", "/opt"].some((root) => dir === root || dir.startsWith(`${root}${sep}`))) return undefined;
+	const real = (path: string) => {
+		try {
+			return realpathSync(path);
+		} catch {
+			return resolve(path);
+		}
+	};
+	const holds = (path: string) => real(path) === dir || real(path).startsWith(`${dir === sep ? "" : dir}${sep}`);
+	const home = guarded.homes.find((path): path is string => path !== undefined && path !== "" && holds(path));
+	const why = home !== undefined ? "is or holds the home" : holds(guarded.codexHome) ? "is or holds the Codex home" : undefined;
+	if (why === undefined) return dir;
+	throw Object.assign(new CodexSpikeError(`Refused: the codex release dir (two levels above the real codex binary) ${why}; picp will not open it to the sandbox. Reinstall the Codex CLI under its own release dir.`), { cli: "version" as const });
 }
 
 /** `codex app-server` argv: the reduced surface, the profile, picp's hook, and its trust entry when known. */

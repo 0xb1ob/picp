@@ -102,7 +102,7 @@ async function deleteThread(root: string, worktree: string, threadId: string | u
 
 /** C1's permission profile over a scratch case's own roots, as `runCodexSpike` builds it. */
 const c1Profile = (s: { root: string; worktree: string; artifactPath: string }) =>
-	codexPermissionProfile({ worktree: s.worktree, codexDir: codexReleaseDir(CODEX as string), artifactDir: dirname(s.artifactPath), tmp: join(s.root, "tmp") });
+	codexPermissionProfile({ worktree: s.worktree, codexDir: codexReleaseDir(CODEX as string, { homes: [process.env.HOME], codexHome: defaultCodexHome() }), artifactDir: dirname(s.artifactPath), tmp: join(s.root, "tmp") });
 
 async function until(check: () => boolean, ms: number): Promise<boolean> {
 	for (const deadline = Date.now() + ms; Date.now() < deadline; await sleep(250)) if (check()) return true;

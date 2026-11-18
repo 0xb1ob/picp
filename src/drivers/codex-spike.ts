@@ -243,7 +243,7 @@ export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSp
 		const login = await codexLoginRefusal(codex.path, { codexHome, home: dirs.home, pathEnv: hostEnv.PATH ?? "" });
 		if (login !== undefined) throw Object.assign(new CodexSpikeError(login), { cli: "auth" as const });
 		const roots = {
-			worktree: options.job.worktree, gitDir: codexGitDir(options.job.worktree), codexDir: codexReleaseDir(codex.path),
+			worktree: options.job.worktree, gitDir: codexGitDir(options.job.worktree), codexDir: codexReleaseDir(codex.path, { homes: [hostEnv.HOME, userInfo().homedir], codexHome }),
 			artifactDir: options.job.artifactPath === undefined ? undefined : dirname(options.job.artifactPath), tmp: dirs.tmp,
 		};
 		return await new CodexRun(options, codex, hostEnv, codexHome, dirs, join(scratch, "hook.sock"), containment, codexPermissionProfile(roots)).run();

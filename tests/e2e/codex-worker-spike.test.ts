@@ -4,7 +4,7 @@
  * untouched and no OPENAI_* or CODEX_* key but CODEX_HOME reached an app-server child.
  */
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
@@ -367,4 +367,28 @@ test("CX-1d: an enabled feature, a differing profile read-back or web search on 
 	assert.deepEqual(tools.map((each) => `${each.phase} ${each.name}${each.isError === undefined ? "" : ` ${each.isError}`}`),
 		["start bash", "end bash false", "start report_result", "end report_result false"]);
 	assertClean(fx, result);
+});
+
+test("CX-1k: a codex release dir that is or holds the home or the Codex home refuses the run before any app-server", { timeout: 120_000 }, async (t) => {
+	// The release dir is a sandbox read root; one that is the home, sits above it, or sits above the Codex home would open
+	// the operator's files (auth.json included) to every command. The fixture's release dir is `<root>/codex-release`.
+	const cases = [
+		["equals the home", (fx: CodexFixture) => ({ home: join(fx.bin, "..") })],
+		["holds the home", (fx: CodexFixture) => ({ home: join(fx.bin, "..", "home") })],
+		["holds the Codex home", (fx: CodexFixture) => ({ codexHome: join(fx.bin, "..", "codex-home") })],
+	] as const;
+	for (const [what, pick] of cases) {
+		const fx = fixture(t, { turns: [[{ kind: "shell", command: "cat README.md" }]] });
+		const { home, codexHome } = { home: undefined, codexHome: undefined, ...pick(fx) } as { home?: string; codexHome?: string };
+		for (const dir of [home, codexHome]) if (dir !== undefined) mkdirSync(dir, { recursive: true });
+		const base = fx.options();
+		await assert.rejects(
+			fx.run({ hostEnv: { ...base.hostEnv, ...(home === undefined ? {} : { HOME: home }) }, ...(codexHome === undefined ? {} : { codexHome }) }),
+			new RegExp(`the codex release dir \\(two levels above the real codex binary\\) is or holds the ${what.endsWith("Codex home") ? "Codex home" : "home"};`),
+			what,
+		);
+		assert.deepEqual(fakeSpawns(fx.stateDir).filter((each) => each.argv[0] === "app-server"), [], what);
+		assert.deepEqual(fakeExecuted(fx.stateDir), [], what);
+		assertClean(fx);
+	}
 });
