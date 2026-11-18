@@ -324,65 +324,72 @@ async function c1Session(s: { root: string; worktree: string; artifactPath: stri
 	const socket = join(s.root, "hook.sock");
 	const allow = createServer((conn) => conn.once("data", () => conn.end(`${JSON.stringify({ decision: "allow" })}\n`)));
 	await new Promise<void>((done) => allow.listen(socket, done));
-	const hookCommand = options.hook === "allow" ? codexHookCommand(socket) : `'${process.execPath}' '${HOOK_FAIL}' selfkill`;
-	const profile = c1Profile(s);
-	const env = buildCodexChildEnv({ home: join(s.root, "home"), tmp: join(s.root, "tmp") }, process.env, options.codexHome);
-	const containment = resolveCodexContainment();
-	const extra = options.extraArgs ?? [];
-	const spawn = { hookCommand, profile, hookTimeoutSec: 5 };
-	const trust = await codexHookTrust(CODEX as string, [...codexSpawnArgs(spawn), ...extra], s.worktree, env, containment);
-	const rpc = spawnCodexRpc({ command: CODEX as string, args: [...codexSpawnArgs({ ...spawn, trust }), ...extra], cwd: s.worktree, env, containment });
-	const seen = { approvals: 0, approvalCwds: [] as string[], notes: [] as string[], hooks: [] as string[], commands: [] as string[], killed: false };
-	let threadId: string | undefined;
-	rpc.onRequest(CODEX_METHODS.commandApproval, (params) => {
-		seen.approvals++;
-		seen.approvalCwds.push(String((params as { cwd?: unknown }).cwd));
-		return { decision: options.decline === true ? "decline" : "accept" };
-	});
-	rpc.onRequest(CODEX_METHODS.fileChangeApproval, () => ({ decision: "decline" }));
-	const done = new Promise<void>((ok) => rpc.onNotification(({ method, params }) => {
-		seen.notes.push(`${method} ${JSON.stringify(params)}`);
-		const p = params as { item?: { type?: string; status?: string }; run?: { status?: string }; threadId?: string };
-		if (method === CODEX_METHODS.hookCompleted) seen.hooks.push(String(p.run?.status));
-		if (method === CODEX_METHODS.itemCompleted && p.item?.type === "commandExecution") seen.commands.push(String(p.item.status));
-		if (method === CODEX_METHODS.turnCompleted && p.threadId === threadId) ok();
-	}));
-	const killed = (async () => {
-		if (options.killWhen === undefined) return new Promise<void>(() => {});
-		while (!options.killWhen()) await sleep(250);
-		seen.killed = true;
-		rpc.kill();
-	})();
+	let stop = false;
+	// The allow server and the kill poll end here whatever throws above the inner try, or the test file never exits.
 	try {
-		await rpc.request(CODEX_METHODS.initialize, { clientInfo: { name: "picp-smoke", version: "0" }, capabilities: { experimentalApi: true } });
-		rpc.notify(CODEX_METHODS.initialized);
-		const features: ExperimentalFeature[] = [];
-		for (let cursor: string | null | undefined; ; ) {
-			const page = await rpc.request<ExperimentalFeatureListResponse>(CODEX_METHODS.experimentalFeatureList, cursor ? { cursor } : {});
-			features.push(...page.data);
-			if (!page.nextCursor) break;
-			cursor = page.nextCursor;
-		}
-		const config = await rpc.request<ConfigReadResponse>(CODEX_METHODS.configRead, { cwd: s.worktree });
-		const [hooks, mcpServers, skills] = await Promise.all([
-			rpc.request<HooksListResponse>(CODEX_METHODS.hooksList, { cwds: [s.worktree] }),
-			rpc.request<ListMcpServerStatusResponse>(CODEX_METHODS.mcpServerStatusList, {}),
-			rpc.request<SkillsListResponse>(CODEX_METHODS.skillsList, { cwds: [s.worktree] }),
-		]);
-		const thread = await rpc.request<ThreadStartResponse>(CODEX_METHODS.threadStart, { cwd: s.worktree, approvalPolicy: "untrusted", ...(options.model ? { model: options.model } : {}) });
-		threadId = thread.thread.id;
-		// account: true stands in for a sign-in, which the mock-provider cases do not have; every other read-back is real.
-		const lockdown = codexLockdownVerdict({
-			codexHome: { passed: options.codexHome, reported: options.codexHome }, account: true, hookCommand, hooks, mcpServers, skills, features, config,
-			profile: { id: CODEX_PROFILE, writableRoots: profile.writableRoots }, thread: { response: thread, cwd: s.worktree },
+		const hookCommand = options.hook === "allow" ? codexHookCommand(socket) : `'${process.execPath}' '${HOOK_FAIL}' selfkill`;
+		const profile = c1Profile(s);
+		const env = buildCodexChildEnv({ home: join(s.root, "home"), tmp: join(s.root, "tmp") }, process.env, options.codexHome);
+		const containment = resolveCodexContainment();
+		const extra = options.extraArgs ?? [];
+		const spawn = { hookCommand, profile, hookTimeoutSec: 5 };
+		const trust = await codexHookTrust(CODEX as string, [...codexSpawnArgs(spawn), ...extra], s.worktree, env, containment);
+		const rpc = spawnCodexRpc({ command: CODEX as string, args: [...codexSpawnArgs({ ...spawn, trust }), ...extra], cwd: s.worktree, env, containment });
+		const seen = { approvals: 0, approvalCwds: [] as string[], notes: [] as string[], hooks: [] as string[], commands: [] as string[], killed: false };
+		let threadId: string | undefined;
+		rpc.onRequest(CODEX_METHODS.commandApproval, (params) => {
+			seen.approvals++;
+			seen.approvalCwds.push(String((params as { cwd?: unknown }).cwd));
+			return { decision: options.decline === true ? "decline" : "accept" };
 		});
-		await rpc.request(CODEX_METHODS.turnStart, { threadId, input: [{ type: "text", text: options.prompt }] });
-		await Promise.race([done, killed, sleep(150_000)]);
-		return { ...seen, features, config, lockdown, outside };
+		rpc.onRequest(CODEX_METHODS.fileChangeApproval, () => ({ decision: "decline" }));
+		const done = new Promise<void>((ok) => rpc.onNotification(({ method, params }) => {
+			seen.notes.push(`${method} ${JSON.stringify(params)}`);
+			const p = params as { item?: { type?: string; status?: string }; run?: { status?: string }; threadId?: string };
+			if (method === CODEX_METHODS.hookCompleted) seen.hooks.push(String(p.run?.status));
+			if (method === CODEX_METHODS.itemCompleted && p.item?.type === "commandExecution") seen.commands.push(String(p.item.status));
+			if (method === CODEX_METHODS.turnCompleted && p.threadId === threadId) ok();
+		}));
+		const killed = (async () => {
+			if (options.killWhen === undefined) return new Promise<void>(() => {});
+			while (!stop && !options.killWhen()) await sleep(250);
+			if (stop) return;
+			seen.killed = true;
+			rpc.kill();
+		})();
+		try {
+			await rpc.request(CODEX_METHODS.initialize, { clientInfo: { name: "picp-smoke", version: "0" }, capabilities: { experimentalApi: true } });
+			rpc.notify(CODEX_METHODS.initialized);
+			const features: ExperimentalFeature[] = [];
+			for (let cursor: string | null | undefined; ; ) {
+				const page = await rpc.request<ExperimentalFeatureListResponse>(CODEX_METHODS.experimentalFeatureList, cursor ? { cursor } : {});
+				features.push(...page.data);
+				if (!page.nextCursor) break;
+				cursor = page.nextCursor;
+			}
+			const config = await rpc.request<ConfigReadResponse>(CODEX_METHODS.configRead, { cwd: s.worktree });
+			const [hooks, mcpServers, skills] = await Promise.all([
+				rpc.request<HooksListResponse>(CODEX_METHODS.hooksList, { cwds: [s.worktree] }),
+				rpc.request<ListMcpServerStatusResponse>(CODEX_METHODS.mcpServerStatusList, {}),
+				rpc.request<SkillsListResponse>(CODEX_METHODS.skillsList, { cwds: [s.worktree] }),
+			]);
+			const thread = await rpc.request<ThreadStartResponse>(CODEX_METHODS.threadStart, { cwd: s.worktree, approvalPolicy: "untrusted", ...(options.model ? { model: options.model } : {}) });
+			threadId = thread.thread.id;
+			// account: true stands in for a sign-in, which the mock-provider cases do not have; every other read-back is real.
+			const lockdown = codexLockdownVerdict({
+				codexHome: { passed: options.codexHome, reported: options.codexHome }, account: true, hookCommand, hooks, mcpServers, skills, features, config,
+				profile: { id: CODEX_PROFILE, writableRoots: profile.writableRoots }, thread: { response: thread, cwd: s.worktree },
+			});
+			await rpc.request(CODEX_METHODS.turnStart, { threadId, input: [{ type: "text", text: options.prompt }] });
+			await Promise.race([done, killed, sleep(150_000, undefined, { ref: false })]);
+			return { ...seen, features, config, lockdown, outside };
+		} finally {
+			if (threadId !== undefined) await rpc.request(CODEX_METHODS.threadDelete, { threadId }).catch(() => undefined);
+			rpc.closeInput();
+			await rpc.exited;
+		}
 	} finally {
-		if (threadId !== undefined) await rpc.request(CODEX_METHODS.threadDelete, { threadId }).catch(() => undefined);
-		rpc.closeInput();
-		await rpc.exited;
+		stop = true;
 		allow.close();
 	}
 }
