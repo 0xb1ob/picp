@@ -214,7 +214,7 @@ export async function nativeReviveRefusal(home: string, jobId: string, sessionFi
 	}
 }
 
-/** After a native revive's spawn, picp's revive prompt (plus `note`) starts the resumed run; returns why it was refused. */
+/** After a native revive's spawn, picp's revive prompt (plus `note`) starts the run; returns why it was refused. */
 export async function sendNativeRevive(
 	worker: { send(message: string, mode: "prompt"): Promise<{ receipt: string; disposition?: string; error?: string }> },
 	record: (payload: Record<string, unknown>) => void,

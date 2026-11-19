@@ -135,7 +135,7 @@ function loadUserMcp(): { mcp: CodexMcpServers; section: string } {
 	return (userMcp = { mcp, section: claudeMcpSection(user, { path: mcp.path, servers }, "tools mcp__<server>__<tool>") });
 }
 
-/** The per-job skill dirs (C5) or operator read roots (C7b); anything but a JSON array of absolute paths stops the turn. */
+/** Per-job skill dirs (C5) or operator read roots (C7b); anything but a JSON array of absolute paths stops the turn. */
 function absoluteDirs(name: typeof SKILL_DIRS_ENV | typeof READ_ROOTS_ENV): string[] {
 	const raw = env[name];
 	if (!raw) return [];
@@ -227,7 +227,7 @@ async function turn(prompt: string): Promise<Turn> {
 		write({ type: "native_transcript", transcript_file: transcript.file });
 	}
 	transcript.prompt(prompt, resumed);
-	// Per turn, so a finished turn's abort never reaches the next; a stop or freeze under way keeps its aborted controller.
+	// Per turn, so a finished turn's abort never reaches the next; a stop or freeze keeps its aborted controller.
 	if (!stopping && !freezing) abort = new AbortController();
 	let result: CodexSpikeResult | undefined;
 	let cli: string | undefined;

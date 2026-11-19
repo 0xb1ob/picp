@@ -1496,3 +1496,57 @@ role, so with every switch off nothing writes a codex value (T-row and CX-off-2 
 | 1 | a forbidden action executes | unchanged (CX-1c, CX-1m); C7b adds CX-7b, CX-7d | held (LS-9o-P, LS-7o-M) |
 | 2 | a dead hook lets a tool have an effect outside the implementer's write set, or a picp tool run | unchanged (CX-1g, CX-1h); C7b adds CX-7c | held (LS-9o-R: one worktree file; LS-7o-D: no MCP tool call; R3 recorded) |
 | 6 | a differing profile or an extra surface is not refused | unchanged (CX-1d); C7b adds CX-7k | held (LS-9o-P read-back) |
+
+### C7b ship jobs (wired, shipped off)
+
+C7b is steps 4-5 of the C7 plan (cp-95u6): a `kind:ship` job with role implementer and delivery `pr` or `local`, dispatched
+with `driver: "codex"` (or matched by a rubric row naming it) and an explicit `openai/gpt-…` model, runs on
+`src/drivers/codex-worker.ts` when `data/native.json` `codex_ship` is on. Every switch still ships **off**: no
+`data/*.json` or `defaults/routing*.json` was edited and no shipped row names codex.
+
+| Piece | What happens |
+|---|---|
+| Selection | `codexClassOf` returns `codex_ship` for implementer ship; delivery other than `pr` or `local` is `ineligible`; switch off is `switch: the switch codex_ship is off` (an explicit dispatch refuses before any lease, a row falls back to pi) |
+| Spawn | `nativeSpawn` passes `CP_BASE_BRANCH` to codex as to Claude; the addendum is `CODEX_SHIP_ADDENDUM` (pr) or `CODEX_LOCAL_SHIP_ADDENDUM` (local): shell writes, no `apply_patch`, no git writes in the shell, `git_commit`, `git_merge`, `git_push`, `pr_create`, `head_sha`; the parent's `CP_CODEX_READ_ROOTS` passes to the worker |
+| Worker | the implementer's artifact path and `exclude_paths` as on Claude; no `mcp.json` read and no MCP server (R3, also refused in the run core); read roots vetted by `codexSkillRoots` (a home, the Codex home, the agent dir or the CP home refuses the run before any app-server); the session record keeps `base` |
+| Profile | the worktree entry is its realpath, so a symlinked worktree still holds its read-only `.git` and excluded entries (`codexExcludedRoots` returns realpaths) |
+| Git refusals | `codexGitGuard` runs first in the chain and also refuses `git fetch`, `pull` and `push` in the shell, naming `git_fetch` then `git_merge`, or `git_push`; `git_push`'s non-fast-forward refusal names `git_merge` for codex |
+| Checkpoint (Q2) | the freeze drain's `checkpoint` aborts the turn (the run's own stop sequence), then `codexCheckpointCommit`: hooks and fsmonitor off, a credential-free commit, the staged-path gate (a gated path stays uncommitted and is named in `native_checkpoint.excluded`), the best-effort push; then `agent_settled`. Idle, admission-pending and named-stop cases answer as the Claude worker does; research and reviewers stay refused by name |
+| Moved worktree (Q4) | a resume whose record names another `cwd` emits `native_session_moved`, deletes the old thread (`native_thread_deleted`), starts a fresh record and thread, and leads the prompt with the brief; research keeps the by-name refusal |
+| C1 (RR1) | `cp_revive` (a native continue is the same revive) of a codex implementer whose last `native_run` stopped `lockdown` names its uncommitted paths before the relaunch: in the plan and result text, in `worker_revived.unreviewed_changes`, and after picp's revive prompt, which tells the worker to inspect each before any `git_commit`. Nothing is committed by picp |
+| Persisted | `totals` in the session record is written for a ship job while `codex_ship` is on. `codexPersistRefusal` (queue, armed, rubric write, a row fallback's `requested_driver`) still keys on `codex_research` (C8) |
+
+**Shipped off (C7b).** With every switch off an explicit codex ship dispatch refuses before any lease naming
+`codex_ship`, and a codex `small-ship` row runs pi with `switch:` and no `requested_driver`; no `native-codex` record and
+no codex driver value is written to fleet, queue, armed, run log or `native.json`, so a build before C7b reads every
+file (CX-7i). Contract schemas and the golden are unchanged; `worker_revived` may carry `unreviewed_changes` and
+`native_checkpoint` may carry `excluded`, only in a home that ran a codex ship job. The flip, by hand: add the row (or
+dispatch explicitly), then turn on `codex_ship` (and `codex_research` for a queued or armed codex dispatch, C8).
+Recovery: `codex_ship` off (new jobs route pi; a live codex job still tears down and deletes its thread), or revert the
+PR; no data migration. Before a build older than C7b, tear down every codex ship job.
+
+**Live (LS-9, run once on 2026-11-19, codex-cli 0.170.0, operator's login, one turn).** The worker entry as a local
+ship implementer appended a line with the shell, committed through `git_commit` and reported `head_sha`: lockdown `ok`,
+51,082 tokens at cost 0, 0 `apply_patch` denials (RR5: none needed for this edit), the thread deleted, no surviving
+process.
+
+**Negative controls** (run once each and restored): N1 no excluded carve-outs: CX-7c fails on job B's file; N2 the
+`fileChange` approval answered `accept`: CX-7d fails on the dead-hook patch's file; N3 no staged-path gate: CX-7e fails
+on the first commit landing; N4 `git_commit` with no ticket check: CX-7c job D fails on HEAD (a killed hook's run is
+already killed before the CLI asks for the tool, so job C alone cannot reach the ticket); C1 no dirt lookup: CX-7c
+fails on the revive text.
+
+**Known limits.** The C7a limits stand (RR1-RR8). A ship job's queued or armed codex dispatch and a codex rubric write
+still need `codex_research` on (C8 owns the persist guard). A checkpoint during a merge commits the merge as the WIP.
+
+| KC | Criterion | CI (fake) | Real CLI |
+|---|---|---|---|
+| 1 | a forbidden action executes: a write to `.git`, an existing excluded path or outside; a push beyond `refs/heads/<job>`; an applied patch | held: CX-7a, CX-7b, CX-7d, CX-7e | held (LS-9o-P, LS-9) |
+| 2 | a dead hook lets a tool have an effect outside the implementer's write set, or a picp tool run | held: CX-7c (jobs A-C), CX-7c job D (no ticket) | held (LS-9o-R, LS-7o-D) |
+| 3 | `report_result` accepts another job | unchanged (CX-1a, same tool) | none |
+| 4 | usage counted twice across a checkpoint, resume or moved thread | held: CX-7f | unchanged (LS-3c) |
+| 5 | a process survives a stop, a checkpoint or teardown | held: CX-7a, CX-7c, CX-7f (every scope killed or collected) | held (LS-9: no survivor) |
+| 6 | a differing profile or an extra surface is not refused | held: CX-7k | held (LS-9o-P, LS-9) |
+
+Cases: `tests/e2e/codex-ship.test.ts` (CX-7a…7l, plus CX-7m, a unit check: no entry point leases a symlinked
+worktree) and the opt-in LS-9 in `tests/e2e/codex-worker-live-smoke.test.ts`.

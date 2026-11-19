@@ -198,6 +198,21 @@ test("CX-7c: a dead hook leaves one worktree file at most and runs no picp tool;
 	assert.equal(existsSync(join(h.worktree(b.id), ".github", "workflows", "r1.yml")), false, "B: the excluded dir held");
 	assert.equal(toolResults(h, "git_commit").filter((each) => each.ok).length, 0, "C: no picp tool ran");
 	assert.equal(h.ghCalls().filter((line) => line.startsWith("pr create")).length, 0, "C: no PR");
+	// D: the CLI calls picp's tools with no hook run at all (nothing killed): the missing ticket alone refuses each.
+	const d = await h.job("pr", "ship");
+	reset(h, { turns: [[
+		{ kind: "shell", command: "printf 'd\\n' > d.txt" },
+		{ kind: "tool", tool: "git_commit", arguments: { message: "no ticket" }, hook: "skip" },
+		{ kind: "tool", tool: "git_push", arguments: {}, hook: "skip" },
+		{ kind: "tool", tool: "pr_create", arguments: { title: "x", body: "y" }, hook: "skip" },
+		{ kind: "message", text: "Done." },
+	]] });
+	await h.b.closeParents();
+	await h.run([d.dispatch({ task: "Ship." }), h.waitEvent(d.id, RUN, 1)]);
+	assert.equal(h.git(d.id, "rev-parse", "HEAD"), main, "D: no commit without a ticket");
+	assert.equal(h.originRefs()[`refs/heads/${d.id}`], undefined, "D: no push");
+	for (const name of ["git_commit", "git_push", "pr_create"]) assert.match(toolResults(h, name)[0]?.text ?? "", /no hook verdict for this call/, name);
+	assert.equal(h.ghCalls().filter((line) => line.startsWith("pr create")).length, 0, "D: no PR");
 	// C1: the revive names A's dirt to the operator and to the worker before the relaunch, and commits nothing.
 	reset(h, { turns: [[{ kind: "message", text: "Inspecting r1.txt before anything else." }]] });
 	await h.b.closeParents();

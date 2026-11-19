@@ -24,7 +24,7 @@ export const FAKE_CODEX_REF = "openai/gpt-picp-fake";
 const FORGE_GH = fileURLToPath(new URL("../fixtures/forge-gh", import.meta.url));
 export const FORGE_PR_URL = "https://github.com/picp-e2e/forge/pull/7";
 
-/** `ship` (C7b): EXCLUDE_PATHS in the mandate defaults, a commit identity, and the scripted forge `gh` first on PATH. */
+/** `ship` (C7b): EXCLUDE_PATHS in the mandate defaults, a commit identity and the scripted forge `gh` first on PATH. */
 export async function codexWorkerHome(t: TestContext, opts: { native?: Record<string, unknown> | null; files?: Record<string, string>; ship?: boolean } = {}) {
 	const b = await dispatchS29(t, opts.files ? { files: opts.files } : {});
 	const nativeFile = join(b.home, LAYOUT.data, "native.json");

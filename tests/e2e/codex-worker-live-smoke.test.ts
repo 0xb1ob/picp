@@ -575,7 +575,7 @@ test("LS-4o-F (carry-in 1, KC1/KC2, offline): a patch is announced inProgress be
 const WORKER = new URL("../../src/drivers/codex-worker.ts", import.meta.url).pathname;
 
 /** C1b's worker entry as a child speaking pi RPC lines: one prompt, its events until it settles or exits, then stdin end. */
-async function workerRun(s: { root: string; worktree: string; artifactPath: string }, options: { codexHome: string; model?: string; prompt: string }) {
+async function workerRun(s: { root: string; worktree: string; artifactPath: string }, options: { codexHome: string; model?: string; prompt: string; env?: Record<string, string> }) {
 	const runDir = join(s.root, "worker", "runs", JOB);
 	mkdirSync(runDir, { recursive: true });
 	const systemPrompt = join(runDir, "codex-system-prompt.md");
@@ -583,7 +583,7 @@ async function workerRun(s: { root: string; worktree: string; artifactPath: stri
 	const env = {
 		PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`,
 		CP_JOB_ID: JOB, CP_RUN_DIR: runDir, CP_WORKTREE: s.worktree, CP_ARTIFACT_PATH: s.artifactPath, CP_KIND: "research", CP_ROLE: "planner", CP_DELIVERY: "local",
-		CP_CODEX_SYSTEM_PROMPT_FILE: systemPrompt, CP_CODEX_HOME: options.codexHome, ...(options.model ? { CP_CODEX_MODEL: options.model } : {}),
+		CP_CODEX_SYSTEM_PROMPT_FILE: systemPrompt, CP_CODEX_HOME: options.codexHome, ...(options.model ? { CP_CODEX_MODEL: options.model } : {}), ...options.env,
 	};
 	const child = spawn(process.execPath, [WORKER], { env, stdio: ["pipe", "pipe", "pipe"] });
 	const events: Array<Record<string, unknown>> = [];
@@ -948,4 +948,43 @@ test("LS-9o-W (C7a, offline): runCodexSpike as an implementer writes with the sh
 	} finally {
 		await provider.close();
 	}
+});
+
+// C7b LS-9 (RR5): one live turn on the worker entry as a local ship implementer, on the operator's login. It commits
+// through git_commit (the shell cannot write .git), reports head_sha at cost 0, and its thread is deleted.
+test("LS-9 (C7b, live, one turn): a local codex ship implementer appends a line with the shell, git_commit, reports head_sha", { skip, timeout: 300_000 }, async (t) => {
+	if (!(await live(t))) return;
+	const s = scratch(t);
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: s.worktree, encoding: "utf8" }).trim();
+	git("init", "-q", "-b", "main");
+	git("config", "user.name", "picp ls-9");
+	git("config", "user.email", "ls-9@test.invalid");
+	writeFileSync(join(s.worktree, "README.md"), "live smoke\n");
+	git("add", "-A");
+	git("commit", "-q", "-m", "base");
+	const base = git("rev-parse", "HEAD");
+	const cpHome = join(s.root, "cp-home");
+	mkdirSync(cpHome, { recursive: true, mode: 0o700 });
+	const report = `call report_result with job_id "${JOB}", kind "ship", status "done", summary "live ship ok", branch "${JOB}" and head_sha set to the output of \`git rev-parse HEAD\``;
+	const run = await workerRun(s, {
+		codexHome: defaultCodexHome(),
+		prompt: `Append the line "ls-9" to README.md with the shell (printf 'ls-9\\n' >> README.md). Then call git_commit with message "ls-9". Then ${report}. Then stop.`,
+		env: { CP_KIND: "ship", CP_ROLE: "implementer", CP_DELIVERY: "local", CP_HOME: cpHome, CP_ARTIFACT_PATH: "" },
+	});
+	const [native] = of(run.events, "native_run");
+	const [end] = of(run.events, "message_end");
+	const usage = (end?.message as { usage?: { totalTokens?: number; cost?: { total?: number } } } | undefined)?.usage;
+	spent += usage?.totalTokens ?? 0;
+	const patchDenials = ((native?.denied as string[] | undefined) ?? []).filter((line) => line.startsWith("apply_patch")).length;
+	t.diagnostic(`exit ${run.code}; lockdown ${native?.lockdown}; tokens ${usage?.totalTokens}; report ${native?.report}; apply_patch denials ${patchDenials}; denials ${native?.denials}`);
+	const deleted = await deleteCodexThread({ sessionFile: run.sessionFile });
+	rmSync(run.session.scratch_dir, { recursive: true, force: true });
+	assert.ok(spent <= BUDGET, `the live smoke passed its token budget (${spent} > ${BUDGET})`);
+	assert.equal(native?.lockdown, "ok");
+	assert.notEqual(git("rev-parse", "HEAD"), base, "committed");
+	assert.match(readFileSync(join(s.worktree, "README.md"), "utf8"), /ls-9/);
+	assert.ok(existsSync(join(run.runDir, "envelope.json")), "one envelope");
+	assert.ok((usage?.totalTokens ?? 0) > 0);
+	assert.equal(usage?.cost?.total, 0);
+	assert.equal(deleted.deleted, true, deleted.error);
 });

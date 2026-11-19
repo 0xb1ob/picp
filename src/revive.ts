@@ -294,7 +294,7 @@ async function lockdownChanges(home: string, record: FleetRecord, git: GitRunner
 const namedPaths = (paths: readonly string[]): string =>
 	paths.slice(0, UNREVIEWED_NAMED_MAX).join(", ") + (paths.length > UNREVIEWED_NAMED_MAX ? `, and ${paths.length - UNREVIEWED_NAMED_MAX} more` : "");
 
-/** What the revived Codex implementer is told after picp's revive prompt: the paths, and that none is committed unread. */
+/** What the revived Codex implementer is told after the revive prompt: the paths, and that none is committed unread. */
 export function unreviewedChangesNote(paths: readonly string[]): string {
 	return `picp killed your previous run (a lockdown stop: a dead hook or a tool it was never asked about), and these uncommitted ` +
 		`paths in the worktree were never reviewed: ${namedPaths(paths)}. Before anything else, inspect each one (git status, git diff, ` +
