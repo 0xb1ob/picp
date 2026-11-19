@@ -511,6 +511,42 @@ test("CX-7l: CP_CODEX_READ_ROOTS opens a tool dir read-only; one naming the CP h
 	assertClean(h);
 });
 
+// Scenario: a freeze after a C1 revive never commits the named dirt, and a local job's checkpoint pushes nothing
+//   Given a local codex ship job killed by a dead hook after an unasked `touch r1.txt`, then revived (r1.txt named)
+//   When /cp-drain freeze checkpoints the revived turn, Then the WIP commit holds wip.txt but not r1.txt, r1.txt stays
+//   untracked and is named in native_checkpoint and the answer, and origin has no job branch.
+test("CX-7n: a freeze after a C1 revive leaves the named dirt out of the WIP commit, names it, and a local job pushes nothing", { skip, timeout: 420_000 }, async (t) => {
+	const h = await shipHome(t);
+	const job = await h.job("local", "ship");
+	const main = h.originRefs()["refs/heads/main"];
+	reset(h, { knobs: { autoApprove: ["touch"], modelMs: 1_000 }, turns: [[{ kind: "shell", command: "touch r1.txt", hook: "kill" }, { kind: "shell", command: "touch later.txt" }]] });
+	await h.run([job.dispatch({ task: "Ship." })]);
+	await failed(h, job.id);
+	await h.b.closeParents();
+	await workerGone(h, job.id);
+	reset(h, { turns: [[{ kind: "shell", command: "printf 'half done\\n' > wip.txt" }, { kind: "hold", marker: "held" }]] });
+	rmSync(join(h.state, "held"), { force: true });
+	const gate = join(h.root, "parent-gate-7n");
+	const running = h.run([tool("cp_revive", { job_id: job.id, confirm: true }), tool("bash", { command: `for i in $(seq 1500); do [ -f "${gate}" ] && break; sleep 0.2; done` })]);
+	await waitFor(() => existsSync(join(h.state, "held")), Boolean, { timeoutMs: 120_000, what: "the revived turn is mid-turn" });
+	const parent = h.b.parents.at(-1)!;
+	const records = parent.records().length;
+	await parent.prompt("/cp-drain 120 freeze");
+	const ui = await parent.waitFor((r) => parent.records().indexOf(r) >= records && r.type === "extension_ui_request" && String(r.message).startsWith("DRAIN:"), 60_000);
+	await waitFor(() => ofType(h, job.id, "native_checkpoint"), (found) => found.length > 0, { timeoutMs: 60_000, what: "the checkpoint" });
+	const head = h.git(job.id, "rev-parse", "HEAD");
+	assert.ok(String((ui as Record<string, unknown>).message).includes(`freeze: ${job.id} checkpointed (native codex at ${head})`), String((ui as Record<string, unknown>).message));
+	assert.deepEqual(h.git(job.id, "show", "--name-only", "--format=", "HEAD").split("\n"), ["wip.txt"], "the WIP commit holds wip.txt only");
+	assert.equal(h.git(job.id, "rev-parse", "HEAD~1"), main);
+	assert.equal(h.git(job.id, "status", "--porcelain", "--untracked-files=all"), "?? r1.txt", "the named dirt stays uncommitted");
+	const checkpoint = ofType(h, job.id, "native_checkpoint")[0]?.payload as { head?: string; pushed?: boolean; unreviewed?: string[]; error?: string } | undefined;
+	assert.deepEqual([checkpoint?.head, checkpoint?.pushed, checkpoint?.unreviewed, checkpoint?.error], [head, false, ["r1.txt"], undefined], JSON.stringify(checkpoint));
+	assert.equal(h.originRefs()[`refs/heads/${job.id}`], undefined, "a local job's checkpoint pushes nothing");
+	writeFileSync(gate, "open\n");
+	await running;
+	assertClean(h);
+});
+
 // Scenario: a symlinked worktree still nests its read-only entries (item 4)
 //   Given a worktree reached through a symlink with an existing excluded dir, When the implementer profile is built,
 //   Then the worktree entry is its realpath, so `.git` and the excluded realpaths sit under it as read entries.

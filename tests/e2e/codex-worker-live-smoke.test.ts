@@ -950,11 +950,21 @@ test("LS-9o-W (C7a, offline): runCodexSpike as an implementer writes with the sh
 	}
 });
 
+/** Live picp-codex scopes in the user manager (another job's may run: compare with a count taken before). */
+function codexScopes(): number {
+	try {
+		return execFileSync("systemctl", ["--user", "list-units", "--type=scope", "--no-legend", "picp-codex-*"], { encoding: "utf8" }).trim().split("\n").filter(Boolean).length;
+	} catch {
+		return 0;
+	}
+}
+
 // C7b LS-9 (RR5): one live turn on the worker entry as a local ship implementer, on the operator's login. It commits
 // through git_commit (the shell cannot write .git), reports head_sha at cost 0, and its thread is deleted.
 test("LS-9 (C7b, live, one turn): a local codex ship implementer appends a line with the shell, git_commit, reports head_sha", { skip, timeout: 300_000 }, async (t) => {
 	if (!(await live(t))) return;
 	const s = scratch(t);
+	const before = { appServer: pgrep("app-server"), scopes: codexScopes() };
 	const git = (...args: string[]) => execFileSync("git", args, { cwd: s.worktree, encoding: "utf8" }).trim();
 	git("init", "-q", "-b", "main");
 	git("config", "user.name", "picp ls-9");
@@ -978,7 +988,11 @@ test("LS-9 (C7b, live, one turn): a local codex ship implementer appends a line 
 	const patchDenials = ((native?.denied as string[] | undefined) ?? []).filter((line) => line.startsWith("apply_patch")).length;
 	t.diagnostic(`exit ${run.code}; lockdown ${native?.lockdown}; tokens ${usage?.totalTokens}; report ${native?.report}; apply_patch denials ${patchDenials}; denials ${native?.denials}`);
 	const deleted = await deleteCodexThread({ sessionFile: run.sessionFile });
+	// KC5: no command under the worker's scratch dir, no new app-server and no picp-codex scope outlives the run.
+	const gone = await until(() => pgrep(run.session.scratch_dir) === 0 && pgrep("app-server") <= before.appServer && codexScopes() <= before.scopes, 10_000);
+	t.diagnostic(`survivors: commands ${pgrep(run.session.scratch_dir)}, app-servers ${pgrep("app-server")} (before ${before.appServer}), scopes ${codexScopes()} (before ${before.scopes})`);
 	rmSync(run.session.scratch_dir, { recursive: true, force: true });
+	assert.ok(gone, "KC5 fired: a command, app-server or picp-codex scope outlived the LS-9 run");
 	assert.ok(spent <= BUDGET, `the live smoke passed its token budget (${spent} > ${BUDGET})`);
 	assert.equal(native?.lockdown, "ok");
 	assert.notEqual(git("rev-parse", "HEAD"), base, "committed");

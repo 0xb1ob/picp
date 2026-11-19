@@ -226,11 +226,18 @@ export function checkpointCommit(worktree: string, branch: string, env: NodeJS.P
 	}
 }
 
+export interface CodexCheckpointOptions extends Omit<CommitOptions, "hooksOff"> {
+	/** C1: paths a lockdown-killed run left that the revive named; never WIP-committed, named in `unreviewed`. */
+	unreviewed?: readonly string[];
+	/** False for delivery local: the WIP commit stays local, as every other local-delivery write does. */
+	push: boolean;
+}
+
 /**
- * C7b (Q2): a Codex implementer's freeze checkpoint: hooks off, a credential-free commit, and the staged-path gate,
- * which leaves a gated path uncommitted and names it in `excluded`. Then the best-effort push, as `checkpointCommit`.
+ * C7b (Q2): a Codex implementer's freeze checkpoint: hooks off, a credential-free commit, the staged-path gate (a gated
+ * path stays uncommitted, named in `excluded`) and C1's unreviewed paths left out. Then the best-effort push.
  */
-export async function codexCheckpointCommit(job: ForgeJob, options: Omit<CommitOptions, "hooksOff">): Promise<Checkpoint & { excluded?: string[] }> {
+export async function codexCheckpointCommit(job: ForgeJob, options: CodexCheckpointOptions): Promise<Checkpoint & { excluded?: string[]; unreviewed?: string[] }> {
 	const bounded = (text: string) => text.slice(0, 500);
 	let identity: Record<string, string>;
 	try {
@@ -243,9 +250,12 @@ export async function codexCheckpointCommit(job: ForgeJob, options: Omit<CommitO
 	if (!added.ok) return { error: bounded(added.out) };
 	const hits = await gatedPaths(git, options.excluded);
 	if (typeof hits === "string") return { error: bounded(hits) };
-	if (hits.length > 0) {
-		const unstaged = await git(["reset", "-q", "--", ...hits]);
-		if (!unstaged.ok) return { error: bounded(`unstaging the excluded paths failed: ${unstaged.out}`) };
+	const staged = await git(["diff", "--cached", "--name-only", "--no-renames", "-z"]);
+	if (!staged.ok) return { error: bounded(staged.out) };
+	const held = staged.out.split("\0").filter((path) => (options.unreviewed ?? []).includes(path) && !hits.includes(path));
+	if (hits.length + held.length > 0) {
+		const unstaged = await git(["reset", "-q", "--", ...hits, ...held]);
+		if (!unstaged.ok) return { error: bounded(`unstaging the excluded or unreviewed paths failed: ${unstaged.out}`) };
 	}
 	const merging = (await git(["rev-parse", "-q", "--verify", "MERGE_HEAD"])).ok;
 	if (merging || !(await git(["diff", "--cached", "--quiet"])).ok) {
@@ -254,7 +264,10 @@ export async function codexCheckpointCommit(job: ForgeJob, options: Omit<CommitO
 	}
 	const head = await git(["rev-parse", "HEAD"]);
 	if (!head.ok) return { error: bounded(head.out) };
-	const excluded = hits.length > 0 ? { excluded: hits.slice(0, GATE_NAMES_MAX) } : {};
+	const excluded = {
+		...(hits.length > 0 ? { excluded: hits.slice(0, GATE_NAMES_MAX) } : {}), ...(held.length > 0 ? { unreviewed: held.slice(0, GATE_NAMES_MAX) } : {}),
+	};
+	if (!options.push) return { head: head.out, pushed: false, ...excluded };
 	const branch = job.job_id;
 	if (!branch || ["main", options.env.CP_BASE_BRANCH?.trim()].includes(branch)) return { head: head.out, pushed: false, error: `no job branch to push (${branch || "unset"})`, ...excluded };
 	const pushed = await exec("git", [...GIT_HOOKS_OFF, "push", "-q", "origin", `HEAD:refs/heads/${branch}`], job.worktree, options.env);

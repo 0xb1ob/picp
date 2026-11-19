@@ -10,7 +10,8 @@ import { createInterface } from "node:readline";
 import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
 import { agentDirOf, claudeMcpSection, type CodexMcpServers, codexMcpConfig, readUserMcpServers } from "../worker-mcp.ts";
 import {
-	assertNativeResume, claimFollowUps, enqueueFollowUp, NATIVE_CODEX_SCRATCH_PREFIX, NATIVE_CODEX_SESSION_FILE, type NativeSession, nativeSessionMoved,
+	assertNativeResume, claimFollowUps, enqueueFollowUp, NATIVE_CODEX_SCRATCH_PREFIX, NATIVE_CODEX_SESSION_FILE, NATIVE_UNREVIEWED_ENV, type NativeSession,
+	nativeSessionMoved,
 	readNativeSession, removeNativeScratch, returnClaim, settleClaim, writeNativeSession,
 } from "./claude-followup.ts";
 import { startIdlePrompt } from "./claude-lifecycle.ts";
@@ -318,12 +319,26 @@ async function endReviewerSession(): Promise<void> {
 	}
 }
 
+/** C1: the paths the revive named; unreadable means none could be named, so the checkpoint commits nothing at all. */
+function unreviewedPaths(): string[] {
+	const raw = env[NATIVE_UNREVIEWED_ENV];
+	if (!raw) return [];
+	try {
+		const paths = JSON.parse(raw) as unknown;
+		if (Array.isArray(paths) && paths.every((path) => typeof path === "string")) return paths as string[];
+	} catch {
+		// Falls through to the refusal below.
+	}
+	throw new Error(`${NATIVE_UNREVIEWED_ENV} is not a JSON array of paths; nothing was checkpointed`);
+}
+
 /** After a frozen turn: the WIP commit (hooks off, staged-path gate) and its replies; a named stop wins and is kept. */
 async function checkpointed(last: Turn | undefined): Promise<number> {
 	freezing = false;
 	const named = last?.stopped ? `the turn ended on a named stop (${last.stop}); nothing was checkpointed` : undefined;
 	const outcome = named !== undefined ? { error: named } : await codexCheckpointCommit(
-		{ job_id: jobId, worktree: env.CP_WORKTREE ?? "", runDir }, { excluded: implementerExclusions(env.CP_HOME ?? ""), env },
+		{ job_id: jobId, worktree: env.CP_WORKTREE ?? "", runDir },
+		{ excluded: implementerExclusions(env.CP_HOME ?? ""), env, unreviewed: unreviewedPaths(), push: env.CP_DELIVERY !== "local" },
 	);
 	if (named === undefined) write({ type: "native_checkpoint", ...outcome });
 	for (const answer of checkpointReplies.splice(0)) answer("head" in outcome ? { success: true, data: outcome } : { success: false, ...outcome });
