@@ -4,7 +4,7 @@
  * passed (C5). Any miss refuses. Counts only.
  */
 import { resolve } from "node:path";
-import { CODEX_OFF_FEATURES, CODEX_PROFILE } from "./codex-launch.ts";
+import { CODEX_IMPLEMENTER_PROFILE, CODEX_OFF_FEATURES, CODEX_PROFILE, type CodexAccess } from "./codex-launch.ts";
 import type {
 	ConfigReadResponse,
 	ExperimentalFeature,
@@ -28,8 +28,8 @@ export interface CodexSurface {
 	/** Every page of `experimentalFeature/list`. */
 	features: ExperimentalFeature[];
 	config: ConfigReadResponse;
-	/** What picp passed: the profile id and the roots it made writable. */
-	profile: { id: string; writableRoots: readonly string[] };
+	/** What picp passed: the profile id, the roots it made writable and (C7a, implementer) the map `config/read` returns. */
+	profile: { id: string; writableRoots: readonly string[]; filesystem?: Readonly<Record<string, CodexAccess>> };
 	/** Role features that must also read back off (C6: a reviewer's `shell_tool`). */
 	offFeatures?: readonly string[];
 	/** The MCP server names picp passed in the thread config (C5); the pre-thread list must still be empty. */
@@ -86,6 +86,7 @@ export function codexLockdownVerdict(surface: CodexSurface): CodexLockdown {
 		...(hook !== undefined && (!hook.enabled || hook.isManaged || hook.source !== "sessionFlags" || hook.eventName !== "preToolUse") ? ["picp's hook is not an enabled session-flag preToolUse hook"] : []),
 		...(hookErrors > 0 ? [`the hook listing has ${hookErrors} errors`] : []),
 		...webSearchReasons(surface.config),
+		...profileReasons(surface.config, surface.profile),
 		...threadReasons(surface.thread, surface.profile),
 	];
 	if (reasons.length === 0) return { verdict: "ok", seen, extra };
@@ -99,6 +100,21 @@ function webSearchReasons(config: ConfigReadResponse): string[] {
 	return value === "disabled" && origin === "sessionFlags" ? [] : [`hosted web search reads back ${String(value)} from ${String(origin)}, not disabled from picp's flag`];
 }
 
+/** C7a: the implementer's profile reads back from `config/read` entry by entry, every one from picp's session flags. */
+function profileReasons(config: ConfigReadResponse, profile: CodexSurface["profile"]): string[] {
+	const id = profile.id;
+	if (profile.filesystem === undefined) return id === CODEX_IMPLEMENTER_PROFILE ? [`picp passed no ${id} map to read back`] : [];
+	const fromFlags = (key: string) => config.origins[key]?.name.type === "sessionFlags";
+	const entry = (config.config.permissions as Record<string, { extends?: unknown; filesystem?: Record<string, unknown> } | undefined> | undefined)?.[id];
+	const { glob_scan_max_depth: _depth, ...read } = entry?.filesystem ?? {};
+	const passed = Object.entries(profile.filesystem);
+	const same = passed.length === Object.keys(read).length && passed.every(([path, mode]) => read[path] === mode && fromFlags(`permissions.${id}.filesystem.${path}`));
+	return [
+		...(config.config.default_permissions === id && fromFlags("default_permissions") ? [] : [`the default permissions do not read back as ${id} from picp's flag`]),
+		...(entry !== undefined && entry.extends == null && same ? [] : [`the ${id} filesystem map does not read back as picp passed it`]),
+	];
+}
+
 const sameRoots = (a: readonly string[], b: readonly string[]): boolean =>
 	JSON.stringify(a.map((path) => resolve(path)).sort()) === JSON.stringify(b.map((path) => resolve(path)).sort());
 
@@ -109,7 +125,7 @@ function threadReasons(thread: CodexSurface["thread"], profile: CodexSurface["pr
 	return [
 		...(response.approvalPolicy !== "untrusted" ? [`the thread's approval policy is ${String(response.approvalPolicy)}, not untrusted`] : []),
 		...(response.approvalsReviewer !== "user" ? ["the thread's approvals are not routed to picp"] : []),
-		...(response.activePermissionProfile?.id !== profile.id || profile.id !== CODEX_PROFILE ? [`the thread's permission profile is not ${CODEX_PROFILE}`] : []),
+		...(response.activePermissionProfile?.id !== profile.id || ![CODEX_PROFILE, CODEX_IMPLEMENTER_PROFILE].includes(profile.id) ? [`the thread's permission profile is not ${profile.id}`] : []),
 		...(sandbox?.type !== "workspaceWrite" || sandbox.networkAccess !== false || sandbox.excludeSlashTmp !== true || !sameRoots(sandbox.writableRoots ?? [], profile.writableRoots)
 			? ["the thread's sandbox is not picp's profile (its writable roots, network or tmp exclusion differ)"]
 			: []),

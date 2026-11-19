@@ -14,7 +14,7 @@ import { test, type TestContext } from "node:test";
 import { whichAll } from "../../src/doctor.ts";
 import { codexLoginRefusal, defaultCodexHome } from "../../src/drivers/codex-cli.ts";
 import { resolveCodexContainment } from "../../src/drivers/codex-containment.ts";
-import { CODEX_OFF_FEATURES, CODEX_PROFILE, codexReleaseDir } from "../../src/drivers/codex-launch.ts";
+import { CODEX_IMPLEMENTER_PROFILE, CODEX_OFF_FEATURES, CODEX_PROFILE, type CodexProfile, codexReleaseDir, codexRunRoots } from "../../src/drivers/codex-launch.ts";
 import { codexLockdownVerdict } from "../../src/drivers/codex-lockdown.ts";
 import {
 	CODEX_METHODS,
@@ -39,6 +39,7 @@ import {
 	runCodexSpike,
 } from "../../src/drivers/codex-spike.ts";
 import { deleteCodexThread, codexThreadDelete } from "../../src/drivers/codex-teardown.ts";
+import { codexMcpConfig } from "../../src/worker-mcp.ts";
 import { NATIVE_CODEX_SESSION_FILE, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { spawnSpikeDriver } from "../harness/codex-mock.ts";
 import { type MockModelTurn, startCodexMockProvider } from "../harness/codex-mock-provider.ts";
@@ -307,6 +308,10 @@ interface C1Session {
 	prompt: string;
 	/** Polled every 250 ms; once true the scope is killed (`rpc.kill`, as the run core's tripwire does). */
 	killWhen?: () => boolean;
+	/** C7a: another profile than C1's planner one (the lockdown then reads its filesystem map back). */
+	profile?: CodexProfile;
+	/** C7a: `thread/start` config (an MCP server); every MCP elicitation is declined, as picp does with no ticket. */
+	threadConfig?: Record<string, unknown>;
 }
 
 /**
@@ -325,20 +330,24 @@ async function c1Session(s: { root: string; worktree: string; artifactPath: stri
 	// The allow server and the kill poll end here whatever throws above the inner try, or the test file never exits.
 	try {
 		const hookCommand = options.hook === "selfkill" ? `'${process.execPath}' '${HOOK_FAIL}' selfkill` : codexHookCommand(socket);
-		const profile = c1Profile(s);
+		const profile = options.profile ?? c1Profile(s);
 		const env = buildCodexChildEnv({ home: join(s.root, "home"), tmp: join(s.root, "tmp") }, process.env, options.codexHome);
 		const containment = resolveCodexContainment();
 		const extra = options.extraArgs ?? [];
 		const spawn = { hookCommand, profile, hookTimeoutSec: 5 };
 		const trust = await codexHookTrust(CODEX as string, [...codexSpawnArgs(spawn), ...extra], s.worktree, env, containment);
 		const rpc = spawnCodexRpc({ command: CODEX as string, args: [...codexSpawnArgs({ ...spawn, trust }), ...extra], cwd: s.worktree, env, containment });
-		const seen = { approvals: 0, patchApprovals: 0, approvalCwds: [] as string[], notes: [] as string[], hooks: [] as string[], commands: [] as string[], killed: false };
+		const seen = {
+			approvals: 0, patchApprovals: 0, elicitations: 0, approvalCwds: [] as string[], approvalCommands: [] as string[], notes: [] as string[], hooks: [] as string[], commands: [] as string[], killed: false,
+		};
 		let threadId: string | undefined;
 		rpc.onRequest(CODEX_METHODS.commandApproval, (params) => {
 			seen.approvals++;
 			seen.approvalCwds.push(String((params as { cwd?: unknown }).cwd));
+			seen.approvalCommands.push(String((params as { command?: unknown }).command));
 			return { decision: options.decline === true ? "decline" : "accept" };
 		});
+		rpc.onRequest(CODEX_METHODS.mcpElicitation, () => (seen.elicitations++, { action: "decline" }));
 		rpc.onRequest(CODEX_METHODS.fileChangeApproval, () => {
 			seen.patchApprovals++;
 			seen.notes.push("approval fileChange");
@@ -374,12 +383,16 @@ async function c1Session(s: { root: string; worktree: string; artifactPath: stri
 				rpc.request<ListMcpServerStatusResponse>(CODEX_METHODS.mcpServerStatusList, {}),
 				rpc.request<SkillsListResponse>(CODEX_METHODS.skillsList, { cwds: [s.worktree] }),
 			]);
-			const thread = await rpc.request<ThreadStartResponse>(CODEX_METHODS.threadStart, { cwd: s.worktree, approvalPolicy: "untrusted", ...(options.model ? { model: options.model } : {}) });
+			const thread = await rpc.request<ThreadStartResponse>(CODEX_METHODS.threadStart, {
+				cwd: s.worktree, approvalPolicy: "untrusted", ...(options.model ? { model: options.model } : {}), ...(options.threadConfig ? { config: options.threadConfig } : {}),
+			});
 			threadId = thread.thread.id;
+			// As the run core does (C5 Q2): the thread-scoped list waits for the passed servers before the turn.
+			if (options.threadConfig !== undefined) await rpc.request<ListMcpServerStatusResponse>(CODEX_METHODS.mcpServerStatusList, { threadId, detail: "toolsAndAuthOnly" });
 			// account: true stands in for a sign-in, which the mock-provider cases do not have; every other read-back is real.
 			const lockdown = codexLockdownVerdict({
 				codexHome: { passed: options.codexHome, reported: options.codexHome }, account: true, hookCommand, hooks, mcpServers, skills, features, config,
-				profile: { id: CODEX_PROFILE, writableRoots: profile.writableRoots }, thread: { response: thread, cwd: s.worktree },
+				profile: { id: profile.id, writableRoots: profile.writableRoots, ...(profile.id === CODEX_PROFILE ? {} : { filesystem: profile.filesystem }) }, thread: { response: thread, cwd: s.worktree },
 			});
 			await rpc.request(CODEX_METHODS.turnStart, { threadId, input: [{ type: "text", text: options.prompt }] });
 			await Promise.race([done, killed, sleep(150_000, undefined, { ref: false })]);
@@ -406,7 +419,14 @@ test("LS-4 (KC2, live, one turn): a killed hook, every approval accepted, a read
 
 /** LS-4o: the real CLI on the loopback mock model with a throwaway Codex home; no login, no token. */
 async function offline(
-	t: TestContext, turns: MockModelTurn[], options: Omit<C1Session, "codexHome" | "prompt"> & { rules?: string; route?: (body: string, root: string) => MockModelTurn | undefined },
+	t: TestContext,
+	turns: MockModelTurn[],
+	options: Omit<C1Session, "codexHome" | "prompt"> & {
+		rules?: string;
+		route?: (body: string, root: string) => MockModelTurn | undefined;
+		/** C7a: the case's own setup in the fresh scratch dir, before the session (a repo, a profile, a thread config). */
+		prepare?: (s: ReturnType<typeof scratch>, codexHome: string) => Pick<C1Session, "profile" | "threadConfig">;
+	},
 ) {
 	const s = scratch(t);
 	const codexHome = join(s.root, "codex-home");
@@ -418,7 +438,7 @@ async function offline(
 		route === undefined ? undefined : (body) => route(body, s.root),
 	);
 	try {
-		const seen = await c1Session(s, { ...options, codexHome, prompt: "go", extraArgs: [...provider.config, ...(options.extraArgs ?? [])] });
+		const seen = await c1Session(s, { ...options, ...options.prepare?.(s, codexHome), codexHome, prompt: "go", extraArgs: [...provider.config, ...(options.extraArgs ?? [])] });
 		return { ...seen, root: s.root, requests: provider.requests, sent: JSON.stringify(provider.requests) };
 	} finally {
 		await provider.close();
@@ -698,6 +718,233 @@ test("LS-6o-S (C2b, offline): turn/steer while a model request is in flight is a
 		t.diagnostic(`U1: the steer text ${later ? "reached" : "did not reach"} a later model request`);
 		assert.ok(later, `the CLI acked the steer but sent it to no later request: ${provider.requests.length} requests`);
 		assert.equal(control.steer, undefined);
+	} finally {
+		await provider.close();
+	}
+});
+
+const PROBE_SERVER = new URL("../fixtures/mcp-probe-server.mjs", import.meta.url).pathname;
+
+/** Every tool name the CLI offered in one model request; a namespaced one as `<namespace>/<name>`. */
+function offeredTools(request: unknown): string[] {
+	const walk = (tools: unknown, ns?: string): string[] => (Array.isArray(tools) ? tools : []).flatMap((tool: { name?: unknown; tools?: unknown }) => {
+		const name = typeof tool?.name === "string" ? tool.name : undefined;
+		return [...(name === undefined ? [] : [ns === undefined ? name : `${ns}/${name}`]), ...walk(tool?.tools, name ?? ns)];
+	});
+	return walk((request as { tools?: unknown } | undefined)?.tools);
+}
+
+/** The model call for `tool` of `server` as the CLI offered it (U3); the `mcp__<server>__<tool>` guess when not offered. */
+function mcpCall(offered: readonly string[], server: string, tool: string, args: Record<string, unknown> = {}): MockModelTurn {
+	const own = (name: string) => name.endsWith(tool) && name.includes(server) && !name.includes(`${server}-x`) && !name.includes(`${server}_x`);
+	const hit = offered.find((name) => (server.endsWith("-x") ? name.endsWith(tool) && /probe[-_]x/.test(name) : own(name)));
+	if (hit === undefined) return { calls: [{ name: `mcp__${server}__${tool}`, arguments: args }] };
+	const cut = hit.lastIndexOf("/");
+	return { calls: [cut < 0 ? { name: hit, arguments: args } : { name: hit.slice(cut + 1), namespace: hit.slice(0, cut), arguments: args }] };
+}
+
+/** The probe and probe-x servers (C5's fixture), `delete_*` hidden on probe, logging to `log`. */
+const probeServers = (root: string, log: string) => codexMcpConfig({
+	path: join(root, "mcp.json"),
+	servers: {
+		probe: { command: process.execPath, args: [PROBE_SERVER, "probe", log], toolExposure: { "delete_*": "hidden" } },
+		"probe-x": { command: process.execPath, args: [PROBE_SERVER, "probe-x", log] },
+	},
+});
+const probeLog = (log: string): string[] => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []);
+
+test("LS-7o-M (C7 step 1, KC1/KC5, offline): through runCodexSpike, an MCP tool runs once, a hidden one is a hook denial, U3 printed", { skip, timeout: 300_000 }, async (t) => {
+	const s = scratch(t);
+	const log = join(s.root, "probe.log");
+	const mcp = probeServers(s.root, log);
+	let offered: string[] = [];
+	let n = 0;
+	const route = (body: string): MockModelTurn => {
+		n++;
+		if (n === 1) offered = offeredTools(JSON.parse(body));
+		if (n === 1) return mcpCall(offered, "probe", "read_thing");
+		if (n === 2) return mcpCall(offered, "probe", "delete_thing");
+		if (n === 3) return mcpCall(offered, "probe-x", "read_thing");
+		if (n === 4) return { calls: [{ name: "gh_read", arguments: { verb: "issue view", number: 1 } }] };
+		if (n === 5) return { calls: [{ name: "report_result", arguments: smokeReport(s.artifactPath) }] };
+		return { message: "done" };
+	};
+	const provider = await startCodexMockProvider([], route);
+	try {
+		// gh_read runs gh in this process: no GitHub credential, a scratch gh config, and no repository, so no network.
+		const hostEnv = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:GH_|GITHUB_)/.test(key))), GH_CONFIG_DIR: join(s.root, "gh") };
+		const result = await s.run("go", { codexHome: mockHome(s, provider.url), model: "gpt-picp-mock", mcp, hostEnv, deleteThread: true });
+		const lines = probeLog(log);
+		const hookNames = result.denials.map((d) => d.tool);
+		t.diagnostic(summary(result));
+		t.diagnostic(`U3: offered MCP names ${JSON.stringify(offered.filter((name) => /probe|mcp/.test(name)))}; denied ${JSON.stringify(hookNames)}; probe-x routed ${lines.includes("call probe-x read_thing")}`);
+		t.diagnostic(`ticketMatch ${JSON.stringify(result.ticketMatch)}; probe log ${JSON.stringify(lines.filter((line) => !line.startsWith("start")))}`);
+		assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal);
+		assert.equal(result.bypass, undefined, `the run was killed as a bypass: ${result.error}`);
+		assert.equal(result.outcome, "completed", result.error);
+		assert.equal(lines.filter((line) => line === "call probe read_thing").length, 1, "KC1: the visible tool did not run exactly once");
+		assert.ok(!lines.includes("call probe delete_thing"), "KC1 fired: the hidden tool reached the server");
+		assert.ok(result.denials.some((d) => d.layer === "hook" && /delete_thing is hidden/.test(d.reason)), "the hidden call was not a hook denial");
+		assert.equal(result.report?.job_id, JOB);
+	} finally {
+		await provider.close();
+	}
+});
+
+test("LS-7o-D (C7 step 1, KC2/R3, offline): a killed hook and declined elicitations: no MCP tool call reaches the server; R3 printed", { skip, timeout: 300_000 }, async (t) => {
+	let offered: string[] = [];
+	let n = 0;
+	const route = (body: string, root: string): MockModelTurn => {
+		n++;
+		if (n === 1) offered = offeredTools(JSON.parse(body));
+		if (n === 1) return mcpCall(offered, "probe", "read_thing");
+		if (n === 2) return mcpCall(offered, "probe", "plain");
+		if (n === 3) {
+			const read = offered.find((name) => name.endsWith("read_mcp_resource")) ?? "read_mcp_resource";
+			const cut = read.lastIndexOf("/");
+			const args = { server: "probe", uri: "probe://one" };
+			return { calls: [cut < 0 ? { name: read, arguments: args } : { name: read.slice(cut + 1), namespace: read.slice(0, cut), arguments: args }] };
+		}
+		void root;
+		return { message: "done" };
+	};
+	let log = "";
+	const seen = await offline(t, [], {
+		hook: "selfkill", decline: true, route, model: "gpt-picp-mock",
+		prepare: (s) => {
+			log = join(s.root, "probe.log");
+			return { threadConfig: probeServers(s.root, log).config };
+		},
+	});
+	const lines = probeLog(log);
+	t.diagnostic(`hooks ${JSON.stringify(seen.hooks)}; elicitations ${seen.elicitations}; offered ${JSON.stringify(offered.filter((name) => /probe|mcp/.test(name)))}`);
+	const items = seen.notes.filter((note) => note.startsWith("item/completed") && note.includes('"type":"mcpToolCall"')).map((note) => /"status":"(\w+)"/.exec(note)?.[1]);
+	t.diagnostic(`mcpToolCall items ${JSON.stringify(items)}; approvals ${seen.approvals}`);
+	t.diagnostic(`R3: the resource read ${lines.some((line) => line.startsWith("resource ")) ? "ran" : "did not run"}; probe log ${JSON.stringify(lines.filter((line) => !line.startsWith("start")))}`);
+	assert.ok(offered.some((name) => name.endsWith("read_thing")), "the CLI offered no probe tool, so this case measured nothing");
+	assert.ok(seen.hooks.length >= 3 && seen.hooks.every((status) => status !== "completed"), "the hook did not fail on each call, so this case measured nothing");
+	assert.deepEqual(lines.filter((line) => line.startsWith("call ")), [], "KC2 fired: an MCP tool call reached the server with a dead hook (C7 stops)");
+});
+
+const SHIP_EXCLUDED = ["excluded/", "**/.env*"];
+
+/** A scratch repo whose linked worktree is the case's worktree (as a lease is), with an excluded dir and an env file. */
+function shipRepo(s: { root: string; worktree: string }): { common: string; head: string } {
+	const repo = join(s.root, "repo");
+	const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+	mkdirSync(join(repo, "excluded"), { recursive: true });
+	git(repo, "init", "-q", "-b", "main");
+	git(repo, "config", "user.name", "cp live");
+	git(repo, "config", "user.email", "cp-live@test.invalid");
+	writeFileSync(join(repo, "README.md"), "ship smoke\n");
+	writeFileSync(join(repo, "excluded", "keep.txt"), "KEEP-SENTINEL\n");
+	writeFileSync(join(repo, ".env.local"), "ENV-SENTINEL\n");
+	git(repo, "add", "-A");
+	git(repo, "commit", "-q", "-m", "init");
+	rmSync(s.worktree, { recursive: true, force: true });
+	git(repo, "worktree", "add", "-q", "-b", JOB, s.worktree);
+	return { common: join(repo, ".git"), head: git(s.worktree, "rev-parse", "HEAD") };
+}
+
+const shipProfile = (s: { root: string; worktree: string; artifactPath: string }, codexHome: string): CodexProfile => codexPermissionProfile(codexRunRoots({
+	job: { role: "implementer", worktree: s.worktree, artifactPath: s.artifactPath, excludePaths: SHIP_EXCLUDED }, codexPath: CODEX as string, codexHome, hostEnv: process.env, tmp: join(s.root, "tmp"),
+}));
+const gitIn = (cwd: string, ...args: string[]): string => {
+	try {
+		return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+	} catch {
+		return "";
+	}
+};
+
+test("LS-9o-P (C7a, KC1/KC6, offline): picp_implementer writes the worktree only; .git, the common dir and excluded paths stay read-only", { skip, timeout: 400_000 }, async (t) => {
+	let repo = { common: "", head: "" };
+	let profile: CodexProfile | undefined;
+	const cmds = [
+		"echo hi > new.txt", "mkdir sub", "echo x > excluded/a.txt", "rm excluded/keep.txt", "cat excluded/keep.txt", "echo x > .env.local", "echo x > @ROOT/outside/w.txt",
+		"git status --porcelain", "git add -A", "git commit -q -m x", "echo x > @ROOT/repo/.git/hooks/pre-commit", "git config user.foo bar", "echo x >> .git",
+	];
+	const seen = await offline(t, [...cmds.map((cmd) => exec({ cmd })), { message: "done" }], {
+		hook: "allow",
+		prepare: (s, codexHome) => {
+			repo = shipRepo(s);
+			profile = shipProfile(s, codexHome);
+			return { profile };
+		},
+	});
+	const work = join(seen.root, "work");
+	t.diagnostic(`profile ${profile?.id}; lockdown ${seen.lockdown.verdict} ${seen.lockdown.refusal ?? ""}; approvals ${seen.approvals}; commands ${JSON.stringify(seen.commands)}`);
+	t.diagnostic(`read-only answers ${(seen.sent.match(/Read-only file system/g) ?? []).length}; busy answers ${(seen.sent.match(/Device or resource busy/g) ?? []).length}`);
+	assert.equal(profile?.id, CODEX_IMPLEMENTER_PROFILE);
+	assert.equal(seen.lockdown.verdict, "ok", seen.lockdown.refusal);
+	assert.equal(seen.approvals, cmds.length, "every command asked once and was accepted, so only the kernel stood");
+	assert.ok(existsSync(join(work, "new.txt")) && existsSync(join(work, "sub")), "the worktree is not writable");
+	assert.ok(seen.sent.includes("KEEP-SENTINEL"), "the excluded path is not readable");
+	assert.ok(seen.sent.includes("?? new.txt"), "git status did not run in the sandbox");
+	assert.ok(seen.sent.includes("Read-only file system"));
+	assert.equal(existsSync(join(work, "excluded", "a.txt")), false, "KC1 fired: a write into an existing excluded dir");
+	assert.equal(readFileSync(join(work, "excluded", "keep.txt"), "utf8"), "KEEP-SENTINEL\n", "KC1 fired: an excluded file was removed");
+	assert.equal(readFileSync(join(work, ".env.local"), "utf8"), "ENV-SENTINEL\n", "KC1 fired: an excluded file was written");
+	assert.equal(existsSync(join(seen.root, "outside", "w.txt")), false, "KC1 fired: a write outside the worktree");
+	assert.equal(existsSync(join(repo.common, "hooks", "pre-commit")), false, "KC1 fired: a hook was written");
+	assert.equal(gitIn(work, "config", "--get", "user.foo"), "", "KC1 fired: git config was written");
+	assert.match(readFileSync(join(work, ".git"), "utf8"), /^gitdir: /, "KC1 fired: .git was written");
+	assert.equal(gitIn(work, "rev-parse", "HEAD"), repo.head, "KC1 fired: HEAD moved");
+	assert.equal(gitIn(work, "diff", "--cached", "--name-only"), "", "KC1 fired: the index was written");
+});
+
+test("LS-9o-R (C7a R1, KC2, offline): a killed hook, allow rules for touch and git, approvals declined: one worktree file, nothing else", { skip, timeout: 400_000 }, async (t) => {
+	let repo = { common: "", head: "" };
+	const cmds = ["touch r1.txt", "touch excluded/r1.txt", "git config user.foo bar", "git commit --allow-empty -q -m r1"];
+	const seen = await offline(t, [...cmds.map((cmd) => exec({ cmd })), { message: "done" }], {
+		hook: "selfkill", decline: true, rules: 'prefix_rule(pattern=["touch"], decision="allow")\nprefix_rule(pattern=["git"], decision="allow")\n',
+		prepare: (s, codexHome) => {
+			repo = shipRepo(s);
+			return { profile: shipProfile(s, codexHome) };
+		},
+	});
+	const work = join(seen.root, "work");
+	const status = gitIn(work, "status", "--porcelain");
+	t.diagnostic(`hooks ${JSON.stringify(seen.hooks)}; approvals ${JSON.stringify(seen.approvalCommands)}; commands ${JSON.stringify(seen.commands)}; status ${JSON.stringify(status)}`);
+	assert.ok(seen.hooks.length > 0 && seen.hooks.every((each) => each !== "completed"), "the hook did not fail, so this case measured nothing");
+	assert.ok(!seen.approvalCommands.some((command) => /\btouch\b/.test(command)), "the touch rule did not auto-approve, so R1 was not measured");
+	assert.equal(status, "?? r1.txt", "KC2 fired: a dead hook let a command change more than one worktree file (C7 stops; C2)");
+	assert.equal(existsSync(join(work, "excluded", "r1.txt")), false, "KC2 fired: a rule-approved write into an excluded path");
+	assert.equal(gitIn(work, "config", "--get", "user.foo"), "", "KC2 fired: git config was written");
+	assert.equal(gitIn(work, "rev-parse", "HEAD"), repo.head, "KC2 fired: HEAD moved");
+});
+
+test("LS-9o-W (C7a, offline): runCodexSpike as an implementer writes with the shell, commits through git_commit and reports its head", { skip, timeout: 300_000 }, async (t) => {
+	const s = scratch(t);
+	const repo = shipRepo(s);
+	const durations: Record<string, number> = {};
+	const started = new Map<string, number>();
+	let n = 0;
+	const route = (body: string): MockModelTurn => {
+		n++;
+		if (n === 1) return exec({ cmd: "printf 'w9\\n' > w.txt" });
+		if (n === 2) return { calls: [{ name: "git_commit", arguments: { message: "LS-9o-W" } }] };
+		const head = /Committed ([0-9a-f]{40})/.exec(body)?.[1];
+		if (n === 3) return { calls: [{ name: "report_result", arguments: { job_id: JOB, kind: "ship", status: "done", summary: "live smoke ok", branch: JOB, head_sha: head ?? "missing" } }] };
+		return { message: "done" };
+	};
+	const provider = await startCodexMockProvider([], route);
+	try {
+		const job = { job_id: JOB, kind: "ship" as const, role: "implementer" as const, delivery: "local" as const, runDir: join(s.root, "run"), worktree: s.worktree, artifactPath: s.artifactPath, excludePaths: SHIP_EXCLUDED };
+		const result = await runCodexSpike({
+			...s.options("go"), job, codexHome: mockHome(s, provider.url), model: "gpt-picp-mock", deleteThread: true,
+			onTool: (event) => (event.phase === "start" ? started.set(event.id, Date.now()) : (durations[`${event.name}#${event.id}`] = Date.now() - (started.get(event.id) ?? Date.now()))),
+		});
+		t.diagnostic(summary(result));
+		t.diagnostic(`tool durations ms ${JSON.stringify(durations)}; ticketMatch ${JSON.stringify(result.ticketMatch)}`);
+		assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal);
+		assert.equal(result.bypass, undefined, `the run was killed as a bypass: ${result.error}`);
+		assert.equal(result.outcome, "completed", result.error);
+		assert.equal(gitIn(s.worktree, "log", "-1", "--format=%s"), "LS-9o-W", "git_commit did not commit");
+		assert.equal(gitIn(s.worktree, "show", "HEAD:w.txt"), "w9", "the shell's write is not in the commit");
+		assert.notEqual(gitIn(s.worktree, "rev-parse", "HEAD"), repo.head);
+		assert.equal(result.report?.head_sha, gitIn(s.worktree, "rev-parse", "HEAD"));
+		assert.deepEqual({ payload: result.ticketMatch.payload, none: result.ticketMatch.none }, { payload: 0, none: 0 }, "every ticket matched by id");
 	} finally {
 		await provider.close();
 	}

@@ -3,7 +3,6 @@
  * reads (`get_state`, `prompt`, `follow_up`, then events), runs each turn through `runClaudeSpike` with every N3a gate
  * on, and exits on stdin end or SIGTERM. A clean unreported turn settles idle; a named stop exits non-zero.
  */
-import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -13,7 +12,7 @@ import { join } from "node:path";
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
 import { estimatedRunUsage, liveUsageUpdate, NATIVE_REPORTED_GRACE_MS, NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage, noteStreamedUsage, type StreamedUsage } from "./claude-usage.ts";
-import { commitIdentityEnv } from "./claude-forge-tools.ts";
+import { checkpointCommit, commitIdentityEnv } from "./native-forge.ts";
 import { implementerArtifactPath, implementerExclusions, nativeRole, nativeWorkerChildEnv } from "./claude-roles.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
 import { VERDICT_TOOL } from "./claude-verdict.ts";
@@ -285,34 +284,6 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 	return queued;
 }
 
-type Checkpoint = { head: string; pushed: boolean; error?: string } | { error: string };
-
-/**
- * Commits the worktree's WIP after a freeze aborted the turn (`git add -A` honours .gitignore), then pushes it to
- * origin/<job> best effort, never forced: a failed push is `pushed: false` with its error, still a checkpoint.
- */
-function checkpointCommit(worktree: string, branch: string): Checkpoint {
-	const bounded = (error: unknown) => (error as Error).message.slice(0, 500);
-	let head: string;
-	let git: (args: string[]) => string;
-	try {
-		const options: ExecFileSyncOptionsWithStringEncoding = { cwd: worktree, env: { ...env, ...commitIdentityEnv(worktree) }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
-		git = (args) => execFileSync("git", args, options).trim();
-		git(["add", "-A"]);
-		if (git(["status", "--porcelain"]) !== "") git(["commit", "-q", "-m", "WIP: freeze checkpoint"]);
-		head = git(["rev-parse", "HEAD"]);
-	} catch (error) {
-		return { error: bounded(error) };
-	}
-	if (!branch || ["main", env.CP_BASE_BRANCH?.trim()].includes(branch)) return { head, pushed: false, error: `no job branch to push (${branch || "unset"})` };
-	try {
-		git(["push", "-q", "origin", `HEAD:refs/heads/${branch}`]);
-		return { head, pushed: true };
-	} catch (error) {
-		return { head, pushed: false, error: bounded(error) };
-	}
-}
-
 /** Turns until no admitted follow-up is queued; settles when any turn reported or the last ended clean, else fails. */
 async function serve(first: string): Promise<number> {
 	busy = true;
@@ -348,7 +319,7 @@ async function serve(first: string): Promise<number> {
 		freezing = false;
 		// A named stop (auth, lockdown, window) wins over the freeze: no checkpoint, and its non-zero exit is kept.
 		const named = end?.kind === "stop" && end.stop !== "other" ? end.stop : undefined;
-		const outcome = named ? { error: `the turn ended on a named stop (${named}); nothing was checkpointed` } : checkpointCommit(env.CP_WORKTREE ?? "", env.CP_JOB_ID ?? "");
+		const outcome = named ? { error: `the turn ended on a named stop (${named}); nothing was checkpointed` } : checkpointCommit(env.CP_WORKTREE ?? "", env.CP_JOB_ID ?? "", env);
 		if (!named) write({ type: "native_checkpoint", ...outcome });
 		for (const answer of checkpointReplies.splice(0)) answer("head" in outcome ? { success: true, data: outcome } : { success: false, ...outcome });
 		if (named) return code;

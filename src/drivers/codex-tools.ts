@@ -1,17 +1,18 @@
 /**
- * The Codex planner's and (C6) reviewer's tools: picp's dynamic tools (`report_result`, `gh_read`; `report_verdict`,
- * `read`, `grep`, `find`), the hook's tool vocabulary, the Codex secret guard, and the MCP route and approval rules for
- * the operator's servers. SDK-free.
+ * The Codex planner's, (C6) reviewer's and (C7a) implementer's tools: picp's dynamic tools, the hook's tool vocabulary,
+ * the Codex secret and git guards, and the MCP route and approval rules for the operator's servers. SDK-free.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { ENVELOPE_FILE, formatRejection, type JobContext, LenientGateReviewSchema, localChecks } from "../../extensions/worker-reporter/index.ts";
 import {
 	ENVELOPE_REPAIR_MAX_ATTEMPTS, type Envelope, type EnvelopeRecord, EnvelopeSchema, type GateReview, isoTimestamp, SCHEMA_VERSION, validateEnvelope,
 } from "../contracts.ts";
 import { CODEX_MCP_HELPER_TOOLS, type CodexMcpServers } from "../worker-mcp.ts";
+import { type Cmd, extract, lexCommands } from "./claude-bash-lex.ts";
 import { FORGE_TOOL_NAMES } from "./claude-roles.ts";
 import type { DynamicToolSpec, McpElicitationParams } from "./codex-protocol.ts";
+import { FORGE_INPUT_SCHEMAS, type ForgeReply, type ForgeToolName, forgeWrites, gitCommit, gitMerge, parseForgeArgs } from "./native-forge.ts";
 import { capped, type ForgeState, GH_READ_INPUT_SCHEMA, ghRead, parseGhReadArgs, processState } from "./native-gh-read.ts";
 import type { NormalizedCall, SpikeGuard, SpikeJob } from "./native-guards.ts";
 import { PACKET_TOOL_NAMES, packetTools } from "./native-packet-tools.ts";
@@ -20,14 +21,76 @@ import { verdictReport } from "./native-verdict.ts";
 export const REPORT_TOOL = "report_result";
 export const GH_READ_TOOL = "gh_read";
 export const VERDICT_TOOL_NAME = "report_verdict";
+/** C7a: the implementer's commit and merge, served by picp because the Codex sandbox keeps `.git` read-only (U2). */
+export const CODEX_GIT_TOOLS = ["git_commit", "git_merge"] as const;
+
+const who = (role: SpikeJob["role"]): string => (role === "implementer" ? "implementer" : "planner");
 
 /** Closes the lexical gap for Codex: `$CODEX_HOME`, an `OPENAI_*`/`CODEX_*` variable, the home or a `.codex` path. */
-export function codexSecretGuard(codexHome: string): SpikeGuard {
+export function codexSecretGuard(codexHome: string, role: SpikeJob["role"] = "planner"): SpikeGuard {
 	return (call) => {
 		if (call.name !== "bash" || typeof call.input.command !== "string") return undefined;
 		const command = call.input.command;
 		const hit = /\$\{?(?:OPENAI|CODEX)_\w*/.exec(command)?.[0] ?? (command.includes(codexHome) ? codexHome : undefined) ?? /(?<![\w.-])\.codex(?![\w-])/.exec(command)?.[0];
-		return hit === undefined ? undefined : `Refused: a native planner's Bash never touches the Codex home, its login or an OPENAI_/CODEX_ variable (${hit}).`;
+		return hit === undefined ? undefined : `Refused: a native ${who(role)}'s Bash never touches the Codex home, its login or an OPENAI_/CODEX_ variable (${hit}).`;
+	};
+}
+
+/** F5: an accepted patch is applied outside the kernel profile, so picp declines every one; an implementer is told how
+ * to write files instead. */
+export function codexPatchRefusal(role: SpikeJob["role"]): string {
+	if (role !== "implementer") return "Refused: a native planner changes no files.";
+	return "Refused: a native implementer never applies a patch (the CLI applies it outside the sandbox). Write files with the shell (a quoted heredoc, `sed -i`, a script); restore one with `git show HEAD:<path> > <path>`.";
+}
+
+const GIT_WRITES = new Set(["add", "commit", "merge", "stash", "reset", "restore", "checkout", "rm", "mv", "tag", "am", "apply", "cherry-pick", "revert", "rebase"]);
+const GIT_VALUED = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--exec-path"]);
+const SHELLS = new Set(["sh", "bash", "dash", "zsh"]);
+const WRAPPERS = new Set(["env", "command", "exec", "nohup", "time", "builtin"]);
+
+function gitWriteIn(cmd: Cmd, level: number): string | undefined {
+	const words = cmd.words.map((w) => w.text);
+	while (words[0] !== undefined && (/^[A-Za-z_]\w*=/.test(words[0]) || WRAPPERS.has(words[0]))) words.shift();
+	const name = basename(words[0] ?? "");
+	if (SHELLS.has(name)) {
+		const flag = words.findIndex((w) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(w));
+		return flag < 0 || words[flag + 1] === undefined ? undefined : gitWriteInScript(words[flag + 1] as string, level + 1);
+	}
+	if (name !== "git") return undefined;
+	let i = 1;
+	while (words[i]?.startsWith("-")) i += GIT_VALUED.has(words[i] as string) ? 2 : 1;
+	const sub = words[i];
+	return sub !== undefined && GIT_WRITES.has(sub) ? sub : undefined;
+}
+
+function gitWriteInScript(script: string, level = 0): string | undefined {
+	if (level > 3) return undefined;
+	const nested: string[] = [];
+	const cmds = lexCommands(extract(script, nested));
+	for (const inner of nested) {
+		const hit = gitWriteInScript(inner, level + 1);
+		if (hit !== undefined) return hit;
+	}
+	for (const cmd of cmds) {
+		const hit = gitWriteIn(cmd, level);
+		if (hit !== undefined) return hit;
+	}
+	return undefined;
+}
+
+/**
+ * C7a (U2): the implementer's sandbox keeps `.git` read-only, so a git write in its shell can only fail; this refuses it
+ * at the hook with the picp tool that does it instead. Lexical and best effort: the kernel is the bound.
+ */
+export function codexGitGuard(role: SpikeJob["role"]): SpikeGuard {
+	return (call) => {
+		if (role !== "implementer" || call.name !== "bash" || typeof call.input.command !== "string") return undefined;
+		const sub = gitWriteInScript(call.input.command);
+		if (sub === undefined) return undefined;
+		const remedy = sub === "merge" || sub === "rebase" || sub === "cherry-pick" || sub === "revert" ? "git_fetch, then git_merge {ref: \"origin/<base>\"} (fix conflicts with the shell, then git_commit)"
+			: sub === "restore" || sub === "checkout" || sub === "reset" || sub === "stash" ? "restore a file with `git show HEAD:<path> > <path>`, then git_commit"
+			: "git_commit (it runs `git add -A` and commits every change)";
+		return `Refused: a native implementer's shell never writes git (\`git ${sub}\`): .git is read-only in its sandbox. Use ${remedy}.`;
 	};
 }
 
@@ -36,7 +99,7 @@ export function codexToolCall(toolName: string, toolInput: unknown): NormalizedC
 	const args = (toolInput !== null && typeof toolInput === "object" ? toolInput : {}) as Record<string, unknown>;
 	if (toolName === "Bash") return { name: "bash", input: { command: args.command } };
 	if (toolName === REPORT_TOOL) return { name: "report_result", input: args };
-	if ((FORGE_TOOL_NAMES as readonly string[]).includes(toolName)) return { name: toolName, input: args };
+	if ((FORGE_TOOL_NAMES as readonly string[]).includes(toolName) || (CODEX_GIT_TOOLS as readonly string[]).includes(toolName)) return { name: toolName, input: args };
 	// C6: the guard vocabulary's own keys (`path`, `pattern`), so reviewerReadGuard checks the raw arguments.
 	if (toolName === VERDICT_TOOL_NAME || (PACKET_TOOL_NAMES as readonly string[]).includes(toolName)) return { name: toolName, input: args };
 	return undefined;
@@ -138,9 +201,43 @@ function packetDynamicTools(root: string): CodexDynamicTool[] {
 	}));
 }
 
-/** Planner: `report_result` and `gh_read` (forge writes off). Reviewer (C6): `report_verdict` and the packet reads. */
+/**
+ * C7a: the implementer's git and forge writes in the worker process with `hostEnv`, git hooks off. `git_push`,
+ * `pr_create` and `pr_edit` only for delivery `pr`; commit and merge get a credential-free env.
+ */
+function implementerForgeTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv): CodexDynamicTool[] {
+	const writes = forgeWrites(job, hostEnv, { hooksOff: true });
+	const base = hostEnv.CP_BASE_BRANCH?.trim() || "main";
+	const tool = (name: ForgeToolName, description: string, call: (args: Record<string, unknown>) => Promise<ForgeReply>): CodexDynamicTool => ({
+		spec: { type: "function", name, description, inputSchema: JSON.parse(JSON.stringify(FORGE_INPUT_SCHEMAS[name])) as unknown },
+		async run(args) {
+			const parsed = parseForgeArgs(name, args);
+			if (typeof parsed === "string") return { text: parsed, success: false };
+			const done = await call(parsed);
+			return { text: capped(done.text), success: !done.isError };
+		},
+	});
+	const tools = [
+		tool("git_commit", "Commit every change in this job's worktree: `git add -A`, then `git commit -m <message>`, hooks off. A change to an excluded path is refused and unstaged. The shell cannot write .git.",
+			(args) => gitCommit(job, args as { message: string }, { excluded: job.excludePaths ?? [], env: hostEnv, hooksOff: true })),
+		tool("git_merge", `Merge origin/${job.job_id} or origin/${base} into HEAD (git_fetch first). On conflicts fix the files with the shell, then git_commit.`,
+			(args) => gitMerge(job, args as { ref: string }, { env: hostEnv, hooksOff: true })),
+		tool("git_fetch", writes.descriptions.fetch, (args) => writes.fetch(args)),
+	];
+	if (job.delivery !== "pr") return tools;
+	return [
+		...tools,
+		tool("git_push", writes.descriptions.push, (args) => writes.push(args)),
+		tool("pr_create", writes.descriptions.prCreate, (args) => writes.prCreate(args as { title: string; body: string })),
+		tool("pr_edit", writes.descriptions.prEdit, (args) => writes.prEdit(args)),
+	];
+}
+
+/** Planner: `report_result` and `gh_read` (forge writes off). Reviewer (C6): `report_verdict` and the packet reads.
+ * Implementer (C7a): `report_result`, `gh_read` and its git and forge writes. */
 export function codexRoleTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv, report: CodexReportState, forge: ForgeState = processState): CodexDynamicTool[] {
 	if (job.role === "gate-reviewer") return [verdictTool(job, report), ...packetDynamicTools(job.worktree)];
+	if (job.role === "implementer") return [reportTool(job, report), ghReadTool(job, hostEnv, forge), ...implementerForgeTools(job, hostEnv)];
 	return [reportTool(job, report), ghReadTool(job, hostEnv, forge)];
 }
 
