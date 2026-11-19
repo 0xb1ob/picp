@@ -492,9 +492,9 @@ export interface DecisionsResponse extends AwaitingResponse { decided: DecisionD
 export interface ForwardedCi { ci: string; observed_at: string; url: string | null }
 export interface FlightJob {
  id: string; project: string; title: string | null; phase: string; model: string | null; script_path: string | null;
- /** N3b: the native driver that ran it (`claude`); null is pi.
-  * `usage_unavailable`: its usage was not measured, not zero. */
- driver?: string | null; usage_unavailable?: boolean;
+ /** N3b: the native driver that ran it (`claude`, `codex`); null is pi.
+  * `usage_unavailable`: its usage was not measured, not zero. `cost_unknown`: its USD cost is unknown, not $0 (C1b). */
+ driver?: string | null; usage_unavailable?: boolean; cost_unknown?: boolean;
  elapsed_seconds: number | null; limit_seconds: number | null;
  head: string | null; ci: string | null; review: string | null; review_attempts: number;
  /** Operator-forwarded CI for `head`: shown only where native CI is absent, unknown or unreadable; never a gate. */

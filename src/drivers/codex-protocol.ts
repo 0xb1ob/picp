@@ -129,10 +129,13 @@ export interface TerminalsListResponse { data: ThreadBackgroundTerminal[]; nextC
 export type ThreadItem =
 	| { type: "userMessage"; id: string }
 	| { type: "agentMessage"; id: string; text: string }
-	| { type: "reasoning"; id: string }
-	| { type: "commandExecution"; id: string; command: string; cwd: string; status: "inProgress" | "completed" | "failed" | "declined"; processId?: string | null }
-	| { type: "dynamicToolCall"; id: string; tool: string; arguments: unknown; status: string }
-	| { type: "fileChange"; id: string; status: string }
+	| { type: "reasoning"; id: string; summary?: string[] }
+	| {
+		type: "commandExecution"; id: string; command: string; cwd: string; status: "inProgress" | "completed" | "failed" | "declined"; processId?: string | null;
+		aggregatedOutput?: string | null; exitCode?: number | null;
+	}
+	| { type: "dynamicToolCall"; id: string; tool: string; arguments: unknown; status: string; success?: boolean | null; contentItems?: Array<{ type: string; text?: string }> | null }
+	| { type: "fileChange"; id: string; status: "inProgress" | "completed" | "failed" | "declined"; changes?: unknown }
 	| { type: "imageView" | "subAgentActivity" | "collabAgentToolCall" | "mcpToolCall" | "webSearch" | "imageGeneration" | "sleep"; id: string };
 
 /** `cwd` is the call's working directory (a model `workdir` moves it); `command` is the shell-wrapped form (E16). */

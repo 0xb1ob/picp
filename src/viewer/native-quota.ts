@@ -17,11 +17,14 @@ const readJson = (file: string): Json | undefined => {
 	try { return obj(JSON.parse(readFileSync(file, "utf8"))); } catch { return undefined; }
 };
 const only = (value: Json, keys: readonly string[]) => Object.keys(value).every((key) => keys.includes(key));
-/** Viewer copy of `NATIVE_CLASSES` (`worker-driver.ts`): valid like `loadNativeConfig`, and some class switch on. */
+/** Viewer copy of `NATIVE_CLASSES` and `CODEX_CLASSES` (`worker-driver.ts`): valid like `loadNativeConfig`, and some
+ * Claude class switch on (the item is Claude's). */
 const SWITCHES = ["claude_research", "claude_ship", "claude_review"] as const;
-const nativeSwitchOn = (config: Json): boolean => only(config, [...SWITCHES, "max_concurrent"])
-	&& SWITCHES.every((key) => config[key] === undefined || typeof config[key] === "boolean")
-	&& (config.max_concurrent === undefined || (Number.isInteger(config.max_concurrent) && (config.max_concurrent as number) >= 1 && (config.max_concurrent as number) <= 4))
+const CODEX_SWITCHES = ["codex_research", "codex_ship", "codex_review"] as const;
+const count = (value: unknown) => value === undefined || (Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 4);
+const nativeSwitchOn = (config: Json): boolean => only(config, [...SWITCHES, "max_concurrent", ...CODEX_SWITCHES, "codex_max_concurrent"])
+	&& [...SWITCHES, ...CODEX_SWITCHES].every((key) => config[key] === undefined || typeof config[key] === "boolean")
+	&& count(config.max_concurrent) && count(config.codex_max_concurrent)
 	&& SWITCHES.some((key) => config[key] === true);
 const at = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined);
 const version = (value: unknown) => value === undefined || (typeof value === "string" && value.length >= 1 && value.length <= 40);

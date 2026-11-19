@@ -14,7 +14,8 @@ type HookMode = "run" | "skip" | "kill" | "stall" | "unlink";
 type Step =
 	| { kind: "shell"; command: string; hook?: HookMode; background?: boolean; workdir?: string }
 	| { kind: "tool"; tool: string; arguments: unknown; hook?: HookMode }
-	| { kind: "patch"; patch: string }
+	| { kind: "patch"; path: string; content?: string; hook?: HookMode }
+	| { kind: "subagent"; command: string; hook?: HookMode }
 	| { kind: "message"; text: string }
 	| { kind: "hold"; marker: string };
 interface Knobs {
@@ -43,6 +44,8 @@ interface Knobs {
 	profileReadback?: "extraRoot";
 	/** A model round trip before each step after the first; the real CLI waits on the provider there. */
 	modelMs?: number;
+	/** `unasked`: a patch applies with no approval request, a CLI that bypasses picp's decline. */
+	patchApply?: "unasked";
 }
 interface Script { knobs?: Knobs; turns?: Step[][] }
 interface Totals { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number; outputTokens: number; reasoningOutputTokens: number; totalTokens: number }
@@ -290,14 +293,41 @@ async function shellStep(step: Extract<Step, { kind: "shell" }>, turnId: string)
 	notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: run.status === 0 ? "completed" : "failed", exitCode: run.status, aggregatedOutput: `${run.stdout}${run.stderr}` } });
 }
 
+/** The 0.170.0 order (F1-F5): hook, `inProgress`, the approval, then `declined`, or `completed` with the file written
+ * and no profile check (F5). A blocked hook leaves no item (F2); `patchApply: "unasked"` applies with no approval. */
+async function patchStep(step: Extract<Step, { kind: "patch" }>, turnId: string): Promise<void> {
+	const itemId = `item_${++counter}`;
+	const patch = `*** Begin Patch\n*** Add File: ${step.path}\n+${step.content ?? "patched"}\n*** End Patch`;
+	if ((await runHook("apply_patch", { command: patch }, itemId, turnId, step.hook)) === "blocked") return;
+	const base = { type: "fileChange", id: itemId, changes: [{ path: step.path, kind: { type: "add" } }] };
+	notify("item/started", { threadId: thread?.id, turnId, item: { ...base, status: "inProgress" } });
+	if (knobs.patchApply !== "unasked") {
+		const answer = (await ask("item/fileChange/requestApproval", { itemId, threadId: thread?.id, turnId })) as { decision?: unknown } | undefined;
+		if (answer?.decision !== "accept") {
+			notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: "declined" } });
+			return;
+		}
+	}
+	writeFileSync(resolve(thread?.cwd ?? process.cwd(), step.path), `${step.content ?? "patched"}\n`);
+	log("patched.jsonl", { path: step.path });
+	notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: "completed" } });
+}
+
 async function runStep(step: Step, turnId: string): Promise<void> {
 	if (step.kind === "shell") return shellStep(step, turnId);
 	if (step.kind === "message") {
 		notify("item/completed", { threadId: thread?.id, turnId, item: { type: "agentMessage", id: `item_${++counter}`, text: step.text } });
 		return;
 	}
-	if (step.kind === "patch") {
-		await ask("item/fileChange/requestApproval", { itemId: `item_${++counter}`, threadId: thread?.id, turnId });
+	if (step.kind === "patch") return patchStep(step, turnId);
+	if (step.kind === "subagent") {
+		// R2 stand-in: an unblocked spawn starts a second thread and a detached command inside the scope.
+		if ((await runHook("collaborationspawn_agent", { message: step.command }, `call_${++counter}`, turnId, step.hook)) === "blocked") return;
+		notify("thread/started", { thread: { id: `thr_sub_${process.pid}_${counter}` } });
+		notify("item/started", { threadId: thread?.id, turnId, item: { type: "subAgentActivity", id: `item_${++counter}` } });
+		const child = spawn("sh", ["-c", `exec ${step.command}`], { cwd: thread?.cwd, detached: true, stdio: "ignore" });
+		child.unref();
+		log("pids.jsonl", { pid: child.pid });
 		return;
 	}
 	if (step.kind === "hold") {
@@ -309,7 +339,8 @@ async function runStep(step: Step, turnId: string): Promise<void> {
 	if ((await runHook(step.tool, step.arguments, callId, turnId, step.hook)) === "blocked") return;
 	const result = await ask("item/tool/call", { tool: step.tool, arguments: step.arguments, callId, threadId: thread?.id, turnId });
 	log("tool-results.jsonl", { tool: step.tool, result });
-	notify("item/completed", { threadId: thread?.id, turnId, item: { type: "dynamicToolCall", id: callId, tool: step.tool, arguments: step.arguments, status: "completed" } });
+	const { success, contentItems } = (result ?? {}) as { success?: boolean; contentItems?: unknown };
+	notify("item/completed", { threadId: thread?.id, turnId, item: { type: "dynamicToolCall", id: callId, tool: step.tool, arguments: step.arguments, status: "completed", success, contentItems } });
 }
 
 function addUsage(t: Thread, turnId: string, last: Totals): void {

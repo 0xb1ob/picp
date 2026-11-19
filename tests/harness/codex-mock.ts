@@ -18,7 +18,8 @@ export const OUTSIDE_SENTINEL = "SYNTHETIC-OUTSIDE-WORKTREE-SENTINEL";
 export type FakeCodexStep =
 	| { kind: "shell"; command: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink"; background?: boolean; workdir?: string }
 	| { kind: "tool"; tool: string; arguments: unknown; hook?: "run" | "skip" | "kill" | "stall" | "unlink" }
-	| { kind: "patch"; patch: string }
+	| { kind: "patch"; path: string; content?: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink" }
+	| { kind: "subagent"; command: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink" }
 	| { kind: "message"; text: string }
 	| { kind: "hold"; marker: string };
 export interface FakeCodexScript { knobs?: Record<string, unknown>; turns?: FakeCodexStep[][] }
@@ -49,7 +50,8 @@ export const fakeRpcMethods = (state: string) => lines<{ pid: number; method: st
 export const fakeExecuted = (state: string) => lines<{ command: string }>(join(state, "executed.jsonl")).map((entry) => entry.command);
 export const fakePids = (state: string) => lines<{ pid: number }>(join(state, "pids.jsonl")).map((entry) => entry.pid);
 export const fakeHooks = (state: string) => lines<{ tool: string; mode: string; status: string; stderr: string }>(join(state, "hooks.jsonl"));
-export const fakeScopes = (state: string) => lines<{ unit: string; started?: true; killed?: number; collected?: true; refused?: true }>(join(state, "scopes.jsonl"));
+export const fakeScopes = (state: string) => lines<{ unit: string; started?: true; props?: string[]; killed?: number; collected?: true; refused?: true }>(join(state, "scopes.jsonl"));
+export const fakePatched = (state: string) => lines<{ path: string }>(join(state, "patched.jsonl")).map((entry) => entry.path);
 export const fakeThreadTotal = (state: string, threadId: string) =>
 	(JSON.parse(readFileSync(join(state, "threads", `${threadId}.json`), "utf8")) as { total: { totalTokens: number } }).total;
 

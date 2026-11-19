@@ -27,11 +27,11 @@ function records(state:ViewerState) {
  const ledger=objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs",j=>typeof j.id === "string" && isSafeId(j.id) && LEDGER_STATUSES.includes(str(j.status) ?? ""));
  return {fleet:fleet.value,ledger:ledger.value,grants:readMandates(state)};
 }
-/** S3: the recorded driver choice, only when claude was requested or chosen; legacy and plain pi records have none. */
+/** S3: the recorded driver choice, only when a native driver was requested or chosen; legacy and plain pi have none. */
 function driverNote(routing:Json | undefined):string | null {
- const driver=str(routing?.driver), reason=str(routing?.driver_reason)?.slice(0,200);
- if(driver==="claude") return `claude, effort ${str(routing?.thinking) ?? "CLI default"}`;
- return driver==="pi" && str(routing?.requested_driver)==="claude" ? `pi (preferred claude${reason ? `: ${reason.replace(/^(\w+): /,"$1 ")}` : ""})` : null;
+ const driver=str(routing?.driver), requested=str(routing?.requested_driver), reason=str(routing?.driver_reason)?.slice(0,200);
+ if(driver && driver!=="pi") return `${driver}, effort ${str(routing?.thinking) ?? "CLI default"}`;
+ return driver==="pi" && requested && requested!=="pi" ? `pi (preferred ${requested}${reason ? `: ${reason.replace(/^(\w+): /,"$1 ")}` : ""})` : null;
 }
 function dispatchMandate(state:ViewerState,id:string,entry:Json | undefined,status:Json | undefined):string | null {
  const valid=(value:unknown)=>typeof value==="string" && /^md-[A-Za-z0-9_-]+$/.test(value) ? value : null;
@@ -91,7 +91,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const ledgerStatus=str(job?.status) ?? null;
   const expected=phase==="done" ? "closed" : phase==="queued" ? "open" : "in_progress";
   return {id,project,title:str(job?.title) ?? null,phase,model:detail?.model ?? null,script_path:detail?.script_path ?? null,
-   driver:str(obj(entry?.worker)?.driver) ?? null,driver_note:driverNote(obj(entry?.routing)),usage_unavailable:status?.usage_unavailable===true,
+   driver:str(obj(entry?.worker)?.driver) ?? null,driver_note:driverNote(obj(entry?.routing)),usage_unavailable:status?.usage_unavailable===true,cost_unknown:status?.cost_unknown===true,
    elapsed_seconds:live?.elapsed_seconds ?? duration,limit_seconds:live?.limit_seconds ?? nonnegative(obj(entry?.bounds)?.wall_clock_seconds),head:head ?? null,
    ci:headCi(state,id,ci,head ?? null),ci_forwarded:forwardedCi(state,id,head),review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),
    routing:live?.routing ?? (entry ? routingText(state,entry) : null),note:live?.note ?? null,ledger_status:ledgerStatus,ledger_disagrees:ledgerStatus!==null && (phase==="failed" || ledgerStatus!==expected),mandate_id:mandate,

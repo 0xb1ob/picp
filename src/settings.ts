@@ -212,6 +212,10 @@ function workersDriverView(rubric: View | undefined, native: OwnerRead<unknown> 
 	const rows = (Array.isArray(rubric.value) ? rubric.value : []) as RoutingRule[];
 	const on = (driver: string) => rows.filter((row) => (row.driver ?? "pi") === driver).map((row) => row.id);
 	const source = rows.some((row) => row.driver !== undefined) ? "file" : "code";
+	const other = rows.filter((row) => row.driver !== undefined && row.driver !== "pi" && row.driver !== "claude");
+	if (other.length) {
+		return { value: null, source, status: "ok", diagnostic: `rows name a driver this switch does not set: ${other.map((row) => `${row.driver} on ${row.id}`).join(", ")}; edit data/routing.json` };
+	}
 	const claude = on("claude");
 	if (claude.length && claude.length < rows.length) {
 		return { value: null, source, status: "ok", diagnostic: `rows disagree: claude on ${claude.join(", ")}; pi on ${on("pi").join(", ")}. Choose one CLI to set every row` };

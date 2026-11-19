@@ -205,6 +205,36 @@ test("native + an openai model is refused before any write, for the parent and f
 	assert.equal(ui.posts().length, 0);
 });
 
+// Scenario: C1b B11 and main-session condition 2 — a codex rubric row is model-checked, never vendor-checked
+//   Given a hand-written codex row (Settings never sets a row's driver to codex) and codex_research off, then on
+//   When a rubric write moves that row to another openai/gpt-… model, then to an Anthropic model
+//   Then off refuses naming the switch, on saves the first and refuses the second naming the Codex CLI
+test("C1b codex row: a changed codex row is refused while codex_research is off; with it on, openai/gpt-… saves and anthropic refuses", { timeout: 120_000 }, async (t) => {
+	let id = "";
+	const h = await home(t, (root) => {
+		const routing = JSON.parse(readFileSync(join(root, LAYOUT.routingFile), "utf8")) as Json;
+		const row = (routing.rubric as Json[]).find((each) => each.role === "planner")!;
+		Object.assign(row, { model: "openai/gpt-5", thinking: "high", driver: "codex" });
+		id = row.id as string;
+		put(join(root, LAYOUT.routingFile), JSON.stringify(routing));
+	});
+	const withModel = (model: string) => (h.json(LAYOUT.routingFile).rubric as Json[]).map((row) => (row.id === id ? { id: row.id, role: row.role, ...(row.risk ? { risk: row.risk } : {}), ...(row.scope ? { scope: row.scope } : {}), model, fallbacks: row.fallbacks, thinking: "high" } : row));
+	assert.match(String((await h.field("workers.driver"))?.diagnostic), new RegExp(`codex on ${id}`));
+	const before = readFileSync(join(h.root, LAYOUT.routingFile), "utf8");
+	const off = await h.post("/api/settings/apply", { changes: { "models.rubric": withModel("openai/gpt-6.1-sol") } });
+	assert.equal(off.status, 400, JSON.stringify(off.body));
+	assert.match((off.body.errors as string[]).join("\n"), new RegExp(`row ${id} names the codex driver while codex_research is off`));
+	assert.equal(readFileSync(join(h.root, LAYOUT.routingFile), "utf8"), before, "nothing written");
+	put(join(h.root, LAYOUT.data, "native.json"), JSON.stringify({ codex_research: true }));
+	const saved = await h.post("/api/settings/apply", { changes: { "models.rubric": withModel("openai/gpt-6.1-sol") } });
+	assert.equal(saved.status, 200, JSON.stringify(saved.body).slice(0, 400));
+	const row = (h.json(LAYOUT.routingFile).rubric as Json[]).find((each) => each.id === id);
+	assert.deepEqual([row?.model, row?.driver], ["openai/gpt-6.1-sol", "codex"]);
+	const anthropic = await h.post("/api/settings/apply", { changes: { "models.rubric": withModel("anthropic/claude-opus-5-5") } });
+	assert.equal(anthropic.status, 400, JSON.stringify(anthropic.body).slice(0, 400));
+	assert.deepEqual(anthropic.body.errors, [`row ${id}: the Codex CLI runs only an openai/gpt-… model, not anthropic/claude-opus-5-5`]);
+});
+
 // Scenario: restore works
 //   Given the parent and every worker on the Claude CLI
 //   When the operator restores the Model routing and the parent keys

@@ -993,10 +993,7 @@ its argv from there and runs in the systemd user scope.
   the real CLI (mock model, a synthetic API-key login in a throwaway Codex home) and shows the hook's `tool_use_id`,
   the approval `itemId` and the tool `callId` are one id: a hook denial and an accepted command end `completed`, no
   bypass, every ticket matched by id.
-- **Deferred to C1b: `fileChange` order.** The tripwire still kills on any `fileChange` item not `declined`,
-  `inProgress` included. A C1a planner declines every patch, so this only ends a run that tried one. C1b's plan must
-  show the real-CLI order of `fileChange` items and must not kill on a pre-approval `inProgress` item, as
-  `commandExecution` already does not.
+- **`fileChange` order:** measured and fixed in C1b; see [C1b research wiring](#c1b-research-wiring).
 - `onTool` reports each shell and dynamic tool call once per phase, for C1b's worker.
 
 Kill-criteria verdicts (CI: `tests/e2e/codex-worker-spike.test.ts`; real CLI: `CP_LIVE_TESTS=1
@@ -1028,3 +1025,122 @@ U1 (LS-4, live): the operator's home asked an approval for `cat`, so no allow ru
 counts and statuses only, never URLs or config values.
 Known limits of the C1 planner: no network; it reads only the worktree, its git dir and system paths, so a brief
 pointing at another job's artifact or a tool under the home cannot be followed. Recovery: revert; nothing selects it.
+
+### C1b research wiring
+
+C1b wires the run core to `cp_dispatch` for research only, behind switches that ship **off**. A `kind:research` job
+with role planner and delivery `local` or `answer`, dispatched with `driver: "codex"` (or matched by a rubric row naming
+it) and an explicit `openai/gpt-…` model, runs `src/drivers/codex-worker.ts`, a pi-RPC child like `claude-worker.ts`.
+Every other role, kind and delivery stays on pi. No `data/*.json` or `defaults/routing*.json` was edited.
+
+**Switches (`data/native.json`).** `codex_research`, `codex_ship`, `codex_review` (booleans, default off) and
+`codex_max_concurrent` (1-4, default 1, counted apart from Claude's `max_concurrent`). Only `codex_research` selects
+anything; the ship and review keys have no class behind them yet. Settings never sets or deletes them.
+
+**Selection** (`codexSelectionRefusal` in `src/drivers/codex.ts`), each a named refusal before any lease, in order:
+
+| Check | Category |
+|---|---|
+| `data/native.json` unreadable | `switch` |
+| not planner research | `ineligible` |
+| `codex_research` off | `switch` |
+| delivery not `local` or `answer` | `ineligible` |
+| `codex_max_concurrent` live codex jobs | `occupied` |
+| no `systemd-run`, or a malformed `CP_WORKER_MEMORY_MAX` | `containment` |
+| `codex` missing or below `0.170.0` | `cli_missing` / `cli_version` |
+| `codex login status` not 0 (HOME `/nonexistent`, only `CODEX_HOME` is read) | `auth` |
+
+An explicit `driver: "codex"` is strict and refuses by name; a row's `codex` is a preference that falls back to pi
+with `requested_driver: "codex"` and a `driver_reason`. A started job keeps its driver: `pi` or `claude` on a codex job
+refuses naming the lock. A codex row's model must match `openai/gpt-…` (checked in the resolver and in a Settings rubric
+write; programme D1: never a vendor check); its effort is `low`…`max` (`off` and `minimal` refuse). The home's `allow`
+and `deny_by_role` still apply. Per-driver specs live in `src/drivers/registry.ts`.
+
+**Lifecycle.**
+
+| Step | What happens |
+|---|---|
+| spawn | `codexSpawnOptions`: the role contract plus the Codex addendum in `<run dir>/codex-system-prompt.md` (0600); env `CP_CODEX_MODEL`, `CP_CODEX_HOME`, `CP_CODEX_MEMORY_MAX` when the parent has `CP_WORKER_MEMORY_MAX` |
+| turn | one `runCodexSpike` turn, 24 h run timeout (the parent's bounds decide); `<run dir>/native-codex` (0600) records `scratch_dir`, `cwd`, `codex_home`, then `thread_id` at the first `turn/started` |
+| events | `tool_execution_start`/`_end` per call (blocked calls included), `turn_end` per agent message, unlogged `message_update` per token update, one `message_end` at cost 0 with `cost_unknown`, one `native_run` (`driver: "codex"`) |
+| Log | `state/sessions/native/<job>.jsonl` (0600): prompt, agent messages, reasoning summaries, each tool call and result |
+| end | a reported turn settles and waits for stdin end; an unreported or stopped turn exits 1 and fails on its observed exit |
+| teardown | after the observed exit (or a gone pid): `native_thread_deleted` through one contained bare app-server (`codexBareArgs`, web search off, no hook; D5), then `native_scratch_removed`; a delete failure is named and never blocks the lease |
+
+Named stops: a lockdown refusal, a dead hook, a bypass or a containment, CLI or release-dir refusal is `native_run.stop:
+"lockdown"` (class `spawn_failed`); a sign-in refusal is `auth` (`model_call_failed`). Neither is nudged.
+
+**Usage (D3).** Tokens come from the CLI's totals; the USD side is 0 with `cost_unknown` on the run status and
+`/api/job/<id>`. The job page reads "unknown (tokens only)" (or `$x + unknown` for an estimated Claude run, which sets
+the same flag). Fleet, board, stats and mandate USD sums count a codex job as $0.00, so token caps are the bound: the
+per-job token budget and a grant's token cap (CX-1j: the turn's tokens pause the grant `token_cap` after the turn, the
+running job still reports, the next dispatch refuses).
+
+**Blocked calls (B13).** A hook-denied call gets no item from the CLI, so the run core fires its own
+`onTool` start and end pair with the refusal as `output`: bounds count it and the Log shows it.
+
+**`fileChange` order (carry-in 1).** Measured on codex-cli 0.170.0 with zero tokens (picp's `spawnCodexRpc`, the loopback
+mock model, an empty throwaway `CODEX_HOME`, slug `gpt-6.2-sol`):
+
+| # | Setup | Observed |
+|---|---|---|
+| F1 | hook allows `apply_patch`, picp declines | `hook/started`, `hook/completed completed`, `item/started fileChange inProgress`, the approval request (same id as the hook's `tool_use_id`), `item/completed declined`; file absent |
+| F2 | hook denies | `hook/completed blocked`; no item, no approval; file absent |
+| F3 | hook allows, no handler (`-32601`) | `inProgress`, then `declined`; file absent |
+| F4 | a user allow rule for `apply_patch`, hook killed | the approval is still requested; `declined`; file absent |
+| F5 | approval accepted | `completed`; the file is written in the worktree, the artifact dir **and a dir outside every profile root** |
+| F6 | `apply_patch` heredoc through the shell | the hook names it `Bash` (refused by `shellPatchCommand`); the CLI raises a `fileChange` approval |
+| F7 | a patch that fails verification | no item, no approval, nothing written; `failed` was never observed |
+
+Tripwire rule: a `fileChange` kills the run only on an end other than `declined` (`completed`, or a `failed` apply picp
+never accepted, Q1). An `inProgress` item is an announcement and no longer kills. picp answers every patch `decline`.
+**F5 and F4 are inputs to the C7 re-decision:** the kernel profile does not confine an accepted patch, so C7 must not
+accept one without its own bound.
+
+**Refused until C2.** `cp_send`, `cp_revive` (so bounded recovery and quota continuation) and a resume admission
+refuse a codex job first: "<job> runs on the Codex CLI driver: <door> is refused (follow-ups, steers, revives and
+checkpoints land with C2; tear it down with cp_teardown and dispatch again). Nothing was sent or spawned." The worker
+refuses a second prompt, `follow_up`, `steer` and `checkpoint` the same way, so a settle correction is refused and
+recorded.
+
+**Memory cap (B14).** A codex app-server's scope is a sibling of the worker's, so the worker's `MemoryMax` did not cover
+it (E9). The parent's `CP_WORKER_MEMORY_MAX` now reaches every app-server scope as `-p MemoryMax=… -p MemorySwapMax=0`;
+a malformed value refuses the run before any app-server (CX-1o).
+
+**Shipped off: what an older build can still read (main-session condition 2).** While every codex switch is off, picp
+writes no codex value anywhere: an explicit codex dispatch refuses before any lease, a queued or armed codex dispatch is
+refused before it is written (`codexPersistRefusal`), and a Settings rubric write refuses a new or changed codex row.
+So `fleet.json`, the dispatch queue, the armed dispatches, `data/routing.json` and `data/native.json` stay readable by a
+build before C1b. The C1b T-row in `tests/e2e/codex-worker.test.ts` pins this with the switches off. A codex row the
+operator writes by hand is itself a value an older build cannot read, and a job it routes records `requested_driver:
+"codex"` in `fleet.json`.
+
+**Recovery for a home that turned codex on.** The supported rollback is the switch: set `codex_research` to `false`
+(new jobs route to pi; a live codex job still tears down and deletes its thread). Before running a build older than
+C1b: tear down every codex job (`cp_teardown`), remove the four `codex_*` keys from `data/native.json`, remove every
+`driver: "codex"` from `data/routing.json`, drop any dispatch-queue or armed entry naming `codex`, and close or remove
+fleet records whose `worker.driver` is `codex` or whose `routing` names `codex`; an older build refuses the whole file
+otherwise.
+
+**Known limits.** No network; reads only the worktree, its git dir and system paths, so a brief pointing at another
+job's artifact or a tool under the home cannot be followed. No resume: a failed or drained codex job is torn down and
+dispatched again. A paused grant lets the running turn finish. R1 (a rule-approved command with a dead hook) and R2
+stay as accepted for read-only research only; F5 and R1 are re-decided before C7.
+
+Kill-criteria verdicts (CI: `tests/e2e/codex-worker.test.ts` and `tests/e2e/codex-worker-spike.test.ts` on the fake;
+real CLI: `tests/e2e/codex-worker-live-smoke.test.ts` under `CP_LIVE_TESTS=1`):
+
+| KC | Criterion | CI (fake) | Real CLI |
+|---|---|---|---|
+| 1 | a forbidden action executes | held (CX-1c through `cp_dispatch`; CX-1m: a declined patch is absent) | held (LS-4o-F pass 1: inProgress, then the approval, then `declined`, file absent; LS-5o-W: a hook-denied `touch` is absent on the worker entry) |
+| 2 | a hook crash, timeout or missing socket lets a tool have an effect | held (CX-1g and CX-1h through `cp_dispatch`; CX-1m with a killed hook; CX-1n with a killed hook) | held (LS-4o-F pass 3: an `apply_patch` allow rule plus a killed hook still asked once, target outside the roots absent; LS-4o-R, LS-4o-V2 and LS-4 re-run held) |
+| 3 | the report tool accepts another job | held (CX-1a) | none (no CLI part) |
+| 5 | a command process survives teardown | held (CX-1f: worker SIGKILLed mid-turn; CX-1n) | held (LS-5o-V: 0 processes naming the worker's scratch root; LS-3d…3d3 re-run held) |
+| 6 | an extra loaded surface is not refused | held (CX-1q: an enabled feature fails the dispatched job before any turn) | held (LS-5o-W: lockdown `ok` on the worker entry; LS-3e re-run refused the operator's surface) |
+
+KC4 has no C1b path: one turn per worker, resume refused (CX-1i).
+Real CLI run once on 2026-11-19 (`CP_LIVE_TESTS=1 XDG_RUNTIME_DIR=/run/user/$UID npm run test:one --
+tests/e2e/codex-worker-live-smoke.test.ts`, codex-cli 0.170.0): all 19 cases passed, one pass each. LS-5o-V: the
+spawn is denied at picp's hook (`collaborationspawn_agent`), no `subAgentActivity`, report accepted. LS-5 (one live
+turn on the worker entry): 36,727 tokens at cost 0, the envelope filed; the first thread delete returned `deleted:
+true`, a second `deleted: false` naming the CLI's "no rollout found" error.

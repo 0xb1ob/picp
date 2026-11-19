@@ -255,6 +255,7 @@ export function applyEvent(state: ProjectionState, event: RunEvent): ProjectionS
 					const usage = readUsage(message.usage);
 					if (usage) baseUsage = addUsage(baseUsage, usage);
 					currentUsage = EMPTY_USAGE;
+					if (payload.cost_unknown === true) status.cost_unknown = true;
 				}
 				break;
 			}
@@ -326,6 +327,7 @@ export function applyEvent(state: ProjectionState, event: RunEvent): ProjectionS
 					const usage = readUsage(message.usage);
 					if (usage) baseUsage = addUsage(baseUsage, usage);
 					currentUsage = EMPTY_USAGE;
+					if (payload.cost_unknown === true) status.cost_unknown = true;
 				}
 				break;
 			}

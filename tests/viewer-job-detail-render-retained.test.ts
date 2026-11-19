@@ -49,3 +49,11 @@ test("routing pills retain recorded provenance once and show one explanation", (
  assert.match(partial, /risk:low/);
  assert.doesNotMatch(partial, /scope:|inferred|defaulted/);
 });
+
+test("C1b: an unknown USD cost never reads as $0.00, and a codex job names the Codex CLI", () => {
+ const codex = parseHTML(detail({cost_usd:0, cost_unknown:true, driver:"codex", model:"openai/gpt-picp-fake"})).document;
+ assert.equal(codex.querySelector(".job-fact-cost dd")?.textContent, "unknown (tokens only)");
+ assert.match(codex.querySelector(".job-fact-model dd")?.textContent ?? "", /Codex CLI/);
+ assert.match(parseHTML(detail({cost_usd:1.5, cost_unknown:true})).document.querySelector(".job-fact-cost dd")?.textContent ?? "", /^\$1\.50? \+ unknown$/);
+ assert.doesNotMatch(parseHTML(detail({cost_usd:0})).document.querySelector(".job-fact-cost dd")?.textContent ?? "", /unknown/);
+});

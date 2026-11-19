@@ -36,6 +36,7 @@ import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type
 import { nativeDoorRefusal, nativeReviveBase, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
 import { observeNative } from "./native-availability-observer.ts";
 import { nativeBaseEnv, nativeThinkingEnv } from "./drivers/claude.ts";
+import { codexDoorRefusal } from "./drivers/codex.ts";
 import { projectBaseBranch } from "./forge-runtime.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
@@ -385,6 +386,7 @@ export class Reviver {
 		const record = this.#options.fleet.get(jobId);
 		if (!record) return refuse(jobId, "not_found", `no fleet record for ${jobId}`);
 		if (isScriptFleetRecord(record)) return refuse(jobId, "not_revivable_phase", `${jobId} is a script job; an unobserved exit cannot be replayed`);
+		if (record.worker?.driver === "codex") return refuse(jobId, "native_refused", codexDoorRefusal(jobId, "cp_revive"));
 		const native = record.worker?.driver !== undefined;
 		if (native && options?.recovering) return refuse(jobId, "native_refused", nativeDoorRefusal(jobId, "bounded recovery"));
 		// J7: a native continue_failed is the plain native revive (its event records continue_failed_as_revive).

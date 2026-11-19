@@ -206,7 +206,7 @@ test("S1 config: an unknown driver or a non-anthropic claude model refuses with 
 	h.toggle(true);
 	const write = (json: string) => tool("bash", { command: `printf '%s' '${json}' > "${routingFile}"` });
 	const ends = (await h.b.run([
-		write(h.routing({ driver: "codex" })),
+		write(h.routing({ driver: "gemini" })),
 		{ kind: "tool_calls", calls: [dispatch(codex.id)] },
 		write(h.routing({ driver: "claude", model: h.piModel })),
 		{ kind: "tool_calls", calls: [dispatch(badModel.id)] },

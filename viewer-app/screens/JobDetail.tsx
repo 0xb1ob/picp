@@ -18,7 +18,15 @@ function ModelFact({job}: {job: ViewerJob}) {
  const id = job.script_path ?? job.model;
  if (!id) return <>not recorded</>;
  const provider = !job.script_path && id.includes("/") ? id.slice(0,id.lastIndexOf("/")) : null;
- return job.script_path ? <code>{job.script_path}</code> : <><ModelName job={job}/>{provider && <span class="job-provider">{provider}</span>}{job.driver && <span class="job-provider">{job.driver === "claude" ? "Claude CLI" : `native ${job.driver}`}</span>}</>;
+ return job.script_path ? <code>{job.script_path}</code> : <><ModelName job={job}/>{provider && <span class="job-provider">{provider}</span>}{job.driver && <span class="job-provider">{job.driver === "claude" ? "Claude CLI" : job.driver === "codex" ? "Codex CLI" : `native ${job.driver}`}</span>}</>;
+}
+
+/** C1b: an unknown USD cost (a codex run, an estimated Claude run) never reads as a measured $0.00. */
+function costFact(job: ViewerJob): string {
+ if (job.usage_unavailable) return "unavailable (not measured)";
+ if (job.cost_usd === null) return "not recorded";
+ if (!job.cost_unknown) return money(job.cost_usd);
+ return job.cost_usd === 0 ? "unknown (tokens only)" : `${money(job.cost_usd)} + unknown`;
 }
 
 function reviewFact(job: ViewerJob): string {
@@ -204,7 +212,7 @@ export function JobDetail({data, wide, initial, embedded = false}: {data: JobRes
     {data.mandate && <MandateSnippet mandate={data.mandate}/>}
     <dl class="job-facts">
      <div class="job-fact-clock"><dt>Wall clock</dt><dd>{clockFact(job)}</dd></div>
-     <div class="job-fact-cost"><dt>Cost</dt><dd>{job.usage_unavailable ? "unavailable (not measured)" : job.cost_usd === null ? "not recorded" : money(job.cost_usd)}</dd></div>
+     <div class="job-fact-cost"><dt>Cost</dt><dd>{costFact(job)}</dd></div>
      <div class="job-fact-model"><dt>Model</dt><dd><ModelFact job={job}/></dd></div>
      {job.driver_note && <div class="job-fact-wide job-fact-driver"><dt>Driver</dt><dd>{job.driver_note}</dd></div>}
      <div class="job-fact-head"><dt>Head</dt><dd>{job.head ? <ShaCopy sha={job.head}/> : "no commits yet"}</dd></div>

@@ -51,7 +51,7 @@ import {
 	WorkerProcess,
 	type WorkerSpawnOptions,
 } from "./worker-process.ts";
-import { nativeMaxConcurrent, nativeSlotRefusal, nativeSpawnOptions } from "./drivers/claude.ts";
+import { nativeDriverSpec, nativeWorkerSlotRefusal } from "./drivers/registry.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 
 /** Why a spawn was refused; the message text is unchanged, the code is for callers that branch (cp_dispatch queues `spawn_cap`). */
@@ -623,7 +623,7 @@ export class WorkerManager {
 				{ code: reviewer ? "review_reserve" : "spawn_cap" },
 			);
 		}
-		const full = request.driver && nativeSlotRefusal(this.active.filter((w) => w.driver).map((w) => w.key), key, nativeMaxConcurrent(this.#options.home));
+		const full = request.driver && nativeWorkerSlotRefusal(this.#options.home, request.driver, this.active.filter((w) => w.driver === request.driver).map((w) => w.key), key);
 		if (full) throw new SpawnSafetyError(`job ${key}: ${full.why}`);
 		request.admit?.();
 		const plan = this.plan(request);
@@ -666,7 +666,7 @@ export class WorkerManager {
 				? { extraArgs: [...(request.extraArgs ?? []), ...(optional.flags ?? [])] }
 				: {}),
 			...(this.#options.piBin ? { piBin: this.#options.piBin } : {}),
-			...(request.driver ? nativeSpawnOptions(request.model, plan.env, request.profile.systemPrompt, {
+			...(request.driver ? nativeDriverSpec(request.driver).spawnOptions(request.model, plan.env, request.profile.systemPrompt, {
 				web: activatedPackageNames(role, request.profile.frontmatter.packages).includes("pi-web-access"),
 				profile: request.profile.frontmatter.name,
 			}) : {}),

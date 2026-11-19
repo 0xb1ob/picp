@@ -19,7 +19,7 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const ThinkingLevelSchema = StringEnum([...THINKING_LEVELS]);
 
 /** Native routing S1: the drivers a rubric row may prefer; absent means pi. */
-export const ROUTING_DRIVERS = ["pi", "claude"] as const;
+export const ROUTING_DRIVERS = ["pi", "claude", "codex"] as const;
 export type RoutingDriver = (typeof ROUTING_DRIVERS)[number];
 export const RoutingDriverSchema = StringEnum([...ROUTING_DRIVERS]);
 /** `<code>: <why>` for the driver a dispatch ran on, e.g. `switch: … is off`; bounded, never credentials. */
@@ -208,8 +208,8 @@ export const RoutingRuleSchema = Type.Object(
 		fallbacks: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 4 })),
 		note: Type.Optional(Type.String({ maxLength: 300 })),
 		/**
-		 * Native routing S1: `claude` prefers the native driver for eligible research; absent or `pi` is pi.
-		 * A claude row's `model` is an explicit Anthropic Claude id; `[model, ...fallbacks]` stays the pi lane.
+		 * Native routing S1: `claude` (or `codex`, C1b) prefers that native driver for eligible jobs; absent or `pi` is pi.
+		 * A claude row's `model` is an explicit Anthropic Claude id, a codex row's an explicit OpenAI GPT id.
 		 */
 		driver: Type.Optional(RoutingDriverSchema),
 	},

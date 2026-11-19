@@ -286,9 +286,13 @@ test("N4f native.json: absent is every class off at concurrency 1; switches are 
 	t.after(() => rmSync(home, { recursive: true, force: true }));
 	const file = nativeConfigFile(home);
 	mkdirSync(dirname(file), { recursive: true });
-	assert.deepEqual(loadNativeConfig(file), { claude_research: false, claude_ship: false, claude_review: false, max_concurrent: 1 });
+	const codexOff = { codex_research: false, codex_ship: false, codex_review: false, codex_max_concurrent: 1 };
+	assert.deepEqual(loadNativeConfig(file), { claude_research: false, claude_ship: false, claude_review: false, max_concurrent: 1, ...codexOff });
 	const load = (value: unknown) => (writeFileSync(file, JSON.stringify(value)), loadNativeConfig(file));
-	assert.deepEqual(load({ claude_ship: true, max_concurrent: 4 }), { claude_research: false, claude_ship: true, claude_review: false, max_concurrent: 4 });
+	assert.deepEqual(load({ claude_ship: true, max_concurrent: 4 }), { claude_research: false, claude_ship: true, claude_review: false, max_concurrent: 4, ...codexOff });
+	// C1b: the codex keys type-check like the claude ones; their count is separate and 1-4.
+	assert.deepEqual(load({ codex_research: true, codex_max_concurrent: 2 }), { claude_research: false, claude_ship: false, claude_review: false, max_concurrent: 1, ...codexOff, codex_research: true, codex_max_concurrent: 2 });
+	for (const bad of [0, 5]) assert.throws(() => load({ codex_max_concurrent: bad }), /codex_max_concurrent must be an integer from 1 to 4/, String(bad));
 	assert.equal(load({ claude_review: true }).claude_review, true);
 	for (const bad of [0, 5, 1.5, "2", null]) assert.throws(() => load({ max_concurrent: bad }), /max_concurrent must be an integer from 1 to 4/, String(bad));
 	assert.throws(() => load({ claude_ship: "yes" }), /claude_ship must be true or false/);
@@ -301,6 +305,11 @@ test("N4f native.json: absent is every class off at concurrency 1; switches are 
 	writeFileSync(file, JSON.stringify({ claude_ship: true, extra: 1 }));
 	assert.equal(nativeQuotaLine(state, Date.now()), undefined);
 	writeFileSync(file, JSON.stringify({ claude_ship: false, claude_review: false }));
+	assert.equal(nativeQuotaLine(state, Date.now()), undefined);
+	// The Claude item stays visible with codex keys present; a codex switch alone never shows it.
+	writeFileSync(file, JSON.stringify({ claude_ship: true, codex_research: true, codex_max_concurrent: 2 }));
+	assert.equal(nativeQuotaLine(state, Date.now())?.state, "unknown");
+	writeFileSync(file, JSON.stringify({ codex_research: true }));
 	assert.equal(nativeQuotaLine(state, Date.now()), undefined);
 });
 

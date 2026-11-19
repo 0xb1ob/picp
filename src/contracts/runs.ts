@@ -282,6 +282,8 @@ export const CP_EVENT_KINDS = [
 	"pr_url_unverified",
 	/** N3c: teardown removed a native job's kept Claude scratch dir after the observed exit (or kept it, naming why). */
 	"native_scratch_removed",
+	/** C1b: teardown deleted a codex job's recorded thread through one contained app-server (or named why not). */
+	"native_thread_deleted",
 ] as const;
 export type CpEventKind = (typeof CP_EVENT_KINDS)[number];
 export const CpEventKindSchema = StringEnum([...CP_EVENT_KINDS]);
@@ -350,6 +352,8 @@ export const RunStatusSchema = Type.Object(
 		usage: UsageSchema,
 		/** A native worker whose run could not be measured: `usage` is then unknown, never a measured zero (N3b). */
 		usage_unavailable: Type.Optional(Type.Literal(true)),
+		/** A native run whose USD cost is unknown (a codex run, an estimated Claude run): `usage.cost_usd` is not a measured $0. */
+		cost_unknown: Type.Optional(Type.Literal(true)),
 		started_at: IsoTimestampSchema,
 		last_activity_at: IsoTimestampSchema,
 		settled_at: Type.Optional(IsoTimestampSchema),
