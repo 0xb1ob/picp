@@ -50,7 +50,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			message: Type.String({ description: "The new brief, steer or follow-up text" }),
 			mode: Type.Optional(
 				StringEnum(["auto", "prompt", "steer", "follow_up"], {
-					description: "auto: prompt when idle, steer when busy (a Claude CLI job resumes when idle, queues until the turn ends when busy, refuses steer)",
+					description: "auto: prompt when idle, steer when busy (a Claude CLI job resumes when idle, queues until the turn ends when busy, refuses steer; a Codex CLI job resumes when idle and steers the running turn when busy, queuing if the CLI refuses the steer)",
 				}),
 			),
 			model: Type.Optional(

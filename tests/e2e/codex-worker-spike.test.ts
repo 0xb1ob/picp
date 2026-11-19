@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
 import { isPidAlive } from "../../src/fleet.ts";
-import { codexHookTrust, codexPermissionProfile, codexSpawnArgs, type CodexSpikeResult, type CodexToolEvent } from "../../src/drivers/codex-spike.ts";
+import { codexHookTrust, codexPermissionProfile, type CodexRunControl, codexSpawnArgs, type CodexSpikeResult, type CodexToolEvent } from "../../src/drivers/codex-spike.ts";
 import { resolveCodexContainment } from "../../src/drivers/codex-containment.ts";
 import { spawnCodexRpc } from "../../src/drivers/codex-rpc.ts";
 import {
@@ -20,6 +20,7 @@ import {
 	fakeExecuted,
 	fakeHooks,
 	fakePids,
+	fakePrompts,
 	fakeRpcMethods,
 	fakeScopes,
 	fakeSpawns,
@@ -435,4 +436,29 @@ test("CX-1k: a codex release dir that is or holds the home or the Codex home ref
 		assert.deepEqual(fakeExecuted(fx.stateDir), [], what);
 		assertClean(fx);
 	}
+});
+
+test("CX-2s: control.steer acks on the live turn, returns the CLI's -32600 refusal, refuses a credential-shaped text, and is gone after", { timeout: 120_000 }, async (t) => {
+	const fx = fixture(t, { turns: [[{ kind: "hold", marker: "held" }, { kind: "message", text: "after the steer" }]] });
+	const control: CodexRunControl = {};
+	const running = fx.run({ control });
+	await until(() => existsSync(join(fx.stateDir, "held")) && control.steer !== undefined, "the held turn");
+	await assert.rejects(control.steer!(`use sk-${"a".repeat(20)}`), /steer appears to contain openai-style key/);
+	const acked = await control.steer!("Steer: one more check.");
+	assert.equal(acked.steered, true, JSON.stringify(acked));
+	const result = await running;
+	assert.equal(result.outcome, "completed", result.error);
+	assert.equal(control.steer, undefined, "no steer outlives its turn");
+	const steers = fakePrompts(fx.stateDir).filter((each) => each.method === "turn/steer");
+	assert.deepEqual(steers.map((each) => each.text), ["Steer: one more check."], "only the safe text reached the CLI");
+	assert.equal(steers[0]?.turnId, acked.steered ? acked.turnId : undefined);
+
+	const refused = fixture(t, { knobs: { steer: "refuse" }, turns: [[{ kind: "hold", marker: "held", forMs: 3_000 }]] });
+	const refusedControl: CodexRunControl = {};
+	const second = refused.run({ control: refusedControl });
+	await until(() => existsSync(join(refused.stateDir, "held")) && refusedControl.steer !== undefined, "the second held turn");
+	assert.deepEqual(await refusedControl.steer!("Too late."), { steered: false, why: "no active turn to steer" });
+	assert.equal((await second).outcome, "completed");
+	assert.equal(refusedControl.steer, undefined);
+	assertClean(fx, result);
 });

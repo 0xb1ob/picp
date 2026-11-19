@@ -17,7 +17,7 @@ type Step =
 	| { kind: "patch"; path: string; content?: string; hook?: HookMode }
 	| { kind: "subagent"; command: string; hook?: HookMode }
 	| { kind: "message"; text: string }
-	| { kind: "hold"; marker: string };
+	| { kind: "hold"; marker: string; forMs?: number };
 interface Knobs {
 	version?: string;
 	loginStatus?: number;
@@ -46,6 +46,8 @@ interface Knobs {
 	modelMs?: number;
 	/** `unasked`: a patch applies with no approval request, a CLI that bypasses picp's decline. */
 	patchApply?: "unasked";
+	/** `refuse`: every `turn/steer` answers -32600, as the CLI does for a turn it no longer runs. */
+	steer?: "refuse";
 }
 interface Script { knobs?: Knobs; turns?: Step[][] }
 interface Totals { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number; outputTokens: number; reasoningOutputTokens: number; totalTokens: number }
@@ -120,6 +122,7 @@ function ask(method: string, params: unknown): Promise<unknown> {
 interface Thread { id: string; total: Totals; lastTurnId?: string; cwd: string; policy: string; replay: boolean }
 let thread: Thread | undefined;
 let interrupted = false;
+let liveTurn: string | undefined;
 let wakeHold: () => void = () => {};
 let counter = 0;
 const terminals = new Map<string, { pid: number; command: string; itemId: string }>();
@@ -198,8 +201,22 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
 	}
 	if (method === "turn/start") {
 		const id = `turn_${process.pid}_${++counter}`;
+		log("prompts.jsonl", { method, threadId: thread?.id, turnId: id, text: textOf(params.input) });
+		liveTurn = id;
 		setImmediate(() => void runTurn(id, nextTurn()));
 		return { turn: { id, status: "inProgress", items: [] } };
+	}
+	if (method === "turn/steer") {
+		const expected = String(params.expectedTurnId ?? "");
+		if (knobs.steer === "refuse" || liveTurn === undefined) throw Object.assign(new Error("no active turn to steer"), { code: -32600 });
+		if (expected !== liveTurn) throw Object.assign(new Error(`expected active turn id ${expected} but found ${liveTurn}`), { code: -32600 });
+		const text = textOf(params.input);
+		log("prompts.jsonl", { method, threadId: thread?.id, turnId: liveTurn, text });
+		const item = { type: "userMessage", id: `item_${++counter}`, content: [{ type: "text", text }] };
+		notify("item/started", { threadId: thread?.id, turnId: liveTurn, item });
+		notify("item/completed", { threadId: thread?.id, turnId: liveTurn, item });
+		wakeHold();
+		return { turnId: liveTurn };
 	}
 	if (method === "turn/interrupt") {
 		interrupted = true;
@@ -223,6 +240,8 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
 	}
 	throw Object.assign(new Error(`fake codex: no method ${method}`), { code: -32601 });
 }
+
+const textOf = (input: unknown): string => (Array.isArray(input) ? input.map((part: { text?: unknown }) => String(part?.text ?? "")).join("\n") : "");
 
 function socketOf(command: string): string | undefined {
 	return /'([^']*)' \d+$/.exec(command)?.[1];
@@ -332,7 +351,12 @@ async function runStep(step: Step, turnId: string): Promise<void> {
 	}
 	if (step.kind === "hold") {
 		writeFileSync(join(STATE, step.marker), "");
-		if (!interrupted) await new Promise<void>((done) => (wakeHold = done));
+		if (!interrupted) {
+			await new Promise<void>((done) => {
+				wakeHold = done;
+				if (step.forMs !== undefined) setTimeout(done, step.forMs);
+			});
+		}
 		return;
 	}
 	const callId = `call_${++counter}`;
@@ -366,6 +390,7 @@ async function runTurn(turnId: string, steps: Step[]): Promise<void> {
 		if (usage) addUsage(t, turnId, STEP_USAGE);
 	}
 	if (usage) notify("thread/tokenUsage/updated", { threadId: t.id, turnId, tokenUsage: { total: { ...t.total }, last: STEP_USAGE } });
+	liveTurn = undefined;
 	notify("turn/completed", { threadId: t.id, turn: { id: turnId, status: interrupted ? "interrupted" : "completed", items: [] } });
 }
 

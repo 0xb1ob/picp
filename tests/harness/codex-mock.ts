@@ -21,7 +21,7 @@ export type FakeCodexStep =
 	| { kind: "patch"; path: string; content?: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink" }
 	| { kind: "subagent"; command: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink" }
 	| { kind: "message"; text: string }
-	| { kind: "hold"; marker: string };
+	| { kind: "hold"; marker: string; forMs?: number };
 export interface FakeCodexScript { knobs?: Record<string, unknown>; turns?: FakeCodexStep[][] }
 
 export function writeCodexScript(file: string, script: FakeCodexScript): void {
@@ -52,6 +52,8 @@ export const fakePids = (state: string) => lines<{ pid: number }>(join(state, "p
 export const fakeHooks = (state: string) => lines<{ tool: string; mode: string; status: string; stderr: string }>(join(state, "hooks.jsonl"));
 export const fakeScopes = (state: string) => lines<{ unit: string; started?: true; props?: string[]; killed?: number; collected?: true; refused?: true }>(join(state, "scopes.jsonl"));
 export const fakePatched = (state: string) => lines<{ path: string }>(join(state, "patched.jsonl")).map((entry) => entry.path);
+/** Each `turn/start` and acked `turn/steer` the fake took, with its thread, turn and text. */
+export const fakePrompts = (state: string) => lines<{ method: string; threadId: string; turnId: string; text: string }>(join(state, "prompts.jsonl"));
 export const fakeThreadTotal = (state: string, threadId: string) =>
 	(JSON.parse(readFileSync(join(state, "threads", `${threadId}.json`), "utf8")) as { total: { totalTokens: number } }).total;
 

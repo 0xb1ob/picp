@@ -4,6 +4,7 @@
  */
 import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision, type RoutingDriver } from "./contracts.ts";
 import { liveNativeJobs, nativeBaseEnv, NativeDriverError, type NativeRefusal, nativeSlotRefusal, nativeThinkingEnv } from "./drivers/claude.ts";
+import { codexPersistRefusal } from "./drivers/codex.ts";
 import { nativeDriverSpec, type NativeDriverSpec } from "./drivers/registry.ts";
 import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest, RoutingError } from "./routing.ts";
 import { nativeAvailability } from "./native-availability.ts";
@@ -102,7 +103,9 @@ export async function resolveDriverRoute(
 	}
 	if (refusal) {
 		const pi = await resolveWithCapacity(route, config, probe, capacity);
-		return { ...pi, requested_driver: wanted, driver: "pi", driver_reason: bounded(`${refusal.category}: ${refusal.why}`) };
+		// While codex is off no persisted record names it: the previous build reads the fleet and run log.
+		const off = wanted === "codex" && codexPersistRefusal(ctx.home, `the routing record of ${ctx.jobId}`) !== undefined;
+		return { ...pi, ...(off ? {} : { requested_driver: wanted }), driver: "pi", driver_reason: bounded(`${refusal.category}: ${refusal.why}`) };
 	}
 	if (ctx.reserve) slots.set(slotKey(ctx.home, wanted), (slots.get(slotKey(ctx.home, wanted)) ?? new Set<string>()).add(ctx.jobId));
 	const native: RoutingDecision = {

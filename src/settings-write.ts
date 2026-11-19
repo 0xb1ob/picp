@@ -356,8 +356,10 @@ function setNativeSwitches(doc: Record<string, unknown>, driver: string): boolea
 
 /** No claude or codex row on a model or effort its CLI refuses, and no newly picked model routing refuses. */
 function refuseRoutingRows(home: string, config: RoutingConfig, prior: Record<string, unknown>): void {
-	const was = new Map((Array.isArray(prior.rubric) ? prior.rubric : []).filter(isObject).map((row) => [row.id, row.model]));
-	const rows = new Map((Array.isArray(prior.rubric) ? prior.rubric : []).filter(isObject).map((row) => [row.id, row]));
+	// `config` is legacy-role normalised, so the prior rows are too: `kept` compares like with like.
+	const priorRows = (Array.isArray(prior.rubric) ? (normalizeLegacyRoles(clone(prior.rubric)) as unknown[]) : []).filter(isObject);
+	const was = new Map(priorRows.map((row) => [row.id, row.model]));
+	const rows = new Map(priorRows.map((row) => [row.id, row]));
 	// Condition 2 (C1b): while codex is off, picp writes no new or changed codex row; an unchanged hand-written one stays.
 	const errors = config.rubric.flatMap((row: RoutingRule) => {
 		const out: string[] = [];

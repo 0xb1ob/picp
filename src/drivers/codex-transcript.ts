@@ -7,7 +7,9 @@ import type { CodexToolEvent } from "./codex-spike.ts";
 
 export interface CodexTranscript {
 	file: string;
-	prompt(text: string): void;
+	/** A resumed turn is marked first, in Codex words (the shared marker names Claude). */
+	prompt(text: string, resumed?: boolean): void;
+	steer(text: string): void;
 	agent(text: string): void;
 	reasoning(text: string): void;
 	tool(event: CodexToolEvent): void;
@@ -17,9 +19,14 @@ export function codexTranscript(file: string, header: { id: string; cwd: string 
 	const log = nativeTranscript(file, header, (name) => name);
 	const names = new Map<string, string>();
 	const assistant = (content: unknown[]) => log.message("assistant", content, { provider: "openai", model });
+	const marked = (content: string, text: string) => {
+		log.entry("custom_message", { customType: "native", content, display: true });
+		log.prompt(text, false);
+	};
 	return {
 		file,
-		prompt: (text) => log.prompt(text, false),
+		prompt: (text, resumed = false) => (resumed ? marked("Resumed the recorded Codex thread", text) : log.prompt(text, false)),
+		steer: (text) => marked("Steered the running turn", text),
 		agent: (text) => assistant([{ type: "text", text: capped(text) }]),
 		reasoning: (text) => assistant([{ type: "thinking", thinking: capped(text) }]),
 		tool(event) {
