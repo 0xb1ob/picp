@@ -493,13 +493,16 @@ test("CX-7l: CP_CODEX_READ_ROOTS opens a tool dir read-only; one naming the CP h
 	const tools = join(h.root, "tools");
 	mkdirSync(tools);
 	writeFileSync(join(tools, "tool"), "READ-ROOT-SENTINEL\n");
-	reset(h, { turns: [[{ kind: "shell", command: `cat ${join(tools, "tool")}` }, { kind: "message", text: "Read it." }]] });
-	await h.run([reads.dispatch({ task: "Read the tool." }), h.waitEvent(reads.id, RUN, 1)], { CP_CODEX_READ_ROOTS: JSON.stringify([tools]) });
+	reset(h, { turns: [[
+		{ kind: "shell", command: `cat ${join(tools, "tool")}` }, { kind: "tool", tool: "report_result", arguments: h.shipReport(reads.id, "local") }, { kind: "message", text: "Read it." },
+	]] });
+	await h.run([reads.dispatch({ task: "Read the tool." }), h.awaitEnvelope(reads.id), h.pause(2)], { CP_CODEX_READ_ROOTS: JSON.stringify([tools]) });
 	assert.equal(implementerProfile(h)[realpathSync(tools)], "read");
 	assert.match(transcript(h, reads.id), /READ-ROOT-SENTINEL/);
-	const servers = appServers(h).length;
 	reset(h, { turns: [[{ kind: "message", text: "never" }]] });
 	await h.b.closeParents();
+	await workerGone(h, reads.id);
+	const servers = appServers(h).length;
 	await h.run([refused.dispatch({ task: "Ship." })], { CP_CODEX_READ_ROOTS: JSON.stringify([h.b.home]) });
 	await failed(h, refused.id);
 	const [run] = await h.runs(refused.id);
