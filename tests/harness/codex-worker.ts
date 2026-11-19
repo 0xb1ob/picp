@@ -69,7 +69,7 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 			return [];
 		}
 	};
-	const run = async (steps: ScriptStep[], extraEnv: Record<string, string> = {}) =>
-		(await b.run(steps, { ...env, ...extraEnv }, undefined, 240_000)) as Array<{ toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } }>;
+	const run = async (steps: ScriptStep[], extraEnv: Record<string, string> = {}, prompt?: string) =>
+		(await b.run(steps, { ...env, ...extraEnv }, prompt, 240_000)) as Array<{ toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } }>;
 	return { b, root, bin, state, codexHome, outside, nativeFile, env, record, job, report, reporting, setScript, awaitEnvelope, awaitFile, pause, runs, session, homeListing, lines, run };
 }
