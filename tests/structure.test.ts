@@ -181,6 +181,8 @@ const R2_ALLOWED = [
 	"src/drivers/claude-worker.ts",
 	// C0 spike: its scratch HOME, TMPDIR and hook socket sit outside the worktree and the home.
 	"src/drivers/codex-spike.ts",
+	// C1b: the Codex worker's kept scratch dir (the thread delete's HOME and TMPDIR); teardown removes it.
+	"src/drivers/codex-worker.ts",
 	// C1a: the guard chain moved out of claude-spike.ts keeps its default secret paths under the home.
 	"src/drivers/native-guards.ts",
 	"src/home.ts",
@@ -227,7 +229,7 @@ test("storage ratchet R1/R1b/R2: home paths come from LAYOUT, outside-the-home c
 
 // C1a: the Codex driver never loads the Agent SDK. Static run-time imports only (`import type` erases); a bare package
 // is not followed, so the closure is of this repo's modules plus the package names they import.
-const SDK_FREE_ROOTS = ["src/drivers/codex-spike.ts"];
+const SDK_FREE_ROOTS = ["src/drivers/codex-spike.ts", "src/drivers/codex-worker.ts"];
 const SDK_ONLY = /^(?:@anthropic-ai\/claude-agent-sdk|zod)(?:\/|$)|\/claude-spike\.ts$/;
 const IMPORT = /^\s*(?:import|export)\s+(?!type\s)(?:[^"';]*?\sfrom\s+)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/gm;
 

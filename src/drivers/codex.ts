@@ -52,6 +52,20 @@ export function codexMaxConcurrent(home: string): number {
 	}
 }
 
+/**
+ * Why picp may not persist a `codex` value (a queued or armed request, a rubric row) in this home: while every codex
+ * switch is off, the fleet, queue, routing and native.json files stay readable by a build before C1b.
+ */
+export function codexPersistRefusal(home: string, what: string): string | undefined {
+	let on: boolean;
+	try {
+		on = loadNativeConfig(nativeConfigFile(home)).codex_research;
+	} catch (error) {
+		return `${what} names the codex driver and data/native.json is unreadable (${(error as Error).message}); nothing was written`;
+	}
+	return on ? undefined : `${what} names the codex driver while codex_research is off (data/native.json); turn it on first. Nothing was written`;
+}
+
 /** The first C1b selection condition that fails, in order: switch file, class, switch, delivery, slot, scope, CLI, login. */
 export async function codexSelectionRefusal(input: NativeSelection): Promise<{ category: NativeRefusal; why: string } | undefined> {
 	let config: ReturnType<typeof loadNativeConfig>;

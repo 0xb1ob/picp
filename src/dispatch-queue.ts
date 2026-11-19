@@ -21,6 +21,7 @@ import {
 } from "./contracts.ts";
 import type { DispatchRequest } from "./dispatch.ts";
 import { NativeDriverError } from "./drivers/claude.ts";
+import { codexPersistRefusal } from "./drivers/codex.ts";
 import { assertDispatchOpen, readDrain } from "./drain.ts";
 import { UpdateHoldError } from "./update-hold.ts";
 import { atomicWriteJson } from "./json-store.ts";
@@ -115,6 +116,8 @@ export class DispatchQueue {
 	/** Append; refuses a duplicate or a full queue. Returns the new position. */
 	enqueue(jobId: string, request: QueuedDispatchRequest): number {
 		assertDispatchOpen(this.#options.home, `queued dispatch of ${jobId}`); // draining wins: nothing new is queued either
+		const codexOff = request.driver === "codex" ? codexPersistRefusal(this.#options.home, `the queued dispatch of ${jobId}`) : undefined;
+		if (codexOff !== undefined) throw new DispatchQueueError(codexOff);
 		const file = this.read();
 		const at = file.entries.findIndex((entry) => entry.job_id === jobId);
 		if (at >= 0) throw new DispatchQueueError(`${jobId} is already queued at position ${at + 1} — it starts when a worker slot frees; do not re-dispatch`);
