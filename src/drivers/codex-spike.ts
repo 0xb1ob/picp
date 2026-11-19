@@ -227,6 +227,8 @@ export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSp
 	if (!["planner", "gate-reviewer", "implementer"].includes(options.job.role)) {
 		throw new CodexSpikeError(`the Codex run core runs the planner, gate-reviewer and implementer roles only, not ${options.job.role}`);
 	}
+	// C7a (R3): a write-capable job gets no MCP server, so a dead hook's resource read cannot reach one.
+	if (options.job.role === "implementer" && (options.mcp?.names.length ?? 0) > 0) throw new CodexSpikeError("Refused: a Codex implementer runs with no MCP server (R3).");
 	const hostEnv = options.hostEnv ?? process.env;
 	const codex = resolveCodex(hostEnv);
 	const containment = resolveCodexContainment(hostEnv);
