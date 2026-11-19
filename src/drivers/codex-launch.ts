@@ -18,6 +18,9 @@ export const SURFACE_FLAGS: readonly string[] = [
 	...CODEX_OFF_FEATURES.flatMap((feature) => ["--disable", feature]),
 	"--enable", "skip_host_skill_discovery",
 ];
+/** C6: a reviewer also loses the CLI's shell (V3); the lockdown reads it back off. */
+export const CODEX_REVIEWER_OFF_FEATURES: readonly string[] = ["shell_tool"];
+export const REVIEWER_SURFACE_FLAGS: readonly string[] = [...SURFACE_FLAGS, ...CODEX_REVIEWER_OFF_FEATURES.flatMap((feature) => ["--disable", feature])];
 export const CODEX_PROFILE = "picp_planner";
 export const HOOK_TIMEOUT_SEC = 20;
 export const CODEX_HOOK_CLIENT = fileURLToPath(new URL("./codex-hook.mjs", import.meta.url));

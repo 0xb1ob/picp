@@ -41,8 +41,9 @@ export function assertCodexEffort(level: string | undefined): void {
 /** The Codex home picp passes as `CODEX_HOME` and never opens: `CP_CODEX_HOME`, else `<passwd home>/.codex`. */
 export const codexHomeOf = (env: NodeJS.ProcessEnv): string => env.CP_CODEX_HOME?.trim() || defaultCodexHome();
 
-/** Only planner research has a Codex class in C1b; ship and review switches select nothing yet. */
-export const codexClassOf = (kind: JobKind, role: Role): CodexClass | undefined => (role === "planner" && kind === "research" ? "codex_research" : undefined);
+/** Planner research and (C6) gate reviewers have a Codex class; `codex_ship` selects nothing yet. */
+export const codexClassOf = (kind: JobKind, role: Role): CodexClass | undefined =>
+	role === "gate-reviewer" ? "codex_review" : role === "planner" && kind === "research" ? "codex_research" : undefined;
 
 /** `codex_max_concurrent`; an unreadable data/native.json keeps the safe 1. */
 export function codexMaxConcurrent(home: string): number {
@@ -75,11 +76,14 @@ export async function codexSelectionRefusal(input: NativeSelection): Promise<{ c
 	} catch (error) {
 		return { category: "switch", why: `the native switch is unreadable (${(error as Error).message})` };
 	}
-	const ineligible = { category: "ineligible" as const, why: `only research (role planner, delivery local or answer) runs on the Codex CLI in C1b; this is ${input.kind}/${input.role}/${input.delivery}` };
+	const ineligible = {
+		category: "ineligible" as const,
+		why: `only research (role planner, delivery local or answer) runs on the Codex CLI, beside gate reviewers; this is ${input.kind}/${input.role}/${input.delivery}`,
+	};
 	const codexClass = codexClassOf(input.kind, input.role);
 	if (codexClass === undefined) return ineligible;
-	if (!config[codexClass]) return { category: "switch", why: `the switch ${codexClass} is off (data/native.json codex_research)` };
-	if (!DELIVERIES.includes(input.delivery)) return ineligible;
+	if (!config[codexClass]) return { category: "switch", why: `the switch ${codexClass} is off (data/native.json ${codexClass})` };
+	if (codexClass === "codex_research" && !DELIVERIES.includes(input.delivery)) return ineligible;
 	// C5 Q3: the Codex shell has no network and no agent socket, so an ops job falls back rather than run without ssh.
 	if (input.profile === "ops") return { category: "ineligible", why: "profile ops runs no Codex CLI job: the Codex shell has no network and no ssh agent" };
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs, "codex"), input.jobId, config.codex_max_concurrent, "live", "codex");
@@ -111,6 +115,14 @@ export const CODEX_ADDENDUM = [
 	"web search are refused. Then call report_result once.",
 ].join("\n");
 
+/** C6: what a Codex reviewer is told after the profile body: picp's packet reads and the verdict, no shell. */
+export const CODEX_REVIEW_ADDENDUM = [
+	"Codex reviewer: your tools are read, grep and find, served by picp over the review packet in your working",
+	"directory, plus report_verdict; ignore any other tool names above (there is no ls). There is no shell, no patch tool,",
+	"no web search and no sub-agent. grep takes literal text, not a regular expression. Read the packet, then call",
+	"report_verdict once.",
+].join("\n");
+
 /**
  * Overrides pi's argv with the Codex worker; the role contract goes to a 0600 file in the run dir, not the argv or env.
  * `skills` (C5): the per-job skill dirs, as `CP_CODEX_SKILL_DIRS` (a JSON array) for the sandbox's read roots.
@@ -122,7 +134,7 @@ export function codexSpawnOptions(
 	if (!runDir) throw new NativeDriverError("the Codex CLI worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
-	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${CODEX_ADDENDUM}\n`, { mode: 0o600 });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${env.CP_ROLE === "gate-reviewer" ? CODEX_REVIEW_ADDENDUM : CODEX_ADDENDUM}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	const memory = process.env[WORKER_MEMORY_MAX_ENV];
 	const { [SKILL_DIRS_ENV]: _inherited, ...rest } = env;

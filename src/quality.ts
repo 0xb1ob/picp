@@ -470,7 +470,7 @@ export class QualityPass {
 				managed = await holdReviewerSlot(home, request.jobId, async () => spawn(route.decision));
 			} catch (error) {
 				// A native worker took the slot after the panel's route: this voter runs on pi rather than abstain.
-				if (!(error instanceof SpawnSafetyError && /native concurrency/.test(error.message))) throw error;
+				if (!(error instanceof SpawnSafetyError && /(?:native|codex) concurrency/.test(error.message))) throw error;
 				const pi = await this.#route(profile, request, record, "pi");
 				recorder.cp("routing_resolved", reviewerRoutingEvent({ surface: `quality/${options.slot}`, ...pi }));
 				model = pi.decision.model;

@@ -7,7 +7,7 @@ import { createServer, type Server } from "node:net";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { Envelope } from "../contracts.ts";
+import type { Envelope, GateReview } from "../contracts.ts";
 import { isPidAlive } from "../fleet.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
 import { agentDirOf, type CodexMcpServers } from "../worker-mcp.ts";
@@ -22,8 +22,10 @@ import {
 	codexPermissionProfile,
 	type CodexProfile,
 	codexReleaseDir,
+	CODEX_REVIEWER_OFF_FEATURES,
 	codexSkillRoots,
 	codexSpawnArgs,
+	REVIEWER_SURFACE_FLAGS,
 } from "./codex-launch.ts";
 import { type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
 import { type CodexRateLimits, mergeCodexRateLimits } from "./codex-observation.ts";
@@ -161,7 +163,7 @@ export function codexRunUsage(baseline: CodexTokenTotals | undefined, latest: Co
 }
 
 export interface CodexSpikeOptions {
-	/** Planner only in C0; another role throws. */
+	/** Planner or (C6) gate-reviewer; another role throws. */
 	job: SpikeJob;
 	prompt: string;
 	model?: string;
@@ -218,6 +220,8 @@ export interface CodexSpikeResult {
 	turnStatus?: Turn["status"];
 	codexErrorInfo?: unknown;
 	report?: Envelope;
+	/** A reviewer's accepted `report_verdict` (C6), already filed in the run dir. */
+	verdict?: GateReview;
 	reportRefusals: string[];
 	denials: CodexDenial[];
 	ticketMatch: { id: number; payload: number; none: number };
@@ -239,7 +243,9 @@ export interface CodexSpikeResult {
 
 /** One isolated planner run; its own scratch dir (HOME, TMPDIR, hook socket) is removed before returning. */
 export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSpikeResult> {
-	if (options.job.role !== "planner") throw new CodexSpikeError(`the Codex spike runs the planner role only, not ${options.job.role}`);
+	if (options.job.role !== "planner" && options.job.role !== "gate-reviewer") {
+		throw new CodexSpikeError(`the Codex run core runs the planner and gate-reviewer roles only, not ${options.job.role}`);
+	}
 	const hostEnv = options.hostEnv ?? process.env;
 	const codex = resolveCodex(hostEnv);
 	const containment = resolveCodexContainment(hostEnv);
@@ -255,7 +261,7 @@ export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSp
 		const login = await codexLoginRefusal(codex.path, { codexHome, home: dirs.home, pathEnv: hostEnv.PATH ?? "" });
 		if (login !== undefined) throw Object.assign(new CodexSpikeError(login), { cli: "auth" as const });
 		const roots = {
-			worktree: options.job.worktree, gitDir: codexGitDir(options.job.worktree), codexDir: codexReleaseDir(codex.path, { homes: [hostEnv.HOME, userInfo().homedir], codexHome }),
+			worktree: options.job.worktree, gitDir: options.job.role === "gate-reviewer" ? undefined : codexGitDir(options.job.worktree), codexDir: codexReleaseDir(codex.path, { homes: [hostEnv.HOME, userInfo().homedir], codexHome }),
 			artifactDir: options.job.artifactPath === undefined ? undefined : dirname(options.job.artifactPath), tmp: dirs.tmp,
 			skills: options.skillDirs?.length ? codexSkillRoots(options.skillDirs, { homes: [hostEnv.HOME, userInfo().homedir], codexHome, others: [agentDirOf(hostEnv), hostEnv.CP_HOME] }) : undefined,
 		};
@@ -305,6 +311,7 @@ class CodexRun {
 	private readonly socket: string;
 	private readonly containment: CodexContainment;
 	private readonly profile: CodexProfile;
+	private readonly reviewer: boolean;
 
 	constructor(
 		options: CodexSpikeOptions, codex: { path: string; version: string }, hostEnv: NodeJS.ProcessEnv, codexHome: string,
@@ -314,7 +321,8 @@ class CodexRun {
 		[this.containment, this.profile] = [containment, profile];
 		const job = { ...options.job, tmp: dirs.tmp };
 		const secrets = [...secretPaths(null, [userInfo().homedir]), resolve(codexHome)];
-		this.guards = [...spikeGuards(job, secrets, "planner", false), codexSecretGuard(resolve(codexHome)), ...(options.extraGuards ?? [])];
+		this.reviewer = options.job.role === "gate-reviewer";
+		this.guards = [...spikeGuards(job, secrets, options.job.role, false), codexSecretGuard(resolve(codexHome)), ...(options.extraGuards ?? [])];
 		this.tools = codexRoleTools(options.job, hostEnv, this.reported);
 	}
 
@@ -514,9 +522,8 @@ class CodexRun {
 		const status = "status" in item ? item.status : undefined;
 		// 0.170.0 announces a command `inProgress` with no process before it asks; a process or an end means it ran.
 		const ran = item.type === "commandExecution" && (status !== "inProgress" || item.processId != null);
-		// 0.170.0 announces a patch `inProgress` after the hook and before it asks (F1); picp accepts none, so only an
-		// end other than `declined` (`completed`, or a `failed` apply it never accepted) is an unasked patch.
-		// C5: an MCP item the hook never allowed, or a tool call that ended `completed` with no accepted approval (P1).
+		// F1: a patch is `inProgress` before it asks and picp accepts none, so any end but `declined` is unasked.
+		// C5 (P1): so is an MCP item the hook never allowed, or a tool call `completed` with no accepted approval.
 		const mcp = item.type === "mcpToolCall" ? this.allowedMcp.get(item.id) : undefined;
 		const unasked = item.type === "commandExecution"
 			? ran && status !== "declined" && !this.acceptedItems.has(item.id) && !this.hookDenied.has(item.id)
@@ -599,7 +606,8 @@ class CodexRun {
 		const { job } = this.options;
 		const env = buildCodexChildEnv(this.dirs, this.hostEnv, this.codexHome, this.options.childEnv);
 		const hookCommand = codexHookCommand(this.socket, this.options.hookClientTimeoutMs);
-		const spawn = { hookCommand, profile: this.profile, hookTimeoutSec: this.options.hookTimeoutSec, surfaceFlags: this.options.surfaceFlags };
+		const spawn = { hookCommand, profile: this.profile, hookTimeoutSec: this.options.hookTimeoutSec,
+			surfaceFlags: this.options.surfaceFlags ?? (this.reviewer ? REVIEWER_SURFACE_FLAGS : undefined) };
 		const server = await this.hookServer();
 		let lockdown: CodexLockdown | undefined;
 		let error: string | undefined;
@@ -642,6 +650,7 @@ class CodexRun {
 				const surface = {
 					codexHome: { passed: this.codexHome, reported: init.codexHome }, account: account.account != null, hookCommand, hooks, mcpServers: mcp, skills,
 					features, config, profile: { id: CODEX_PROFILE, writableRoots: this.profile.writableRoots }, mcpServersPassed: this.options.mcp?.names ?? [],
+					...(this.reviewer ? { offFeatures: CODEX_REVIEWER_OFF_FEATURES } : {}),
 				};
 				lockdown = codexLockdownVerdict(surface);
 				if (lockdown.verdict === "ok") {
@@ -679,7 +688,7 @@ class CodexRun {
 			codexPath: this.codex.path, codexVersion: this.codex.version, spawnedCommand: this.codex.path, spawnedEnvKeys: Object.keys(env).sort(),
 			...(exit === undefined ? {} : { exit }), outcome, ...(turn === undefined ? {} : { turnStatus: turn.status }),
 			...(turn?.error?.codexErrorInfo === undefined ? {} : { codexErrorInfo: turn.error.codexErrorInfo }),
-			...(this.reported.accepted === undefined ? {} : { report: this.reported.accepted }), reportRefusals: this.reported.refusals, denials: this.denials, ticketMatch: this.ticketMatch,
+			...(this.reported.accepted === undefined ? {} : { report: this.reported.accepted }), ...(this.reported.verdict === undefined ? {} : { verdict: this.reported.verdict }), reportRefusals: this.reported.refusals, denials: this.denials, ticketMatch: this.ticketMatch,
 			...(lockdown === undefined ? {} : { lockdown }), ...(this.threadId === undefined ? {} : { threadId: this.threadId }),
 			...(latest === undefined ? {} : { totals: latest }), usage, ...(this.limits === undefined ? {} : { rateLimits: this.limits }), leftovers, hookFailed: this.hookFailed, ...(this.bypass === undefined ? {} : { bypass: this.bypass }),
 			...(coldStartMs === undefined ? {} : { coldStartMs }), durationMs: Date.now() - this.started, ...(error === undefined ? {} : { error }),
