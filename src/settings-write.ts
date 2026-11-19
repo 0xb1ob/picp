@@ -357,9 +357,12 @@ function setNativeSwitches(doc: Record<string, unknown>, driver: string): boolea
 /** No claude or codex row on a model or effort its CLI refuses, and no newly picked model routing refuses. */
 function refuseRoutingRows(home: string, config: RoutingConfig, prior: Record<string, unknown>): void {
 	const was = new Map((Array.isArray(prior.rubric) ? prior.rubric : []).filter(isObject).map((row) => [row.id, row.model]));
+	const rows = new Map((Array.isArray(prior.rubric) ? prior.rubric : []).filter(isObject).map((row) => [row.id, row]));
+	// Condition 2 (C1b): while codex is off, picp writes no new or changed codex row; an unchanged hand-written one stays.
 	const errors = config.rubric.flatMap((row: RoutingRule) => {
 		const out: string[] = [];
-		const off = row.driver === "codex" ? codexPersistRefusal(home, `row ${row.id}`) : undefined;
+		const kept = JSON.stringify(rows.get(row.id)) === JSON.stringify(row);
+		const off = row.driver === "codex" && !kept ? codexPersistRefusal(home, `row ${row.id}`) : undefined;
 		if (off !== undefined) out.push(off);
 		if (row.driver === "claude" && !isNativeModel(row.model)) out.push(`row ${row.id}: the Claude CLI runs only an anthropic/claude-… model, not ${row.model}; pick one for this row`);
 		if (row.driver === "claude" && row.thinking !== undefined && !CLAUDE_EFFORTS.includes(row.thinking)) out.push(`row ${row.id}: thinking ${row.thinking} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);
