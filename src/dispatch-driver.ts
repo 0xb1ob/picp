@@ -7,7 +7,6 @@ import { liveNativeJobs, nativeBaseEnv, NativeDriverError, type NativeRefusal, n
 import { codexPersistRefusal } from "./drivers/codex.ts";
 import { nativeDriverSpec, type NativeDriverSpec } from "./drivers/registry.ts";
 import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest, RoutingError } from "./routing.ts";
-import { nativeAvailability } from "./native-availability.ts";
 export { observeNative } from "./native-availability-observer.ts";
 import { NATIVE_DRIVERS, type NativeDriver } from "./worker-driver.ts";
 import type { WorkerManager } from "./worker-manager.ts";
@@ -92,7 +91,7 @@ export async function resolveDriverRoute(
 	for (const candidate of candidates.filter(spec.isModel)) {
 		const blocked = allowRefusal(config, ctx.role, candidate)
 			?? await (selected ??= spec.selectionRefusal(selection))
-			?? (spec.availability ? await nativeAvailability(ctx.home, candidate).then((seen) => ((note = seen.note), seen.blocked)) : undefined);
+			?? (spec.availability ? await spec.availability(ctx.home, candidate).then((seen) => ((note = seen.note), seen.blocked)) : undefined);
 		if (!blocked) { model = candidate; break; }
 		skipped ??= blocked;
 	}

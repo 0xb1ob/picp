@@ -1,6 +1,6 @@
 /** `GET /api/workspace/status` (full match S5): the chat footer's facts, read-only, from overview and Stats helpers. */
 import { join } from "node:path";
-import { nativeQuotaLine } from "./native-quota.ts";
+import { codexQuotaLine, nativeQuotaLine } from "./native-quota.ts";
 import type { WorkspaceStatusResponse } from "./api-types.ts";
 import { health, quota } from "./overview-health.ts";
 import { objectList } from "./overview-read.ts";
@@ -28,6 +28,7 @@ export function workspaceStatus(state: ViewerState, params: URLSearchParams, now
 	const { merged, closed } = s.jobs_finished;
 	const read = new Date(now).toISOString();
 	const claude = nativeQuotaLine(state.stateDir, now);
+	const codex = codexQuotaLine(state.stateDir, now);
 	return { status: 200, body: {
 		generated_at: read, day: { from: s.range.from, to: s.range.to, tz },
 		quota: { availability: !fleetRead ? "unavailable" : observation ? "ok" : "missing", observed_at: observation?.observed_at ?? null, observation },
@@ -35,5 +36,6 @@ export function workspaceStatus(state: ViewerState, params: URLSearchParams, now
 		working: { availability: fleet.availability, observed_at: read, count: health(state, fleet.value, now, fleetRead).workers.working },
 		done: { availability: s.availability, observed_at: read, count: merged === null || closed === null ? null : merged + closed },
 		...(claude ? { claude } : {}),
+		...(codex ? { codex } : {}),
 	} };
 }

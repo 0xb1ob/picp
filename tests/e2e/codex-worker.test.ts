@@ -11,6 +11,7 @@ import { DEFAULT_BUDGET_CONFIG, LAYOUT, paths } from "../../src/contracts.ts";
 import { checkBudget } from "../../src/failures.ts";
 import { isPidAlive } from "../../src/fleet.ts";
 import { MandateStore } from "../../src/mandate.ts";
+import { codexAvailabilityFile, nativeAvailabilityFile } from "../../src/native-availability.ts";
 import { recordRecoveryAttempt } from "../../src/recovery.ts";
 import { AUTH_SENTINEL, codexFixture, type FakeCodexScript, fakeExecuted, fakePids, fakeRpcMethods, fakeScopes, fakeSpawns } from "../harness/codex-mock.ts";
 import { FAKE_NATIVE_MODEL, routeNativeModel } from "../harness/claude-mock-provider.ts";
@@ -404,6 +405,10 @@ test("CX-off-2: with every codex switch off a hand-written codex row routes pi a
 	assert.equal(existsSync(h.nativeFile), false, "native.json was never written");
 	assert.equal(existsSync(join(h.b.home, paths.runDir(job.id), "native-codex")), false, "no Codex session record, so no totals");
 	assert.doesNotMatch(readFileSync(join(h.b.home, paths.eventsFile(job.id)), "utf8"), /"totals"|"requested_driver":"codex"/);
+	// C3: no codex job ran, so neither availability snapshot exists and no observation was relayed.
+	assert.equal(existsSync(codexAvailabilityFile(h.b.home)), false, "no Codex availability snapshot");
+	assert.equal(existsSync(nativeAvailabilityFile(h.b.home)), false, "no Claude availability snapshot");
+	assert.equal(readRunEvents(h.b.home, job.id).some((event) => event.type === "native_observation"), false);
 	// The harness adds the parent's own rows; picp wrote no codex value: the hand-written row is the only one, as written.
 	const rubric = (JSON.parse(readFileSync(join(h.b.home, LAYOUT.routingFile), "utf8")) as { rubric: Array<Record<string, unknown>> }).rubric;
 	assert.deepEqual(rubric.filter((each) => each.driver === "codex"), [row]);

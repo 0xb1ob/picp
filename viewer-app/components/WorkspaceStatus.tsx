@@ -48,6 +48,7 @@ export function WorkspaceStatus() {
     observed {age(Math.max(0, Math.round((now - Date.parse(observed.observed_at)) / 1000)))} ago</time></>
    : <span class="workspace-status-dim">{!quota ? status.error ? "status unavailable" : "" : quota.availability === "unavailable" ? "quota unreadable" : "quota not recorded"}</span>}
   {data?.claude && <span class={data.claude.state === "ok" ? "workspace-status-claude" : "workspace-status-claude workspace-status-dim"} title={data.claude.detail}>{data.claude.label}</span>}
+  {data?.codex && <span class={data.codex.state === "ok" ? "workspace-status-claude" : "workspace-status-claude workspace-status-dim"} title={data.codex.detail}>{data.codex.label}</span>}
   <span class="workspace-status-dim workspace-status-today">today</span><span title="Worker and reviewer spend of jobs finished today (local day)">{spend}</span>
   <span class="workspace-status-sep" aria-hidden="true">·</span><span>{known(data?.working, "working")}</span>
   <span class="workspace-status-sep" aria-hidden="true">·</span><span>{known(data?.done, "done")}</span>

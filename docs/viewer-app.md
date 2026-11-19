@@ -739,7 +739,8 @@ reviewer spend of jobs finished in the browser's local calendar day, `N working 
 never names it. A phone has no footer and asks for nothing. The footer reads `GET
 /api/workspace/status?from=&to=&tz=<IANA zone>` (read-only; `from`/`to` are UTC instants spanning exactly one local
 day in `tz`, else 400 `{error}`), built in `src/viewer/workspace-status.ts` from the overview's quota and worker counts
-and the Stats custom range. It re-reads on each `overview` stream refresh; a 60 s tick only re-renders the age, and
+and the Stats custom range; the footer also shows the separate Claude and Codex items from `src/viewer/native-quota.ts`
+while their switches are on. It re-reads on each `overview` stream refresh; a 60 s tick only re-renders the age, and
 refetches only when the local day changes (a new range URL). `--stage full-match-status`
 fails unless the footer is 37 px, the drawer, pane and Context end at its top, a stale observation shows "— 5h" with
 no bar, and nothing overflows at 1440, 1100, 900 and 390 px; the committed captures are `desktop`, `desktop-log`,

@@ -17,7 +17,11 @@ type Step =
 	| { kind: "patch"; path: string; content?: string; hook?: HookMode }
 	| { kind: "subagent"; command: string; hook?: HookMode }
 	| { kind: "message"; text: string }
-	| { kind: "hold"; marker: string; forMs?: number };
+	| { kind: "hold"; marker: string; forMs?: number }
+	/** `account/rateLimits/updated` with this snapshot; no usage. */
+	| { kind: "rateLimits"; rateLimits: unknown }
+	/** Ends the turn `failed` after an `error` notification; no usage for the step. */
+	| { kind: "fail"; errorInfo?: unknown; message?: string };
 interface Knobs {
 	version?: string;
 	loginStatus?: number;
@@ -332,7 +336,7 @@ async function patchStep(step: Extract<Step, { kind: "patch" }>, turnId: string)
 	notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: "completed" } });
 }
 
-async function runStep(step: Step, turnId: string): Promise<void> {
+async function runStep(step: Exclude<Step, { kind: "rateLimits" | "fail" }>, turnId: string): Promise<void> {
 	if (step.kind === "shell") return shellStep(step, turnId);
 	if (step.kind === "message") {
 		notify("item/completed", { threadId: thread?.id, turnId, item: { type: "agentMessage", id: `item_${++counter}`, text: step.text } });
@@ -383,15 +387,26 @@ async function runTurn(turnId: string, steps: Step[]): Promise<void> {
 		notify("thread/tokenUsage/updated", { threadId: t.id, turnId: t.lastTurnId, tokenUsage: { total: { ...t.total }, last: zero() } });
 	}
 	t.replay = false;
+	let error: { message: string; codexErrorInfo: unknown } | undefined;
 	for (const [index, step] of steps.entries()) {
 		if (index > 0 && (knobs.modelMs ?? 0) > 0) await sleep(knobs.modelMs);
 		if (interrupted) break;
+		if (step.kind === "rateLimits") {
+			notify("account/rateLimits/updated", { rateLimits: step.rateLimits });
+			continue;
+		}
+		if (step.kind === "fail") {
+			error = { message: step.message ?? "fake failure", codexErrorInfo: step.errorInfo ?? "other" };
+			notify("error", { error, threadId: t.id, turnId, willRetry: false });
+			break;
+		}
 		await runStep(step, turnId);
 		if (usage) addUsage(t, turnId, STEP_USAGE);
 	}
 	if (usage) notify("thread/tokenUsage/updated", { threadId: t.id, turnId, tokenUsage: { total: { ...t.total }, last: STEP_USAGE } });
 	liveTurn = undefined;
-	notify("turn/completed", { threadId: t.id, turn: { id: turnId, status: interrupted ? "interrupted" : "completed", items: [] } });
+	const status = interrupted ? "interrupted" : error ? "failed" : "completed";
+	notify("turn/completed", { threadId: t.id, turn: { id: turnId, status, items: [], ...(error ? { error } : {}) } });
 }
 
 let buffer = "";

@@ -33,7 +33,9 @@ import {
 	codexSpawnArgs,
 } from "./codex-launch.ts";
 import { type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
+import { type CodexRateLimits, mergeCodexRateLimits } from "./codex-observation.ts";
 import {
+	type AccountRateLimitsUpdatedNotification,
 	CODEX_METHODS as M,
 	type CommandApprovalParams,
 	type ConfigReadResponse,
@@ -227,6 +229,8 @@ export interface CodexSpikeResult {
 	/** This thread's latest cumulative totals; pass as `resume.baseline` to the run that resumes it. */
 	totals?: CodexTokenTotals;
 	usage: CodexRunUsage;
+	/** The main allowance as this run's `account/rateLimits/updated` notifications left it (C3). */
+	rateLimits?: CodexRateLimits;
 	leftovers: CodexLeftover[];
 	hookFailed: boolean;
 	/** The item type of a tool the CLI ran without asking picp; the run was killed on it. */
@@ -290,6 +294,7 @@ class CodexRun {
 	private threadId?: string;
 	private turnId?: string;
 	private turn?: Turn;
+	private limits?: CodexRateLimits;
 	private turnDone: () => void = () => {};
 
 	private readonly options: CodexSpikeOptions;
@@ -510,6 +515,8 @@ class CodexRun {
 		} else if (method === M.tokenUsageUpdated) {
 			const usage = params as TokenUsageUpdatedNotification;
 			if (usage.threadId === this.threadId || this.threadId === undefined) this.usages.push({ turnId: usage.turnId, total: totals(usage.tokenUsage.total) });
+		} else if (method === M.rateLimitsUpdated) {
+			this.limits = mergeCodexRateLimits(this.limits, (params as AccountRateLimitsUpdatedNotification | undefined)?.rateLimits);
 		}
 	}
 
@@ -676,7 +683,7 @@ class CodexRun {
 			...(turn?.error?.codexErrorInfo === undefined ? {} : { codexErrorInfo: turn.error.codexErrorInfo }),
 			...(this.accepted === undefined ? {} : { report: this.accepted }), reportRefusals: this.refusals, denials: this.denials, ticketMatch: this.ticketMatch,
 			...(lockdown === undefined ? {} : { lockdown }), ...(this.threadId === undefined ? {} : { threadId: this.threadId }),
-			...(latest === undefined ? {} : { totals: latest }), usage, leftovers, hookFailed: this.hookFailed, ...(this.bypass === undefined ? {} : { bypass: this.bypass }),
+			...(latest === undefined ? {} : { totals: latest }), usage, ...(this.limits === undefined ? {} : { rateLimits: this.limits }), leftovers, hookFailed: this.hookFailed, ...(this.bypass === undefined ? {} : { bypass: this.bypass }),
 			...(coldStartMs === undefined ? {} : { coldStartMs }), durationMs: Date.now() - this.started, ...(error === undefined ? {} : { error }),
 		};
 	}
@@ -718,18 +725,21 @@ class CodexRun {
 		const aborted = new Promise<"aborted">((ok) => (signal.aborted ? ok("aborted") : signal.addEventListener("abort", () => ok("aborted"), { once: true })));
 		const exited = rpc.exited.then(() => "exited" as const);
 		this.ready = true;
-		const effort = this.options.effort === undefined ? {} : { effort: this.options.effort };
-		const started = await rpc.request<TurnStartResponse>(M.turnStart, { threadId: this.threadId, input: [{ type: "text", text: this.options.prompt }], ...effort });
-		this.turnId = started.turn.id;
 		const control = this.options.control;
-		if (control !== undefined) control.steer = (text) => this.steer(rpc, text);
-		const first = await Promise.race([done, aborted, exited]);
-		if (first === "aborted") {
-			await this.interrupt();
-			await Promise.race([done, exited, sleep(STOP_WAIT_MS, undefined, { ref: false })]);
+		try {
+			const effort = this.options.effort === undefined ? {} : { effort: this.options.effort };
+			const started = await rpc.request<TurnStartResponse>(M.turnStart, { threadId: this.threadId, input: [{ type: "text", text: this.options.prompt }], ...effort });
+			this.turnId = started.turn.id;
+			if (control !== undefined) control.steer = (text) => this.steer(rpc, text);
+			const first = await Promise.race([done, aborted, exited]);
+			if (first === "aborted") {
+				await this.interrupt();
+				await Promise.race([done, exited, sleep(STOP_WAIT_MS, undefined, { ref: false })]);
+			}
+		} finally {
+			this.ready = false;
+			if (control !== undefined) delete control.steer;
 		}
-		this.ready = false;
-		if (control !== undefined) delete control.steer;
 		return this.turn === undefined && (await Promise.race([exited, sleep(0, undefined, { ref: false })])) === "exited";
 	}
 }

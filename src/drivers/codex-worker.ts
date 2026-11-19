@@ -16,7 +16,9 @@ import {
 import { startIdlePrompt } from "./claude-lifecycle.ts";
 import { nativeTranscriptFile } from "./claude-transcript.ts";
 import { nativeDenials } from "./claude-usage.ts";
+import { OBSERVATION_EVENT } from "./claude-observation.ts";
 import { codexDoorRefusal, codexPersistRefusal } from "./codex.ts";
+import { codexErrorCode, codexLimit, USAGE_LIMIT } from "./codex-observation.ts";
 import type { ItemNotification, TokenUsageUpdatedNotification } from "./codex-protocol.ts";
 import { type CodexRunControl, type CodexRunUsage, type CodexSpikeResult, type CodexTokenTotals, type CodexToolEvent, runCodexSpike, ZERO_TOTALS } from "./codex-spike.ts";
 import { type CodexTranscript, codexTranscript } from "./codex-transcript.ts";
@@ -41,7 +43,8 @@ let reportedNow = false;
 const control: CodexRunControl = {};
 let transcript: CodexTranscript | undefined;
 
-/** Condition 2 (C2): the record's `totals` is a new-shape value, written only while codex_research is on. */
+/** Condition 2 (C2): `totals` is first written only while codex_research is on; a record holding it is updated by
+ * every counted run. */
 const persistTotals = (): boolean => codexPersistRefusal(env.CP_HOME ?? "", "the Codex session record") === undefined;
 
 /** A new record and scratch dir; a previous record's picp-made scratch dir is removed first, never orphaned. */
@@ -113,7 +116,7 @@ function onTool(event: CodexToolEvent): void {
 }
 
 /** `lockdown` for every picp refusal or kill; `auth` for a sign-in refusal; none for a clean run. */
-function stopOf(result: CodexSpikeResult | undefined, cli: string | undefined): "lockdown" | "auth" | undefined {
+function stopOf(result: CodexSpikeResult | undefined, cli: string | undefined): "lockdown" | "auth" | "window" | undefined {
 	if (cli === "auth") return "auth";
 	if (cli !== undefined) return "lockdown";
 	if (result === undefined) return undefined;
@@ -160,27 +163,38 @@ async function turn(prompt: string): Promise<Turn> {
 	resuming = session.thread_id !== undefined;
 	const usage: CodexRunUsage = result?.usage ?? { status: "unavailable", reason: "the run did not start", cost_unknown: true };
 	if (usage.status === "complete") {
-		// Totals first, then message_end: a crash between the two recounts nothing, it only leaves this run uncounted.
-		if (result?.totals !== undefined && persistTotals()) writeNativeSession(sessionFile, Object.assign(session, { totals: result.totals }));
+		// Totals first, then message_end. A record that holds totals is updated even while codex is off: a stale
+		// baseline recounts this turn on the next resume (KC4).
+		if (result?.totals !== undefined && (session.totals !== undefined || persistTotals())) writeNativeSession(sessionFile, Object.assign(session, { totals: result.totals }));
 		write({ type: "message_end", message: { role: "assistant", model, usage: piUsage(usage) }, usage_status: "complete", cost_unknown: true });
 	} else {
 		write({ type: "message_update", usage: piUsage({ input: 0, cache_read: 0, cache_write: 0, output: 0, total: 0 }) });
 		write({ type: "usage_unavailable", status: usage.status });
 	}
-	const stop = stopOf(result, cli === "other" ? undefined : cli);
+	const limit = result === undefined ? undefined : codexLimit(result);
+	// Only a turn the CLI failed on the usage limit is a stop; a reached type on a finished turn blocks the next one.
+	const spent = result?.turnStatus === "failed" && limit?.reached === USAGE_LIMIT;
+	const stop = stopOf(result, cli === "other" ? undefined : cli) ?? (spent ? "window" : undefined);
+	const clean = stop === undefined && cli === undefined && result?.outcome === "completed" && error === undefined;
 	const reported = result?.report !== undefined;
 	const runId = randomUUID();
+	const code = codexErrorCode(result?.codexErrorInfo);
 	write({
 		type: "native_run", run: runId, driver: "codex", resumed, codex_version: result?.codexVersion ?? null, lockdown: result?.lockdown?.verdict ?? "unchecked",
 		seen: result?.lockdown?.seen, extra: result?.lockdown?.extra, exit_code: result?.exit?.code ?? null, outcome: result?.outcome ?? "refused", report: reported,
+		turn_status: result?.turnStatus ?? null, ...(code ? { error_info: code } : {}),
 		usage: usage.status === "complete" ? "measured" : "unavailable", usage_status: usage.status, cost_unknown: true,
 		denials: result?.denials.length ?? 0, denied: nativeDenials(result?.denials ?? []), report_refusals: result?.reportRefusals.length ?? 0,
 		hook_failed: result?.hookFailed ?? false, ...(result?.bypass ? { bypass: result.bypass } : {}), ...(stop ? { stop } : {}),
+		...(stop === "window" ? { window: "usage_limit", ...(limit?.resets_at === undefined ? {} : { resets_at: limit.resets_at }) } : {}),
 	});
+	if (limit !== undefined) {
+		write({ type: OBSERVATION_EVENT, kind: "limit", reached: limit.reached, ...(limit.resets_at === undefined ? {} : { resets_at: limit.resets_at }), observed_at: Date.now() });
+	} else if (clean) write({ type: OBSERVATION_EVENT, kind: "turn_ok", observed_at: Date.now() });
 	say(`outcome ${result?.outcome ?? "refused"}; lockdown ${result?.lockdown?.verdict ?? "unchecked"}; report ${reported ? "accepted" : "none"}${error ? `; ${error}` : ""}`);
 	return {
 		reported, stopped: stop !== undefined, code: 1, runId,
-		settles: reported || (stop === undefined && cli === undefined && result?.outcome === "completed" && error === undefined),
+		settles: reported || clean,
 		...(usage.status === "complete" ? { pending: { input: usage.input, output: usage.output, cache_read: usage.cache_read, cache_write: usage.cache_write, total_tokens: usage.total, cost_usd: 0 } } : {}),
 	};
 }

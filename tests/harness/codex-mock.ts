@@ -21,7 +21,9 @@ export type FakeCodexStep =
 	| { kind: "patch"; path: string; content?: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink" }
 	| { kind: "subagent"; command: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink" }
 	| { kind: "message"; text: string }
-	| { kind: "hold"; marker: string; forMs?: number };
+	| { kind: "hold"; marker: string; forMs?: number }
+	| { kind: "rateLimits"; rateLimits: unknown }
+	| { kind: "fail"; errorInfo?: unknown; message?: string };
 export interface FakeCodexScript { knobs?: Record<string, unknown>; turns?: FakeCodexStep[][] }
 
 export function writeCodexScript(file: string, script: FakeCodexScript): void {

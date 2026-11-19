@@ -3,12 +3,14 @@
  * from real scratch run files; layout is the browser fixture's `full-match-status` stage.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { NATIVE_AUTH_CODES, NATIVE_WINDOWS, OBSERVATION_EVENT, WINDOW_STATUSES } from "../../src/drivers/claude-observation.ts";
-import { nativeAvailabilityFile, readNativeAvailability, recordNativeObservation } from "../../src/native-availability.ts";
+import {
+	codexAvailabilityFile, nativeAvailabilityFile, readCodexAvailability, readNativeAvailability, recordCodexObservation, recordNativeObservation,
+} from "../../src/native-availability.ts";
 import { QUOTA_AUTH_CODES, QUOTA_STATUSES, QUOTA_WINDOWS } from "../../src/viewer/native-quota.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import type { Context } from "../harness/conversations.ts";
@@ -225,6 +227,44 @@ test("S3-claude-line: a separate Claude item only with the switch on — no snap
 	assert.equal(await label(), "Claude unknown", "an extra top-level key reads unknown with the switch on");
 	writeFileSync(switchFile, JSON.stringify({ claude_research: false }));
 	assert.equal(await claude(), undefined, "switch off again: the line is as short as before");
+});
+
+test("S3-codex-line: a separate Codex item only with codex_research on — no snapshot unknown, a future reset limited, a no-reset limit, ok", { timeout: 120_000 }, async (t) => {
+	const d = await start(t);
+	const url = day(`${DAY}T00:00:00Z`, new Date(NOON + 12 * 60 * MIN).toISOString(), "UTC");
+	const body = async () => (await d.get(url)).body as any;
+	const switchFile = join(d.home, LAYOUT.data, "native.json");
+	mkdirSync(dirname(switchFile), { recursive: true });
+	const switches = (value: object) => {
+		writeFileSync(switchFile, JSON.stringify(value));
+		utimesSync(switchFile, 0, 0); // older than every observation below, so none is voided
+	};
+	switches({ claude_research: true });
+	assert.equal((await body()).codex, undefined, "codex_research off: no Codex item");
+	switches({ claude_research: true, codex_research: true });
+	const label = async () => (await body()).codex?.label;
+	assert.equal(await label(), "Codex unknown", "no snapshot is unknown, never ok");
+	const snapshot = codexAvailabilityFile(d.home);
+	const write = (value: unknown) => writeFileSync(snapshot, JSON.stringify(value));
+	write({ version: 1, limit: { reached: "usageLimitExceeded", observed_at: NOON - 60 * MIN, resets_at: NOON + 120 * MIN } });
+	const limited = (await body()).codex;
+	assert.deepEqual([limited?.state, limited?.label], ["limited", "Codex limited until 14:00Z"]);
+	write({ version: 1, limit: { reached: "rate_limit_reached", observed_at: NOON - 60 * MIN } });
+	assert.equal(await label(), "Codex limited (reset unknown)");
+	write({ version: 1 });
+	assert.deepEqual([(await body()).codex?.state, await label()], ["ok", "Codex ok"]);
+	write({ version: 1, extra: true });
+	assert.equal(readCodexAvailability(d.home), undefined, "the parent rejects an extra key");
+	assert.equal(await label(), "Codex unknown", "and so does the viewer");
+	// The parent's own writer: a limit it records is what the viewer reads, beside an unchanged Claude item.
+	rmSync(snapshot);
+	assert.equal(recordCodexObservation(d.home, { type: OBSERVATION_EVENT, kind: "limit", reached: "usageLimitExceeded", observed_at: NOON - 30 * MIN, resets_at: NOON + 120 * MIN }), true);
+	const both = await body();
+	assert.equal(both.codex?.label, "Codex limited until 14:00Z");
+	assert.equal(both.claude?.label, "Claude unknown", "the Claude item still reads its own snapshot");
+	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
+	tab.shift(NOON - Date.now());
+	await until(() => footer(tab), (text) => text.includes("Claude unknown | Codex limited until 14:00Z | today"), "the Codex item after the Claude item");
 });
 
 test("S5-status-missing-phone: no observation reads as not recorded; a phone has no footer and asks for none", { timeout: 120_000 }, async (t) => {
