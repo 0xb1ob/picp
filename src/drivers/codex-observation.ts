@@ -3,7 +3,7 @@
  * follow T3's `codexUsageLimits.ts` at the pin (`mergeCodexRateLimits`, `codexUsageLimitResetAt`); the code is picp's.
  */
 import { resetMs } from "./claude-observation.ts";
-import type { RateLimitWindow } from "./codex-protocol.ts";
+import type { RateLimitWindow, TokenUsageBreakdown } from "./codex-protocol.ts";
 
 /** The one `codexErrorInfo` that is the usage limit (Q2): a rate limit or a 429 exhaustion stays an unclean end. */
 export const USAGE_LIMIT = "usageLimitExceeded";
@@ -46,4 +46,24 @@ export function codexLimit(result: { turnStatus?: string; codexErrorInfo?: unkno
 	const resets = full.map((w) => resetMs(w.resetsAt));
 	if (resets.length === 0 || resets.some((each) => each === undefined)) return { reached };
 	return { reached, resets_at: Math.max(...(resets as number[])) };
+}
+
+export type CodexTokenTotals = Required<TokenUsageBreakdown>;
+export type CodexRunUsage =
+	| { status: "complete"; input: number; cache_read: number; cache_write: number; output: number; reasoning: number; total: number; cost_unknown: true }
+	| { status: "unavailable"; reason: string; cost_unknown: true };
+
+export const ZERO_TOTALS: CodexTokenTotals = { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 };
+export const codexTotals = (b: TokenUsageBreakdown): CodexTokenTotals => ({ ...b, cacheWriteInputTokens: b.cacheWriteInputTokens ?? 0 });
+
+/** One run's usage: the latest cumulative total minus its baseline. Unknown is `unavailable`, never 0 (D3: no USD). */
+export function codexRunUsage(baseline: CodexTokenTotals | undefined, latest: CodexTokenTotals | undefined): CodexRunUsage {
+	if (baseline === undefined) return { status: "unavailable", reason: "no baseline for the resumed thread", cost_unknown: true };
+	if (latest === undefined) return { status: "unavailable", reason: "the CLI sent no token usage", cost_unknown: true };
+	const d = Object.fromEntries(Object.keys(ZERO_TOTALS).map((k) => [k, latest[k as keyof CodexTokenTotals] - baseline[k as keyof CodexTokenTotals]])) as CodexTokenTotals;
+	if (Object.values(d).some((n) => n < 0)) return { status: "unavailable", reason: "the totals went backwards", cost_unknown: true };
+	return {
+		status: "complete", input: d.inputTokens - d.cachedInputTokens, cache_read: d.cachedInputTokens, cache_write: d.cacheWriteInputTokens,
+		output: d.outputTokens, reasoning: d.reasoningOutputTokens, total: d.totalTokens, cost_unknown: true,
+	};
 }

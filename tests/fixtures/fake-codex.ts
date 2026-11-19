@@ -2,7 +2,8 @@
  * Stand-in `codex` CLI for hosts without one: `--version`, `login status` and an `app-server` speaking the C0 subset of
  * the 0.170.0 wire. `FAKE_CODEX_SCRIPT` (JSON `{knobs, turns}`) plays the model; `FAKE_CODEX_STATE` holds threads and
  * logs (argv and env key names, never values). A failed hook fails open here, the worst case the CLI docs leave open;
- * under picp's `-c default_permissions` profile a lexical stand-in for the kernel refuses paths outside its roots.
+ * under picp's `-c default_permissions` profile a lexical stand-in for the kernel refuses paths outside its roots and
+ * (C7a) writes under no `write` entry, the longest entry winning, and every git write (C7 probe PC).
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -48,8 +49,9 @@ interface Knobs {
 	features?: Record<string, boolean>;
 	/** What `config/read` reports for `web_search` instead of the `-c` value. */
 	webSearch?: string;
-	/** `extraRoot`: the thread read-back lists one writable root picp did not pass. */
-	profileReadback?: "extraRoot";
+	/** `extraRoot`: the thread read-back lists one writable root picp did not pass; `dropEntry`: `config/read` omits
+	 * the profile's last filesystem entry (C7a). */
+	profileReadback?: "extraRoot" | "dropEntry";
 	/** A model round trip before each step after the first; the real CLI waits on the provider there. */
 	modelMs?: number;
 	/** `unasked`: a patch applies with no approval request, a CLI that bypasses picp's decline. */
@@ -115,9 +117,35 @@ const roots = profileRoots.filter((root) => root.mode !== "deny").flatMap((root)
 /** 0.170.0 runs a rule-approved command unsandboxed unless the profile holds a deny entry (C1a probe). */
 const ruleKeepsSandbox = profileRoots.some((root) => root.mode === "deny");
 const inProfile = (path: string) => roots.some((root) => resolve(path) === root || resolve(path).startsWith(`${root}${sep}`));
-/** The lexical stand-in for the kernel: an absolute path or workdir outside the profile's roots is denied. */
-const kernelDenies = (command: string, cwd: string): string | undefined =>
-	profileId === undefined ? undefined : [cwd, ...(command.match(/(?<![\w.-])\/[^\s'";|&<>()]*/g) ?? [])].find((path) => !inProfile(path));
+/** The longest profile entry holding `path` decides its mode (`:minimal` stands for the system dirs). */
+const modeOf = (path: string): string => {
+	const entries = profileRoots.flatMap((root) => (root.path === ":minimal" ? MINIMAL.map((dir) => ({ path: dir, mode: root.mode })) : [root]));
+	const hit = entries.filter((root) => resolve(path) === root.path || resolve(path).startsWith(root.path === sep ? sep : `${root.path}${sep}`))
+		.sort((a, b) => b.path.length - a.path.length)[0];
+	return hit?.mode ?? "deny";
+};
+const WRITERS = new Set(["touch", "mkdir", "rm", "mv", "cp", "tee", "ln"]);
+const GIT_WRITES = /^git\s+(?:add|commit|merge|stash|reset|restore|checkout|rm|mv|tag|am|apply|cherry-pick|revert|rebase|config\s+(?!--get|--list|-l\b))/;
+const unquote = (word: string): string => word.replace(/^(['"])(.*)\1$/, "$2");
+/** A command's literal write targets: each redirect target, and the operands of a writing command. */
+function writeTargets(command: string): string[] {
+	const out = [...command.matchAll(/>>?\s*("[^"]*"|'[^']*'|[^\s;|&<>()]+)/g)].map((m) => unquote(m[1] as string)).filter((word) => !word.startsWith("&"));
+	for (const part of command.split(/&&|\|\||[;|\n]/)) {
+		const [name, ...args] = part.trim().split(/\s+/);
+		if (name !== undefined && WRITERS.has(name)) out.push(...args.filter((arg) => !arg.startsWith("-") && !arg.startsWith(">")).map(unquote));
+	}
+	return out.filter((path) => !["/dev/null", "/dev/stdout", "/dev/stderr"].includes(path));
+}
+/** The lexical stand-in for the kernel: a path or workdir outside the profile's roots is denied, and a write under no
+ * `write` entry or a git write is answered "Read-only file system". */
+const kernelDenies = (command: string, cwd: string): string | undefined => {
+	if (profileId === undefined) return undefined;
+	const outside = [cwd, ...(command.match(/(?<![\w.-])\/[^\s'";|&<>()]*/g) ?? [])].find((path) => !inProfile(path));
+	if (outside !== undefined) return `${outside}: Permission denied`;
+	if (GIT_WRITES.test(command.trim())) return "fatal: Unable to create '.git/index.lock': Read-only file system";
+	const target = writeTargets(command).find((path) => modeOf(resolve(cwd, path)) !== "write");
+	return target === undefined ? undefined : `${target}: Read-only file system`;
+};
 /** M12: `inherit="core"` keeps core names only; `"all"` the whole env minus `exclude`; no flag, the whole env. */
 const inherit = /^shell_environment_policy\.inherit="(\w+)"$/.exec(configs.find((c) => c.startsWith("shell_environment_policy.inherit=")) ?? "")?.[1];
 const excludes = (JSON.parse(configs.find((c) => c.startsWith("shell_environment_policy.exclude="))?.slice(33) ?? "[]") as string[]).map((glob) => new RegExp(`^${glob.replace(/\*/g, ".*")}$`));
@@ -220,7 +248,15 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
 	}
 	if (method === "config/read") {
 		const value = knobs.webSearch ?? webSearchFlag ?? null;
-		return { config: { web_search: value }, origins: webSearchFlag === undefined ? {} : { web_search: { name: { type: "sessionFlags" }, version: "1" } } };
+		const flagged = { name: { type: "sessionFlags" }, version: "1" };
+		const origins: Record<string, unknown> = webSearchFlag === undefined ? {} : { web_search: flagged };
+		if (profileId === undefined) return { config: { web_search: value }, origins };
+		const entries = knobs.profileReadback === "dropEntry" ? profileRoots.slice(0, -1) : profileRoots;
+		for (const root of entries) origins[`permissions.${profileId}.filesystem.${root.path}`] = flagged;
+		origins.default_permissions = flagged;
+		const filesystem = { glob_scan_max_depth: null, ...Object.fromEntries(entries.map((root) => [root.path, root.mode])) };
+		const permissions = { [profileId]: { description: null, extends: null, workspace_roots: null, filesystem, network: null } };
+		return { config: { web_search: value, permissions, default_permissions: profileId }, origins };
 	}
 	if (method === "thread/start") {
 		const mcp = threadMcp(params.config);
@@ -340,7 +376,7 @@ async function shellStep(step: Extract<Step, { kind: "shell" }>, turnId: string)
 	const denied = rule && !ruleKeepsSandbox ? undefined : kernelDenies(step.command, cwd);
 	if (denied !== undefined) {
 		notify("item/started", { threadId: thread?.id, turnId, item: { ...base, status: "inProgress", processId } });
-		notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: "failed", exitCode: 1, aggregatedOutput: `${denied}: Permission denied\n` } });
+		notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: "failed", exitCode: 1, aggregatedOutput: `${denied}\n` } });
 		return;
 	}
 	log("executed.jsonl", { command: step.command });

@@ -5,30 +5,27 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir, userInfo } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Envelope, GateReview } from "../contracts.ts";
 import { isPidAlive } from "../fleet.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
-import { agentDirOf, type CodexMcpServers } from "../worker-mcp.ts";
+import type { CodexMcpServers } from "../worker-mcp.ts";
 import { secretPaths } from "./claude-bash-policy.ts";
 import { CodexSpikeError, codexLoginRefusal, defaultCodexHome, resolveCodex } from "./codex-cli.ts";
 import { type CodexContainment, resolveCodexContainment } from "./codex-containment.ts";
 import {
 	buildCodexChildEnv,
-	CODEX_PROFILE,
-	codexGitDir,
 	codexHookCommand,
 	codexPermissionProfile,
 	type CodexProfile,
-	codexReleaseDir,
 	CODEX_REVIEWER_OFF_FEATURES,
-	codexSkillRoots,
+	codexRunRoots,
 	codexSpawnArgs,
 	REVIEWER_SURFACE_FLAGS,
 } from "./codex-launch.ts";
 import { type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
-import { type CodexRateLimits, mergeCodexRateLimits } from "./codex-observation.ts";
+import { type CodexRateLimits, codexRunUsage, type CodexRunUsage, type CodexTokenTotals, codexTotals as totals, mergeCodexRateLimits, ZERO_TOTALS } from "./codex-observation.ts";
 import {
 	type AccountRateLimitsUpdatedNotification,
 	CODEX_METHODS as M,
@@ -51,7 +48,6 @@ import {
 	type TerminalsListResponse,
 	type ThreadStartedNotification,
 	type ThreadStartResponse,
-	type TokenUsageBreakdown,
 	type TokenUsageUpdatedNotification,
 	type Turn,
 	type TurnCompletedNotification,
@@ -60,10 +56,13 @@ import {
 	type TurnSteerResponse,
 } from "./codex-protocol.ts";
 import { type CodexRpc, CodexRpcError, type CodexRpcExit, spawnCodexRpc } from "./codex-rpc.ts";
-import { type CodexDynamicTool, codexMcpApproval, codexMcpRoute, codexRoleTools, type CodexReportState, codexSecretGuard, codexToolCall } from "./codex-tools.ts";
+import {
+	type CodexDynamicTool, codexGitGuard, codexMcpApproval, codexMcpRoute, codexPatchRefusal, codexRoleTools, type CodexReportState, codexSecretGuard, codexToolCall,
+} from "./codex-tools.ts";
 import { type NormalizedCall, type SpikeGuard, type SpikeJob, spikeGuards } from "./native-guards.ts";
 
 export { CODEX_BUILTIN_SKILLS, type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
+export { codexRunUsage, type CodexRunUsage, type CodexTokenTotals, ZERO_TOTALS } from "./codex-observation.ts";
 export {
 	buildCodexChildEnv,
 	codexBareArgs,
@@ -142,28 +141,8 @@ export async function codexHookTrust(
 	}
 }
 
-export type CodexTokenTotals = Required<TokenUsageBreakdown>;
-export type CodexRunUsage =
-	| { status: "complete"; input: number; cache_read: number; cache_write: number; output: number; reasoning: number; total: number; cost_unknown: true }
-	| { status: "unavailable"; reason: string; cost_unknown: true };
-
-export const ZERO_TOTALS: CodexTokenTotals = { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 };
-const totals = (b: TokenUsageBreakdown): CodexTokenTotals => ({ ...b, cacheWriteInputTokens: b.cacheWriteInputTokens ?? 0 });
-
-/** One run's usage: the latest cumulative total minus its baseline. Unknown is `unavailable`, never 0 (D3: no USD). */
-export function codexRunUsage(baseline: CodexTokenTotals | undefined, latest: CodexTokenTotals | undefined): CodexRunUsage {
-	if (baseline === undefined) return { status: "unavailable", reason: "no baseline for the resumed thread", cost_unknown: true };
-	if (latest === undefined) return { status: "unavailable", reason: "the CLI sent no token usage", cost_unknown: true };
-	const d = Object.fromEntries(Object.keys(ZERO_TOTALS).map((k) => [k, latest[k as keyof CodexTokenTotals] - baseline[k as keyof CodexTokenTotals]])) as CodexTokenTotals;
-	if (Object.values(d).some((n) => n < 0)) return { status: "unavailable", reason: "the totals went backwards", cost_unknown: true };
-	return {
-		status: "complete", input: d.inputTokens - d.cachedInputTokens, cache_read: d.cachedInputTokens, cache_write: d.cacheWriteInputTokens,
-		output: d.outputTokens, reasoning: d.reasoningOutputTokens, total: d.totalTokens, cost_unknown: true,
-	};
-}
-
 export interface CodexSpikeOptions {
-	/** Planner or (C6) gate-reviewer; another role throws. */
+	/** Planner, (C6) gate-reviewer or (C7a) implementer; another role throws. */
 	job: SpikeJob;
 	prompt: string;
 	model?: string;
@@ -196,6 +175,8 @@ export interface CodexSpikeOptions {
 	mcp?: CodexMcpServers;
 	/** Per-job skill dirs the brief names (C5), each a sandbox read root. */
 	skillDirs?: readonly string[];
+	/** Operator read roots (C7a, `CP_CODEX_READ_ROOTS`), vetted as skill dirs are. */
+	readRoots?: readonly string[];
 }
 
 /** `steered` only on the CLI's ack; `-32600` (no or another active turn) or no live turn is `steered: false`. */
@@ -241,10 +222,10 @@ export interface CodexSpikeResult {
 	error?: string;
 }
 
-/** One isolated planner run; its own scratch dir (HOME, TMPDIR, hook socket) is removed before returning. */
+/** One isolated run; its own scratch dir (HOME, TMPDIR, hook socket) is removed before returning. */
 export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSpikeResult> {
-	if (options.job.role !== "planner" && options.job.role !== "gate-reviewer") {
-		throw new CodexSpikeError(`the Codex run core runs the planner and gate-reviewer roles only, not ${options.job.role}`);
+	if (!["planner", "gate-reviewer", "implementer"].includes(options.job.role)) {
+		throw new CodexSpikeError(`the Codex run core runs the planner, gate-reviewer and implementer roles only, not ${options.job.role}`);
 	}
 	const hostEnv = options.hostEnv ?? process.env;
 	const codex = resolveCodex(hostEnv);
@@ -260,11 +241,7 @@ export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSp
 		const codexHome = options.codexHome ?? defaultCodexHome();
 		const login = await codexLoginRefusal(codex.path, { codexHome, home: dirs.home, pathEnv: hostEnv.PATH ?? "" });
 		if (login !== undefined) throw Object.assign(new CodexSpikeError(login), { cli: "auth" as const });
-		const roots = {
-			worktree: options.job.worktree, gitDir: options.job.role === "gate-reviewer" ? undefined : codexGitDir(options.job.worktree), codexDir: codexReleaseDir(codex.path, { homes: [hostEnv.HOME, userInfo().homedir], codexHome }),
-			artifactDir: options.job.artifactPath === undefined ? undefined : dirname(options.job.artifactPath), tmp: dirs.tmp,
-			skills: options.skillDirs?.length ? codexSkillRoots(options.skillDirs, { homes: [hostEnv.HOME, userInfo().homedir], codexHome, others: [agentDirOf(hostEnv), hostEnv.CP_HOME] }) : undefined,
-		};
+		const roots = codexRunRoots({ job: options.job, codexPath: codex.path, codexHome, hostEnv, tmp: dirs.tmp, skillDirs: options.skillDirs, readRoots: options.readRoots });
 		return await new CodexRun(options, codex, hostEnv, codexHome, dirs, join(scratch, "hook.sock"), containment, codexPermissionProfile(roots)).run();
 	} finally {
 		if (options.scratchDir === undefined) rmSync(scratch, { recursive: true, force: true });
@@ -322,7 +299,8 @@ class CodexRun {
 		const job = { ...options.job, tmp: dirs.tmp };
 		const secrets = [...secretPaths(null, [userInfo().homedir]), resolve(codexHome)];
 		this.reviewer = options.job.role === "gate-reviewer";
-		this.guards = [...spikeGuards(job, secrets, options.job.role, false), codexSecretGuard(resolve(codexHome)), ...(options.extraGuards ?? [])];
+		const role = options.job.role;
+		this.guards = [...spikeGuards(job, secrets, role, false), codexSecretGuard(resolve(codexHome), role), codexGitGuard(role), ...(options.extraGuards ?? [])];
 		this.tools = codexRoleTools(options.job, hostEnv, this.reported);
 	}
 
@@ -373,7 +351,8 @@ class CodexRun {
 		const call = mapped !== undefined && mapped.name !== "bash" && !this.tools.some((each) => each.spec.name === tool) ? undefined : mapped;
 		const id = String(hook.tool_use_id ?? "");
 		const reason = this.closed() ?? this.cwdRefusal(hook.cwd)
-			?? (route !== undefined ? route.refusal : call === undefined ? `Refused: ${tool} is not in the Codex spike's tool set.` : this.guard(call));
+			?? (route !== undefined ? route.refusal : call !== undefined ? this.guard(call)
+				: tool === "apply_patch" && this.options.job.role === "implementer" ? codexPatchRefusal("implementer") : `Refused: ${tool} is not in the Codex spike's tool set.`);
 		if (reason !== undefined) {
 			this.hookDenied.add(id);
 			// A blocked call gets no item from the CLI (F2): its pair is fired here, so bounds and the Log count it.
@@ -401,7 +380,7 @@ class CodexRun {
 			}
 		};
 		if (typeof cwd === "string" && cwd !== "" && real(cwd) === real(this.options.job.worktree)) return undefined;
-		return `Refused: a native planner's command runs in its worktree only, not in ${String(cwd)}.`;
+		return `Refused: a native ${this.options.job.role === "implementer" ? "implementer" : "planner"}'s command runs in its worktree only, not in ${String(cwd)}.`;
 	}
 
 	private hookServer(): Promise<Server> {
@@ -627,7 +606,7 @@ class CodexRun {
 			rpc.onNotification(({ method, params }) => this.onNotification(method, params));
 			rpc.onRequest(M.commandApproval, (params) => this.approveCommand(params as CommandApprovalParams));
 			rpc.onRequest(M.fileChangeApproval, (params) => {
-				const why = "Refused: a native planner changes no files.";
+				const why = codexPatchRefusal(this.options.job.role);
 				this.answers.set(String((params as { itemId?: unknown } | undefined)?.itemId ?? ""), why);
 				this.deny("apply_patch", why, "approval");
 				return { decision: "decline" };
@@ -649,8 +628,9 @@ class CodexRun {
 				]);
 				const surface = {
 					codexHome: { passed: this.codexHome, reported: init.codexHome }, account: account.account != null, hookCommand, hooks, mcpServers: mcp, skills,
-					features, config, profile: { id: CODEX_PROFILE, writableRoots: this.profile.writableRoots }, mcpServersPassed: this.options.mcp?.names ?? [],
+					features, config, mcpServersPassed: this.options.mcp?.names ?? [],
 					...(this.reviewer ? { offFeatures: CODEX_REVIEWER_OFF_FEATURES } : {}),
+					profile: { id: this.profile.id, writableRoots: this.profile.writableRoots, ...(job.role === "implementer" ? { filesystem: this.profile.filesystem } : {}) },
 				};
 				lockdown = codexLockdownVerdict(surface);
 				if (lockdown.verdict === "ok") {
