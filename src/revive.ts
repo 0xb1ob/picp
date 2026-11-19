@@ -36,7 +36,7 @@ import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type
 import { nativeDoorRefusal, nativeReviveBase, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
 import { observeNative } from "./native-availability-observer.ts";
 import { nativeBaseEnv, nativeThinkingEnv } from "./drivers/claude.ts";
-import { codexDoorRefusal } from "./drivers/codex.ts";
+import { nativeDriverSpec } from "./drivers/registry.ts";
 import { projectBaseBranch } from "./forge-runtime.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
@@ -166,8 +166,9 @@ export interface ReviveResult {
 	interruptedTool?: InterruptedTool;
 	worktreeDirty: boolean;
 	continuedFailure?: Failure;
-	/** N3c: a native worker is not idle; it resumed its Claude session with picp's revive prompt. */
+	/** N3c: a native worker is not idle; it resumed its Claude session (Codex thread) with picp's revive prompt. */
 	nativeResumed?: true;
+	nativeDriver?: NativeDriver;
 }
 
 export type GitRunner = (
@@ -386,9 +387,10 @@ export class Reviver {
 		const record = this.#options.fleet.get(jobId);
 		if (!record) return refuse(jobId, "not_found", `no fleet record for ${jobId}`);
 		if (isScriptFleetRecord(record)) return refuse(jobId, "not_revivable_phase", `${jobId} is a script job; an unobserved exit cannot be replayed`);
-		if (record.worker?.driver === "codex") return refuse(jobId, "native_refused", codexDoorRefusal(jobId, "cp_revive"));
 		const native = record.worker?.driver !== undefined;
-		if (native && options?.recovering) return refuse(jobId, "native_refused", nativeDoorRefusal(jobId, "bounded recovery"));
+		if (native && options?.recovering) {
+			return refuse(jobId, "native_refused", nativeDoorRefusal(jobId, "bounded recovery", nativeDriverSpec(record.worker.driver as NativeDriver).label));
+		}
 		// J7: a native continue_failed is the plain native revive (its event records continue_failed_as_revive).
 		if (native && options?.continueFailed) options = { ...options, continueFailed: false };
 		if (record.phase === "awaiting_merge") {
@@ -662,7 +664,7 @@ export class Reviver {
 			worktreeDirty: plan.worktreeDirty,
 			...(plan.interruptedTool ? { interruptedTool: plan.interruptedTool } : {}),
 			...(plan.continuesFailure ? { continuedFailure: plan.continuesFailure } : {}),
-			...(record.worker.driver ? { nativeResumed: true as const } : {}),
+			...(record.worker.driver ? { nativeResumed: true as const, nativeDriver: record.worker.driver as NativeDriver } : {}),
 		};
 	}
 }
@@ -691,6 +693,7 @@ export function formatReviveResult(result: ReviveResult): string {
 	const tool = result.interruptedTool ? ` (interrupted: ${result.interruptedTool.name})` : "";
 	const dirty = result.worktreeDirty ? " (worktree has uncommitted changes)" : "";
 	const failed = result.continuedFailure ? ` (continued from failed: ${result.continuedFailure.class})` : "";
-	const next = result.nativeResumed ? "resumed its Claude CLI session with picp's revive prompt" : "idle; send it a message to continue";
+	const spec = result.nativeDriver ? nativeDriverSpec(result.nativeDriver) : undefined;
+	const next = result.nativeResumed ? `resumed its ${spec?.label ?? "Claude CLI"} ${spec?.session ?? "session"} with picp's revive prompt` : "idle; send it a message to continue";
 	return `${result.job_id} revived${failed}: pid ${result.pid}, session ${result.session_file}${tool}${dirty} \u2014 ${next}`;
 }

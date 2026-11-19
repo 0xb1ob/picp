@@ -178,7 +178,7 @@ test("N4b: a native research dispatch sends the planner profile and the native a
 	const first = h.claude.requests.find((request) => request.path.startsWith("/v1/messages") && Array.isArray(request.body.tools));
 	const system = JSON.stringify(first?.body.system ?? "");
 	assert.match(system, /A plan is executable or it is not a plan\./, "a line of profiles/planner.md");
-	assert.match(system, /Write the research artifact with the Write tool/, "the native addendum");
+	assert.match(system, /Write the research artifact to the predeclared artifact path/, "the native addendum");
 	const file = join(h.b.home, paths.runDir(native.id), "native-system-prompt.md");
 	assert.equal(statSync(file).mode & 0o777, 0o600);
 	assert.equal(readRunEvents(h.b.home, native.id).filter((event) => event.type === "envelope_received").length, 1, "the run still reports");

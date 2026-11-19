@@ -242,8 +242,8 @@ function nativeStopClass(payload: Record<string, unknown>): Classification | und
 		return {
 			class: auth ? "model_call_failed" : "spawn_failed",
 			message: auth
-				? "the Codex CLI is not signed in: run `codex login`, then cp_teardown and dispatch again"
-				: "native run stopped: picp refused or killed the Codex CLI run (lockdown, containment, a dead hook or a tool it was never asked about); not nudged; cp_teardown, fix the cause, dispatch again",
+				? "the Codex CLI is not signed in: run `codex login`, then cp_revive resumes its thread (a run stopped before its first turn has none: cp_teardown and dispatch again)"
+				: "native run stopped: picp refused or killed the Codex CLI run (lockdown, containment, a dead hook or a tool it was never asked about); not nudged; fix the cause, then cp_revive, or cp_teardown and dispatch again",
 			evidence: [`native_run stop=${String(payload.stop)}`, "cp:process_exit"],
 		};
 	}

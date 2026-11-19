@@ -235,6 +235,33 @@ test("C1b codex row: a changed codex row is refused while codex_research is off;
 	assert.deepEqual(anthropic.body.errors, [`row ${id}: the Codex CLI runs only an openai/gpt-… model, not anthropic/claude-opus-5-5`]);
 });
 
+// Scenario: C1b review item 2 — a legacy-role home keeps its hand-written codex row through an unrelated write
+//   Given planner-default spelled with the legacy role `researcher`, hand-written onto codex, and no native.json
+//   When a rubric write changes only small-ship's model, then one changes the codex row's model
+//   Then the first saves with the codex row as spelled; the second is refused naming codex_research
+test("SD-legacy: a legacy-role codex row while codex is off does not refuse an unrelated rubric write", { timeout: 120_000 }, async (t) => {
+	const h = await home(t, (root) => {
+		const routing = JSON.parse(readFileSync(join(root, LAYOUT.routingFile), "utf8")) as Json;
+		const row = (routing.rubric as Json[]).find((each) => each.id === "planner-default")!;
+		Object.assign(row, { role: "researcher", model: "openai/gpt-5", thinking: "high", driver: "codex" });
+		put(join(root, LAYOUT.routingFile), JSON.stringify(routing));
+	});
+	const seeded = (h.json(LAYOUT.routingFile).rubric as Json[]).find((row) => row.id === "planner-default");
+	// The UI submits the snapshot's rows, legacy roles already mapped forward.
+	const shown = (await h.field("models.rubric"))?.value as Json[];
+	assert.equal(shown.find((row) => row.id === "planner-default")?.role, "planner");
+	const rubric = (over: Record<string, Json>) => shown.map((row) => (over[row.id as string] ? { ...row, ...over[row.id as string] } : row));
+	const saved = await h.post("/api/settings/apply", { changes: { "models.rubric": rubric({ "small-ship": { model: "anthropic/claude-haiku-5" } }) } });
+	assert.equal(saved.status, 200, JSON.stringify(saved.body).slice(0, 400));
+	const after = h.json(LAYOUT.routingFile).rubric as Json[];
+	assert.equal(after.find((row) => row.id === "small-ship")?.model, "anthropic/claude-haiku-5");
+	assert.deepEqual(after.find((row) => row.id === "planner-default"), seeded, "the codex row stays as spelled, role researcher included");
+	assert.equal(existsSync(join(h.root, LAYOUT.data, "native.json")), false);
+	const changed = await h.post("/api/settings/apply", { changes: { "models.rubric": rubric({ "planner-default": { model: "openai/gpt-6.1-sol" } }) } });
+	assert.equal(changed.status, 400, JSON.stringify(changed.body).slice(0, 400));
+	assert.match((changed.body.errors as string[]).join("\n"), /row planner-default names the codex driver while codex_research is off/);
+});
+
 // Scenario: restore works
 //   Given the parent and every worker on the Claude CLI
 //   When the operator restores the Model routing and the parent keys

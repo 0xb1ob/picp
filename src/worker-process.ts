@@ -455,7 +455,7 @@ export class WorkerProcess {
 			const receipt: SendReceipt =
 				disposition === "queued"
 					? "queued"
-					: disposition === "started" || disposition === "handled"
+					: disposition === "started" || disposition === "handled" || disposition === "steered"
 						? "delivered"
 						: mode === "prompt" && !streamingBehavior
 							? "delivered"

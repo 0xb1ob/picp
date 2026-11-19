@@ -127,7 +127,20 @@ export function codexSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemP
 	};
 }
 
-/** Why a codex job takes no follow-up door in C1b: nothing is sent or spawned. */
+/** Why a codex job takes no checkpoint (C2): nothing is sent or spawned. */
 export function codexDoorRefusal(jobId: string, door: string): string {
-	return `${jobId} runs on the Codex CLI driver: ${door} is refused (follow-ups, steers, revives and checkpoints land with C2; tear it down with cp_teardown and dispatch again). Nothing was sent or spawned.`;
+	return `${jobId} runs on the Codex CLI driver: ${door} is refused (a research planner has nothing to checkpoint; the checkpoint lands with Codex ship jobs, C7). Nothing was sent or spawned.`;
 }
+
+/** What a codex `cp_send` did (C2): resumed the thread, queued until the turn ends, or steered the running turn. */
+export const CODEX_ACK = {
+	resumed:
+		"resuming: one new Codex app-server resumes this job's thread with the message as its next prompt (run event " +
+		"native_run, or the worker's named failure on its observed exit); nothing was steered",
+	queued:
+		"queued until the current turn ends: one new Codex app-server resumes this job's thread after it and delivers the " +
+		"message under the same admission and gates (run event native_followup_delivered), or native_followup_refused names " +
+		"why not; nothing was steered",
+	steered:
+		"steered: the Codex CLI acknowledged turn/steer for the running turn (run event native_steered); the report slot was not reopened",
+} as const;

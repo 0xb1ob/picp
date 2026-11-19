@@ -56,8 +56,10 @@ import {
 	type Turn,
 	type TurnCompletedNotification,
 	type TurnStartResponse,
+	type TurnSteerParams,
+	type TurnSteerResponse,
 } from "./codex-protocol.ts";
-import { type CodexRpc, type CodexRpcExit, spawnCodexRpc } from "./codex-rpc.ts";
+import { type CodexRpc, CodexRpcError, type CodexRpcExit, spawnCodexRpc } from "./codex-rpc.ts";
 import { type NormalizedCall, type SpikeGuard, type SpikeJob, spikeGuards } from "./native-guards.ts";
 
 export { CODEX_BUILTIN_SKILLS, type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
@@ -191,7 +193,13 @@ export interface CodexSpikeOptions {
 	onAppServer?: (pid: number) => void;
 	/** Once per phase per shell or dynamic tool call the CLI reports; `end` carries `isError`. */
 	onTool?: (event: CodexToolEvent) => void;
+	/** Caller-owned: `steer` is set while the turn is live and deleted when it ends (C2b). */
+	control?: CodexRunControl;
 }
+
+/** `steered` only on the CLI's ack; `-32600` (no or another active turn) or no live turn is `steered: false`. */
+export type CodexSteer = { steered: true; turnId: string } | { steered: false; why: string };
+export interface CodexRunControl { steer?: (text: string) => Promise<CodexSteer> }
 
 /** `output` on an end: a command's output, a dynamic tool's reply, or picp's refusal of a blocked or declined call. */
 export interface CodexToolEvent { phase: "start" | "end"; id: string; name: string; args?: unknown; isError?: boolean; output?: string; exitCode?: number | null }
@@ -688,6 +696,20 @@ class CodexRun {
 		return thread;
 	}
 
+	/** `turn/steer` into the live turn; a credential-shaped text throws before any request. */
+	private async steer(rpc: CodexRpc, text: string): Promise<CodexSteer> {
+		assertBriefIsSafe(text, "steer");
+		if (this.turn !== undefined || this.turnId === undefined || this.closed() !== undefined) return { steered: false, why: "no live turn" };
+		try {
+			const params: TurnSteerParams = { threadId: this.threadId as string, expectedTurnId: this.turnId, input: [{ type: "text", text }] };
+			const acked = await rpc.request<TurnSteerResponse>(M.turnSteer, params);
+			return { steered: true, turnId: acked.turnId };
+		} catch (error) {
+			if (error instanceof CodexRpcError && error.code === -32600) return { steered: false, why: error.message };
+			throw error;
+		}
+	}
+
 	/** Runs the one turn; true when the app-server exited before `turn/completed`. */
 	private async runTurn(rpc: CodexRpc, signal: AbortSignal): Promise<boolean> {
 		const done = new Promise<"done">((ok) => (this.turnDone = () => ok("done")));
@@ -697,12 +719,15 @@ class CodexRun {
 		const effort = this.options.effort === undefined ? {} : { effort: this.options.effort };
 		const started = await rpc.request<TurnStartResponse>(M.turnStart, { threadId: this.threadId, input: [{ type: "text", text: this.options.prompt }], ...effort });
 		this.turnId = started.turn.id;
+		const control = this.options.control;
+		if (control !== undefined) control.steer = (text) => this.steer(rpc, text);
 		const first = await Promise.race([done, aborted, exited]);
 		if (first === "aborted") {
 			await this.interrupt();
 			await Promise.race([done, exited, sleep(STOP_WAIT_MS, undefined, { ref: false })]);
 		}
 		this.ready = false;
+		if (control !== undefined) delete control.steer;
 		return this.turn === undefined && (await Promise.race([exited, sleep(0, undefined, { ref: false })])) === "exited";
 	}
 }

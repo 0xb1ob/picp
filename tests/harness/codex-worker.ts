@@ -56,6 +56,10 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 	/** The parent step that waits (up to 60 s) for `file`. */
 	const awaitFile = (file: string): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "bash", args: { command: `for i in $(seq 300); do [ -f "${file}" ] && break; sleep 0.2; done; sleep 1` } }] });
 	const awaitEnvelope = (id: string) => awaitFile(join(b.home, paths.envelopeFile(id)));
+	/** The parent step that waits (up to 120 s) until `pattern` appears `count` times in the job's run log. */
+	const waitEvent = (id: string, pattern: string, count = 1): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "bash", args: {
+		command: `for i in $(seq 600); do [ "$(grep -c '${pattern}' "${join(b.home, paths.eventsFile(id))}" 2>/dev/null)" -ge ${count} ] && break; sleep 0.2; done; sleep 1`,
+	} }] });
 	/** The parent step that sleeps `seconds` (a worker exit or a teardown settling). */
 	const pause = (seconds: number): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "bash", args: { command: `sleep ${seconds}` } }] });
 	const runs = async (id: string) => (await waitFor(() => readRunEvents(b.home, id).filter((event) => event.type === "native_run"), (found) => found.length > 0,
@@ -71,5 +75,5 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 	};
 	const run = async (steps: ScriptStep[], extraEnv: Record<string, string> = {}, prompt?: string) =>
 		(await b.run(steps, { ...env, ...extraEnv }, prompt, 240_000)) as Array<{ toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } }>;
-	return { b, root, bin, state, codexHome, outside, nativeFile, env, record, job, report, reporting, setScript, awaitEnvelope, awaitFile, pause, runs, session, homeListing, lines, run };
+	return { b, root, bin, state, codexHome, outside, nativeFile, env, record, job, report, reporting, setScript, awaitEnvelope, awaitFile, waitEvent, pause, runs, session, homeListing, lines, run };
 }

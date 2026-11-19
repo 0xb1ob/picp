@@ -14,8 +14,8 @@ import { projectDenial } from "../mandate-defaults.ts";
 import { rebuildStatus } from "../run-artifacts.ts";
 import type { NativeDriver } from "../worker-driver.ts";
 import { nativeAvailability } from "../native-availability.ts";
-import { assertNativeSelection, NativeDriverError, nativeModelId } from "./claude.ts";
-import { codexDoorRefusal } from "./codex.ts";
+import { NativeDriverError } from "./claude.ts";
+import { nativeDriverSpec } from "./registry.ts";
 
 export const NATIVE_SESSION_FILE = "native-claude";
 export const NATIVE_FOLLOWUPS_FILE = "native-followups.jsonl";
@@ -70,6 +70,11 @@ export const NativeSessionSchema = Type.Object(
 		base: Type.Optional(Type.String({ minLength: 1 })),
 		/** The session's cumulative per-model tokens and cost at its last result; absent means a resume is unmeasured. */
 		baseline: Type.Optional(Type.Object({ ledger: LedgerSchema, cost_usd: Type.Number({ minimum: 0 }) }, { additionalProperties: false })),
+		/** Codex (C2): the thread's cumulative token totals at the last counted run, the next resume's usage baseline. */
+		totals: Type.Optional(Type.Object({
+			inputTokens: Type.Integer({ minimum: 0 }), cachedInputTokens: Type.Integer({ minimum: 0 }), cacheWriteInputTokens: Type.Integer({ minimum: 0 }),
+			outputTokens: Type.Integer({ minimum: 0 }), reasoningOutputTokens: Type.Integer({ minimum: 0 }), totalTokens: Type.Integer({ minimum: 0 }),
+		}, { additionalProperties: false })),
 	},
 	{ additionalProperties: false },
 );
@@ -170,11 +175,11 @@ export async function assertNativeResume(input: { home: string; jobId: string; w
 		throw new NativeDriverError(`refused: ${input.what} of native ${input.jobId}: ${why}`);
 	};
 	if (!record || isScriptFleetRecord(record) || !record.worker.driver) return refuse("no native fleet record");
-	if (record.worker.driver === "codex") throw new NativeDriverError(codexDoorRefusal(input.jobId, input.what));
+	const spec = nativeDriverSpec(record.worker.driver as NativeDriver);
 	// The update hold stops fresh work; a nudge finishes held work, so it passes the hold, never a drain.
 	(input.ownPrompt ? assertNotDraining : assertDispatchOpen)(input.home, `${input.what} of native ${input.jobId}`);
 	try {
-		nativeModelId(record.worker.model);
+		spec.modelId(record.worker.model);
 	} catch (error) {
 		refuse((error as Error).message);
 	}
@@ -186,16 +191,23 @@ export async function assertNativeResume(input: { home: string; jobId: string; w
 		const check = checkBudget(total, record.budget);
 		if (check.state === "exceeded") refuse(`the per-job budget is spent (${check.tokens.used}/${check.tokens.limit} billable tokens, $${check.cost.used.toFixed(4)}/$${check.cost.limit.toFixed(2)})`);
 	}
-	await assertNativeSelection({ home: input.home, jobId: input.jobId, driver: record.worker.driver as NativeDriver, kind: record.kind, role: record.worker.role, delivery: record.delivery, jobs, ...(input.env ? { env: input.env } : {}) });
+	const refusal = await spec.selectionRefusal({
+		home: input.home, jobId: input.jobId, driver: record.worker.driver as NativeDriver, kind: record.kind, role: record.worker.role, delivery: record.delivery, jobs,
+		...(input.env ? { env: input.env } : {}),
+	});
+	if (refusal) throw new NativeDriverError(`refused: ${input.jobId} cannot run on the ${spec.label} driver: ${refusal.why}`, refusal.category);
+	if (!spec.availability) return;
 	// S2: a rejected window refuses the resume; queued sends stay queued and never move to pi.
 	const window = (await nativeAvailability(input.home, record.worker.model, { windowsOnly: true, ...(input.env ? { env: input.env } : {}) })).blocked;
 	if (window) refuse(`the subscription window is spent (${window.why})`);
 }
 
-/** cp_revive's native admission: a recorded session id to resume, then `assertNativeResume`; the refusal, or none. */
+/** cp_revive's native admission: a recorded session (Codex: thread) id to resume, then `assertNativeResume`. */
 export async function nativeReviveRefusal(home: string, jobId: string, sessionFile: string): Promise<string | undefined> {
 	try {
-		if (readNativeSession(sessionFile).session_id === undefined) throw new Error(`${sessionFile} holds no session id`);
+		const session = readNativeSession(sessionFile);
+		if (session.driver === "codex" && session.thread_id === undefined) throw new Error(`${sessionFile} holds no thread id`);
+		if (session.driver !== "codex" && session.session_id === undefined) throw new Error(`${sessionFile} holds no session id`);
 		await assertNativeResume({ home, jobId, what: "revive" });
 		return undefined;
 	} catch (error) {
@@ -215,11 +227,11 @@ export async function sendNativeRevive(
 }
 
 /** Why a native job takes no pi-only follow-up door (a named stop's bounded recovery, a mid-turn steer). */
-export function nativeDoorRefusal(jobId: string, door: "bounded recovery" | "steer"): string {
+export function nativeDoorRefusal(jobId: string, door: "bounded recovery" | "steer", label = "Claude CLI"): string {
 	const why = {
 		"bounded recovery": "a turn limit, spent window, auth failure or lockdown is a named stop a human decides; the operator " +
 			"revives it with cp_revive",
 		steer: "the native driver takes no mid-turn steer; send with mode auto or follow_up to queue it until the turn ends",
 	}[door];
-	return `${jobId} runs on the Claude CLI driver: ${door} is refused (${why}). Nothing was sent or spawned.`;
+	return `${jobId} runs on the ${label} driver: ${door} is refused (${why}). Nothing was sent or spawned.`;
 }

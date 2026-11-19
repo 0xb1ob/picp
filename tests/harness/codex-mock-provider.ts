@@ -9,10 +9,11 @@ import type { AddressInfo } from "node:net";
  * One model turn: function calls (`name`, JSON `arguments`, a tool `namespace`), custom tool calls (`input` text, as
  * the code-mode `exec` takes JavaScript), or an assistant message.
  */
-export type MockModelTurn =
+export type MockModelTurn = (
 	| { calls: Array<{ name: string; arguments: Record<string, unknown>; namespace?: string }> }
 	| { custom: Array<{ name: string; input: string; namespace?: string }> }
-	| { message: string };
+	| { message: string }
+) & { /** The answer is held this long (a model request in flight, for a steer to land in). */ delayMs?: number };
 /** Picks a turn from the raw request body; undefined falls through to the scripted order. */
 export type MockRouter = (body: string) => MockModelTurn | undefined;
 
@@ -59,11 +60,16 @@ export async function startCodexMockProvider(turns: readonly MockModelTurn[], ro
 				: "custom" in turn
 					? turn.custom.map((call, i) => ({ type: "custom_tool_call", id: `ctc_${n}_${i}`, call_id: `call_${n}_${i}`, name: call.name, input: call.input, ...ns(call.namespace) }))
 					: turn.calls.map((call, i) => ({ type: "function_call", id: `fc_${n}_${i}`, call_id: `call_${n}_${i}`, name: call.name, arguments: JSON.stringify(call.arguments), ...ns(call.namespace) }));
+			const delay = turn.delayMs ?? 0;
 			const usage = { input_tokens: 1, input_tokens_details: { cached_tokens: 0 }, output_tokens: 1, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 2 };
-			res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
-			res.write(sse("response.created", { response: { id } }));
-			for (const item of items) res.write(sse("response.output_item.done", { item }));
-			res.end(sse("response.completed", { response: { id, usage } }));
+			const answer = () => {
+				res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+				res.write(sse("response.created", { response: { id } }));
+				for (const item of items) res.write(sse("response.output_item.done", { item }));
+				res.end(sse("response.completed", { response: { id, usage } }));
+			};
+			if (delay > 0) setTimeout(answer, delay);
+			else answer();
 		});
 	});
 	await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));

@@ -56,6 +56,8 @@ import { assertNotDraining } from "./drain.ts";
 import { resolveJobHardBounds } from "./bounds.ts";
 import { raiseLoopExhausted, type EscalationStore } from "./escalation.ts";
 import { nativeDoorRefusal } from "./drivers/claude-followup.ts";
+import { nativeDriverSpec } from "./drivers/registry.ts";
+import type { NativeDriver } from "./worker-driver.ts";
 import { NATIVE_RESULT_GRACE_MS } from "./drivers/claude-usage.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
 import { loadProfile } from "./profiles.ts";
@@ -400,7 +402,7 @@ export class BoundedRecovery {
 		const native = record?.worker.driver !== undefined;
 		if (native && NATIVE_NAMED_STOPS.includes(failure.class)) {
 			// J7: a named native stop is a human's decision; the operator's cp_revive resumes it.
-			const reason = nativeDoorRefusal(jobId, "bounded recovery");
+			const reason = nativeDoorRefusal(jobId, "bounded recovery", nativeDriverSpec(record!.worker.driver as NativeDriver).label);
 			runs.open(jobId).cp("recovery_failed", { class: failure.class, stage: "native", error: reason });
 			return { action: "revive_refused", reason, attempted: false, attemptsLeft: 0 };
 		}

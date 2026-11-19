@@ -17,6 +17,7 @@ export const CODEX_METHODS = {
 	threadDelete: "thread/delete",
 	turnStart: "turn/start",
 	turnInterrupt: "turn/interrupt",
+	turnSteer: "turn/steer",
 	terminalsList: "thread/backgroundTerminals/list",
 	terminalsTerminate: "thread/backgroundTerminals/terminate",
 	commandApproval: "item/commandExecution/requestApproval",
@@ -112,6 +113,9 @@ export type TurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
 export interface Turn { id: string; status: TurnStatus; error?: { message?: string; codexErrorInfo?: unknown } | null }
 export interface TurnStartParams { threadId: string; input: Array<{ type: "text"; text: string }>; effort?: string }
 export interface TurnStartResponse { turn: Turn }
+/** A wrong `expectedTurnId` or no active turn answers JSON-RPC `-32600` (probe P4, 0.170.0). */
+export interface TurnSteerParams { threadId: string; expectedTurnId: string; input: Array<{ type: "text"; text: string }> }
+export interface TurnSteerResponse { turnId: string }
 
 export interface TokenUsageBreakdown {
 	inputTokens: number;

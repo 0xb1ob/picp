@@ -8,6 +8,7 @@
  *  | `prompt`    | the worker is idle        | `delivered` (pi started it, or a handler consumed it) |
  *  | `steer`     | mid-run, change course    | `queued` (or `delivered` if an input handler consumed it) |
  *  | `follow_up` | mid-run, queue for after  | `queued` (or `delivered` if an input handler consumed it) |
+ *  | `steer` (Codex CLI) | mid-turn, report slot open | `delivered` with disposition `steered` on the CLI's ack, else `queued` |
  *
  * Receipts come from pi's per-input `disposition`, never from the busy flag.
  *
@@ -37,7 +38,9 @@ import { existsSync } from "node:fs";
 import { assertNoAuthorityHold } from "./authority-hold.ts";
 import { isScriptFleetRecord, type Risk, type SendReceipt } from "./contracts.ts";
 import { assertNativeResume, NATIVE_ACK, nativeDoorRefusal } from "./drivers/claude-followup.ts";
-import { codexDoorRefusal } from "./drivers/codex.ts";
+import { CODEX_ACK } from "./drivers/codex.ts";
+import { nativeDriverSpec } from "./drivers/registry.ts";
+import type { NativeDriver } from "./worker-driver.ts";
 import { readTask, type ResolvedTask } from "./dispatch.ts";
 import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
@@ -60,6 +63,13 @@ import type { WorkerManager } from "./worker-manager.ts";
 import { policyBlockedRefusal, sessionPolicyBlocked } from "./worker-session-policy.ts";
 
 export class SendError extends Error {}
+
+/** What a native send did, in its driver's words; none for a failed send. */
+function nativeAck(ack: { resumed: string; queued: string; steered?: string }, outcome: { receipt: SendReceipt; disposition?: string }): { native?: string } {
+	if (outcome.disposition === "steered" && ack.steered) return { native: ack.steered };
+	if (outcome.disposition === "resuming") return { native: ack.resumed };
+	return outcome.receipt === "queued" ? { native: ack.queued } : {};
+}
 
 export const SEND_MODES = ["auto", "prompt", "steer", "follow_up"] as const;
 export type SendMode = (typeof SEND_MODES)[number];
@@ -117,7 +127,7 @@ export interface SendResult {
 	task_updated?: TaskUpdate;
 	/** H6: an inferred-only risk:high against a recorded low promoted under ask_on risk:high; one line naming the keywords. */
 	risk_warning?: string;
-	/** N3c: what a native send actually did (resumed the session, or queued until the turn ends); never "steered". */
+	/** N3c: what a native send actually did (resumed, queued until the turn ends, or a Codex turn/steer acked, C2b). */
 	native?: string;
 }
 
@@ -210,17 +220,17 @@ export class Sender {
 			throw new SendError(`no fleet record for ${request.jobId} — dispatch it first (cp_dispatch)`);
 		}
 		if (isScriptFleetRecord(record)) throw new SendError(`${request.jobId} is a script job; cp_send cannot promote or replay it`);
-		if (record.worker?.driver === "codex") throw new SendError(codexDoorRefusal(request.jobId, "cp_send"));
 		const native = record.worker?.driver !== undefined;
-		if (native && request.mode === "steer") throw new SendError(nativeDoorRefusal(request.jobId, "steer"));
+		const spec = native ? nativeDriverSpec(record.worker.driver as NativeDriver) : undefined;
+		if (spec && !spec.steers && request.mode === "steer") throw new SendError(nativeDoorRefusal(request.jobId, "steer"));
 		// A native worker's tool set, policy and env are fixed at spawn: a research worker never takes a ship brief.
 		if (native && record.kind === "research" && (request.task !== undefined || request.taskFile !== undefined)) {
-			throw new SendError(`${request.jobId} runs on the Claude CLI driver as research: a kind-changing promotion (a new brief via task/task_file) is refused, since its tools and policy were fixed at spawn. Tear it down and dispatch a ship job. Nothing was sent.`);
+			throw new SendError(`${request.jobId} runs on the ${spec?.label} driver as research: a kind-changing promotion (a new brief via task/task_file) is refused, since its tools and policy were fixed at spawn. Tear it down and dispatch a ship job. Nothing was sent.`);
 		}
 		if (record.phase === "failed") {
 			throw new SendError(
 				native
-					? `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); cp_revive ${request.jobId} resumes its Claude CLI session (continue_failed runs as that same plain revive).`
+					? `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); cp_revive ${request.jobId} resumes its ${spec?.label} ${spec?.session} (continue_failed runs as that same plain revive).`
 					: `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); a brief does not revive it. Continue it on ` +
 						`its original lease: cp_revive ${request.jobId} continue_failed:true (plan, then confirm), then cp_send — never a ` +
 						"takeover job, a new branch or a force push.",
@@ -348,7 +358,13 @@ export class Sender {
 		}
 
 		const busy = managed.worker.busy;
-		const mode: DeliveryMode = request.mode && request.mode !== "auto" ? request.mode : busy ? (native ? "follow_up" : "steer") : "prompt";
+		// C2b: a steer never reopens a filed report slot; once filed, a busy steering job queues a new turn instead.
+		const filed = fleet.get(request.jobId)?.reported_at !== undefined;
+		if (busy && spec?.steers && filed && request.mode === "steer") {
+			throw new SendError(`${request.jobId} has already reported: a steer cannot reopen its report slot; send with mode auto or follow_up to queue a new turn. Nothing was sent.`);
+		}
+		const nativeBusy = spec?.steers && !filed ? "steer" : "follow_up";
+		const mode: DeliveryMode = request.mode && request.mode !== "auto" ? request.mode : busy ? (native ? nativeBusy : "steer") : "prompt";
 
 		// cp-promote-task-record: a scope change only becomes the frozen task a
 		// reviewer scores against when it arrives through a genuine promotion of an
@@ -439,7 +455,7 @@ export class Sender {
 			runs.open(request.jobId).cp("budget_warning", { ...budget });
 		}
 		// N3c: a native send starts or queues a claude process, so it passes the native admission before anything moves.
-		if (native) await assertNativeResume({ home, jobId: request.jobId, what: busy ? "queued follow-up" : "resume" }).catch((error: unknown) => { throw new SendError((error as Error).message); });
+		if (native) await assertNativeResume({ home, jobId: request.jobId, what: mode === "steer" ? "steer" : busy ? "queued follow-up" : "resume" }).catch((error: unknown) => { throw new SendError((error as Error).message); });
 
 		// Reopen BEFORE delivering: for the window between the two, the worker must
 		// never be holding work it cannot report (see supersede.ts for the ordering
@@ -518,7 +534,7 @@ export class Sender {
 			...(superseded ? { superseded } : {}),
 			...(taskUpdate ? { task_updated: taskUpdate } : {}),
 			...(riskWarning ? { risk_warning: riskWarning } : {}),
-			...(native && outcome.disposition === "resuming" ? { native: NATIVE_ACK.resumed } : native && outcome.receipt === "queued" ? { native: NATIVE_ACK.queued } : {}),
+			...(native ? nativeAck(record.worker.driver === "codex" ? CODEX_ACK : NATIVE_ACK, outcome) : {}),
 		};
 	}
 

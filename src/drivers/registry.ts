@@ -20,19 +20,23 @@ export interface NativeDriverSpec {
 	maxConcurrent(home: string): number;
 	/** Whether S2's Claude subscription snapshot can block a candidate model. */
 	availability: boolean;
+	/** Whether a busy worker takes a mid-turn steer (Codex `turn/steer`, C2b). */
+	steers: boolean;
+	/** What the CLI resumes: a Claude "session", a Codex "thread". */
+	session: string;
 	spawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string, options?: { web?: boolean; profile?: string }): SpawnOptions;
 }
 
 // Arrow wrappers: the specs are read lazily, so an import cycle through doctor.ts never sees an uninitialised binding.
 export const NATIVE_DRIVER_SPECS: Readonly<Record<NativeDriver, NativeDriverSpec>> = {
 	claude: {
-		label: "Claude CLI", noun: "native", availability: true,
+		label: "Claude CLI", noun: "native", availability: true, steers: false, session: "session",
 		isModel: (model) => isNativeModel(model), modelId: (model) => nativeModelId(model), assertEffort: (level) => assertNativeEffort(level),
 		selectionRefusal: (input) => nativeSelectionRefusal(input), maxConcurrent: (home) => nativeMaxConcurrent(home),
 		spawnOptions: (model, env, systemPrompt, options) => nativeSpawnOptions(model, env, systemPrompt, options),
 	},
 	codex: {
-		label: "Codex CLI", noun: "codex", availability: false,
+		label: "Codex CLI", noun: "codex", availability: false, steers: true, session: "thread",
 		isModel: (model) => isCodexModel(model), modelId: (model) => codexModelId(model), assertEffort: (level) => assertCodexEffort(level),
 		selectionRefusal: (input) => codexSelectionRefusal(input), maxConcurrent: (home) => codexMaxConcurrent(home),
 		spawnOptions: (model, env, systemPrompt) => codexSpawnOptions(model, env, systemPrompt),
