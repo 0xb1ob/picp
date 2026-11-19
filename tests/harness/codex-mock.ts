@@ -13,9 +13,10 @@ export const FAKE_CODEX_CLI = fileURLToPath(new URL("../fixtures/fake-codex.ts",
 export const FAKE_SYSTEMD_RUN = fileURLToPath(new URL("../fixtures/fake-systemd-run.ts", import.meta.url));
 export const FAKE_CODEX_MODEL = "gpt-picp-fake";
 export const AUTH_SENTINEL = "SYNTHETIC-CODEX-AUTH-SENTINEL";
+export const OUTSIDE_SENTINEL = "SYNTHETIC-OUTSIDE-WORKTREE-SENTINEL";
 
 export type FakeCodexStep =
-	| { kind: "shell"; command: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink"; background?: boolean }
+	| { kind: "shell"; command: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink"; background?: boolean; workdir?: string }
 	| { kind: "tool"; tool: string; arguments: unknown; hook?: "run" | "skip" | "kill" | "stall" | "unlink" }
 	| { kind: "patch"; patch: string }
 	| { kind: "message"; text: string }
@@ -60,6 +61,10 @@ export interface CodexFixture {
 	codexHome: string;
 	stateDir: string;
 	script: string;
+	/** The stub's bin dir, two levels below the "release dir" the profile reads, as an installed codex sits. */
+	bin: string;
+	/** A dir outside every profile root, holding `secret.txt` with OUTSIDE_SENTINEL. */
+	outside: string;
 	/** The synthetic Codex home's listing; a case asserts it unchanged. */
 	homeListing: () => string[];
 	setScript: (script: FakeCodexScript) => void;
@@ -70,10 +75,11 @@ export interface CodexFixture {
 /** A fresh fixture under the temp dir, removed after the test; `run` uses the stub first on PATH. */
 export function codexFixture(t: { after: (fn: () => void) => void }, jobId: string, script: FakeCodexScript): CodexFixture {
 	const root = mkdtempSync(join(tmpdir(), "cp-codex-e2e-"));
-	t.after(() => rmSync(root, { recursive: true, force: true }));
-	const [worktree, bin, stateDir, codexHome, artifacts] = ["repo", "bin", "state", "codex-home", "artifacts"].map((name) => join(root, name)) as [string, string, string, string, string];
-	for (const dir of [worktree, bin, stateDir, codexHome, artifacts]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+	t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 5 }));
+	const [worktree, bin, stateDir, codexHome, artifacts, outside] = ["repo", "codex-release/bin", "state", "codex-home", "artifacts", "outside"].map((name) => join(root, name)) as [string, string, string, string, string, string];
+	for (const dir of [worktree, bin, stateDir, codexHome, artifacts, outside]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	writeFileSync(join(worktree, "README.md"), "codex spike readme\n");
+	writeFileSync(join(outside, "secret.txt"), `${OUTSIDE_SENTINEL}\n`);
 	writeFileSync(join(codexHome, "auth.json"), `${AUTH_SENTINEL}\n`, { mode: 0o600 });
 	const scriptFile = join(root, "script.json");
 	writeCodexScript(scriptFile, script);
@@ -90,7 +96,7 @@ export function codexFixture(t: { after: (fn: () => void) => void }, jobId: stri
 		...extra,
 	});
 	return {
-		root, worktree, artifactPath, runDir, codexHome, stateDir, script: scriptFile,
+		root, worktree, artifactPath, runDir, codexHome, stateDir, script: scriptFile, bin, outside,
 		homeListing: () => readdirSync(codexHome).sort(),
 		setScript: (next) => writeCodexScript(scriptFile, next),
 		options,

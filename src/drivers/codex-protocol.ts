@@ -10,6 +10,8 @@ export const CODEX_METHODS = {
 	hooksList: "hooks/list",
 	mcpServerStatusList: "mcpServerStatus/list",
 	skillsList: "skills/list",
+	experimentalFeatureList: "experimentalFeature/list",
+	configRead: "config/read",
 	threadStart: "thread/start",
 	threadResume: "thread/resume",
 	threadDelete: "thread/delete",
@@ -20,6 +22,7 @@ export const CODEX_METHODS = {
 	commandApproval: "item/commandExecution/requestApproval",
 	fileChangeApproval: "item/fileChange/requestApproval",
 	toolCall: "item/tool/call",
+	threadStarted: "thread/started",
 	turnStarted: "turn/started",
 	turnCompleted: "turn/completed",
 	itemStarted: "item/started",
@@ -71,6 +74,14 @@ export interface SkillMetadata { name: string; scope: SkillScope; enabled: boole
 export interface SkillsListEntry { cwd: string; skills: SkillMetadata[]; errors: unknown[] }
 export interface SkillsListResponse { data: SkillsListEntry[] }
 
+export interface ExperimentalFeature { name: string; enabled: boolean; defaultEnabled?: boolean; stage?: unknown }
+export interface ExperimentalFeatureListResponse { data: ExperimentalFeature[]; nextCursor?: string | null }
+/** `origins` is keyed by the dotted config key; `name.type` is the layer (`sessionFlags` for a `-c` flag). */
+export interface ConfigReadResponse {
+	config: { web_search?: string | null; [key: string]: unknown };
+	origins: Record<string, { name: { type: string }; version: string } | undefined>;
+}
+
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type AskForApproval = "untrusted" | "on-request" | "never" | string;
 export interface DynamicToolSpec { type: "function"; name: string; description: string; inputSchema: unknown }
@@ -86,14 +97,15 @@ export interface ThreadStartParams {
 	ephemeral?: boolean;
 }
 export interface ThreadResumeParams extends Omit<ThreadStartParams, "dynamicTools" | "ephemeral"> { threadId: string; excludeTurns?: boolean }
-/** `sandbox` reads back as a policy object (`{type: "readOnly"}`), not the mode string the request sent. */
+/** `sandbox` reads back as a policy object (`{type: "workspaceWrite", writableRoots}`), not a mode string. */
 export interface ThreadStartResponse {
 	thread: { id: string };
 	approvalPolicy: AskForApproval;
-	sandbox: { type: string } | null;
+	approvalsReviewer?: string;
+	sandbox: { type: string; writableRoots?: string[]; networkAccess?: unknown; excludeSlashTmp?: boolean } | null;
 	cwd: string;
 	instructionSources?: string[];
-	activePermissionProfile?: { id: string } | null;
+	activePermissionProfile?: { id: string; extends?: string | null } | null;
 }
 
 export type TurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
@@ -120,8 +132,10 @@ export type ThreadItem =
 	| { type: "reasoning"; id: string }
 	| { type: "commandExecution"; id: string; command: string; cwd: string; status: "inProgress" | "completed" | "failed" | "declined"; processId?: string | null }
 	| { type: "dynamicToolCall"; id: string; tool: string; arguments: unknown; status: string }
-	| { type: "fileChange"; id: string; status: string };
+	| { type: "fileChange"; id: string; status: string }
+	| { type: "imageView" | "subAgentActivity" | "collabAgentToolCall" | "mcpToolCall" | "webSearch" | "imageGeneration" | "sleep"; id: string };
 
+/** `cwd` is the call's working directory (a model `workdir` moves it); `command` is the shell-wrapped form (E16). */
 export interface CommandApprovalParams {
 	itemId: string;
 	threadId: string;
@@ -138,6 +152,7 @@ export interface FileChangeApprovalParams { itemId: string; threadId: string; tu
 export interface DynamicToolCallParams { tool: string; arguments: unknown; callId: string; threadId: string; turnId: string }
 export interface DynamicToolCallResponse { contentItems: Array<{ type: "inputText"; text: string }>; success: boolean }
 
+export interface ThreadStartedNotification { thread: { id: string } }
 export interface TurnCompletedNotification { threadId: string; turn: Turn }
 export interface ItemNotification { threadId: string; turnId: string; item: ThreadItem }
 export interface TokenUsageUpdatedNotification { threadId: string; turnId: string; tokenUsage: ThreadTokenUsage }

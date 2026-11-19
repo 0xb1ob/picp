@@ -10,7 +10,7 @@ import { type SdkMcpToolDefinition, tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod";
 import { ciStatusRepeatRefusal } from "../ci-wait.ts";
 import { redactGithubTokens } from "../worker-credential-guard.ts";
-import type { SpikeJob } from "./claude-spike.ts";
+import type { SpikeJob } from "./native-guards.ts";
 
 export const FORGE_OUTPUT_MAX = 20_000;
 /** This job's PR, recorded in its run dir by `pr_create`: what `pr_edit` and `gh_read` accept as "this job's PR". */

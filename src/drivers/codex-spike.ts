@@ -1,14 +1,12 @@
 /**
- * Codex C0 spike: one planner run on `codex app-server`, unwired. Three fail-closed gates (picp's PreToolUse hook,
- * a hook ticket, `untrusted` approvals), a surface lockdown before any thread, a dynamic `report_result`, usage from
- * cumulative totals, and a stop that ends every command process the app-server reported. No production path imports it.
+ * Codex run core: one planner run on `codex app-server`, unwired. Gates: picp's hook, its ticket, `untrusted` approvals
+ * and the kernel profile; a lockdown; a tripwire that kills on any unasked tool; usage from totals; a full stop.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir, userInfo } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
 import { ENVELOPE_FILE, formatRejection, type JobContext, localChecks } from "../../extensions/worker-reporter/index.ts";
 import {
 	ENVELOPE_REPAIR_MAX_ATTEMPTS,
@@ -20,18 +18,29 @@ import {
 	validateEnvelope,
 } from "../contracts.ts";
 import { isPidAlive } from "../fleet.ts";
-import { SECRET_ENV_NAME } from "../web-egress.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
 import { secretPaths } from "./claude-bash-policy.ts";
-import { type NormalizedCall, type SpikeGuard, type SpikeJob, spikeGuards } from "./claude-spike.ts";
 import { CodexSpikeError, codexLoginRefusal, defaultCodexHome, resolveCodex } from "./codex-cli.ts";
-import { CONTAIN_ENV_KEY, type CodexContainment, resolveCodexContainment } from "./codex-containment.ts";
+import { type CodexContainment, resolveCodexContainment } from "./codex-containment.ts";
+import {
+	buildCodexChildEnv,
+	CODEX_PROFILE,
+	codexGitDir,
+	codexHookCommand,
+	codexPermissionProfile,
+	type CodexProfile,
+	codexReleaseDir,
+	codexSpawnArgs,
+} from "./codex-launch.ts";
 import { type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
 import {
 	CODEX_METHODS as M,
 	type CommandApprovalParams,
+	type ConfigReadResponse,
 	type DynamicToolCallParams,
 	type DynamicToolCallResponse,
+	type ExperimentalFeature,
+	type ExperimentalFeatureListResponse,
 	type GetAccountResponse,
 	type HookCompletedNotification,
 	type HooksListResponse,
@@ -40,6 +49,7 @@ import {
 	type ListMcpServerStatusResponse,
 	type SkillsListResponse,
 	type TerminalsListResponse,
+	type ThreadStartedNotification,
 	type ThreadStartResponse,
 	type TokenUsageBreakdown,
 	type TokenUsageUpdatedNotification,
@@ -48,71 +58,26 @@ import {
 	type TurnStartResponse,
 } from "./codex-protocol.ts";
 import { type CodexRpc, type CodexRpcExit, spawnCodexRpc } from "./codex-rpc.ts";
+import { type NormalizedCall, type SpikeGuard, type SpikeJob, spikeGuards } from "./native-guards.ts";
 
 export { CODEX_BUILTIN_SKILLS, type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
+export {
+	buildCodexChildEnv,
+	codexBareArgs,
+	CODEX_HOOK_CLIENT,
+	codexHookCommand,
+	codexPermissionProfile,
+	codexSpawnArgs,
+	HOOK_TIMEOUT_SEC,
+	SURFACE_FLAGS,
+} from "./codex-launch.ts";
 
-/** AP probe P11: the flags that cut the operator's surface (MCP 1 → 0, skills 68 → 5) before the lockdown checks it. */
-export const SURFACE_FLAGS: readonly string[] = [
-	"--disable", "apps", "--disable", "plugins", "--disable", "multi_agent", "--disable", "image_generation", "--disable", "memories",
-	"--enable", "skip_host_skill_discovery",
-];
 export const REPORT_TOOL = "report_result";
-export const HOOK_TIMEOUT_SEC = 20;
-export const CODEX_HOOK_CLIENT = fileURLToPath(new URL("./codex-hook.mjs", import.meta.url));
-const HOST_ENV_ALLOW = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] as const;
 const EXIT_GRACE_MS = 10_000;
 const STOP_WAIT_MS = 10_000;
 const PID_WAIT_MS = 2_000;
-
-/** The CLI child env from an allow-list; a host OPENAI_*, CODEX_* (but CODEX_HOME) or secret-named key throws. */
-export function buildCodexChildEnv(
-	dirs: { home: string; tmp: string },
-	hostEnv: NodeJS.ProcessEnv,
-	codexHome: string,
-	extra: Record<string, string | undefined> = {},
-): Record<string, string> {
-	const env: Record<string, string> = {};
-	for (const key of HOST_ENV_ALLOW) {
-		const value = hostEnv[key];
-		if (value !== undefined) env[key] = value;
-	}
-	Object.assign(env, { HOME: dirs.home, TMPDIR: dirs.tmp, CODEX_HOME: codexHome, GIT_SSH_COMMAND: "false" });
-	for (const [key, value] of Object.entries(extra)) {
-		if (value === undefined) delete env[key];
-		else env[key] = value;
-	}
-	const bad = Object.keys(env).find((key) => /^OPENAI_/.test(key) || (/^CODEX_/.test(key) && key !== "CODEX_HOME") || SECRET_ENV_NAME.test(key) || CONTAIN_ENV_KEY.test(key));
-	if (bad !== undefined) throw new CodexSpikeError(`the Codex child env may not carry ${bad}`);
-	return env;
-}
-
-const toml = (value: string): string => JSON.stringify(value);
-
-/** The hook command the CLI runs per tool call; a path holding a single quote throws. */
-export function codexHookCommand(socket: string, clientTimeoutMs = 10_000): string {
-	const words = [process.execPath, CODEX_HOOK_CLIENT, socket];
-	if (words.some((word) => word.includes("'"))) throw new CodexSpikeError("the Codex hook command needs paths without a single quote");
-	return `${words.map((word) => `'${word}'`).join(" ")} ${clientTimeoutMs}`;
-}
-
-/** `codex app-server` argv: the reduced surface, picp's PreToolUse hook, and its trust entry when known. */
-export function codexSpawnArgs(options: {
-	hookCommand: string;
-	hookTimeoutSec?: number;
-	trust?: { key: string; currentHash: string };
-	surfaceFlags?: readonly string[];
-}): string[] {
-	const hook = `hooks.PreToolUse=[{matcher="*",hooks=[{type="command",command=${toml(options.hookCommand)},timeout=${options.hookTimeoutSec ?? HOOK_TIMEOUT_SEC}}]}]`;
-	return [
-		"app-server", "--strict-config", ...(options.surfaceFlags ?? SURFACE_FLAGS),
-		"-c", hook,
-		"-c", 'web_search="disabled"',
-		"-c", "project_doc_max_bytes=0",
-		"-c", 'shell_environment_policy.inherit="core"',
-		"-c", 'shell_environment_policy.exclude=["CODEX_*","OPENAI_*"]',
-		...(options.trust === undefined ? [] : ["-c", `hooks.state={${toml(options.trust.key)}={trusted_hash=${toml(options.trust.currentHash)}}}`]),
-	];
-}
+/** Item types of tools that never ask picp (E5); any of them, or another thread, kills the run. */
+const UNGATED_ITEMS: readonly string[] = ["imageView", "subAgentActivity", "collabAgentToolCall", "mcpToolCall", "webSearch", "imageGeneration", "sleep"];
 
 const CLIENT_INFO = { clientInfo: { name: "picp", version: "0.0.0" }, capabilities: { experimentalApi: true } };
 
@@ -120,6 +85,19 @@ async function initialize(rpc: CodexRpc): Promise<InitializeResponse> {
 	const init = await rpc.request<InitializeResponse>(M.initialize, CLIENT_INFO);
 	rpc.notify(M.initialized);
 	return init;
+}
+
+/** Every page of `experimentalFeature/list`; a cursor that repeats ends the walk. */
+async function listFeatures(rpc: CodexRpc): Promise<ExperimentalFeature[]> {
+	const features: ExperimentalFeature[] = [];
+	const cursors = new Set<string>();
+	for (let cursor: string | undefined; ; ) {
+		const page = await rpc.request<ExperimentalFeatureListResponse>(M.experimentalFeatureList, cursor === undefined ? {} : { cursor });
+		features.push(...page.data);
+		if (page.nextCursor == null || cursors.has(page.nextCursor)) return features;
+		cursor = page.nextCursor;
+		cursors.add(cursor);
+	}
 }
 
 /** Ends an app-server: stdin close, then a grace, then SIGKILL of the own child; the observed exit either way. */
@@ -211,7 +189,11 @@ export interface CodexSpikeOptions {
 	deleteThread?: boolean;
 	/** The run's app-server pid, once its scope is up and it answered `initialize`. */
 	onAppServer?: (pid: number) => void;
+	/** Once per phase per shell or dynamic tool call the CLI reports; `end` carries `isError`. */
+	onTool?: (event: CodexToolEvent) => void;
 }
+
+export interface CodexToolEvent { phase: "start" | "end"; id: string; name: string; args?: unknown; isError?: boolean }
 
 export type CodexDenial = { tool: string; reason: string; layer: "hook" | "approval" | "tool_call" };
 export interface CodexLeftover { processId: string; osPid?: number; terminated: boolean; gone: boolean }
@@ -238,6 +220,8 @@ export interface CodexSpikeResult {
 	usage: CodexRunUsage;
 	leftovers: CodexLeftover[];
 	hookFailed: boolean;
+	/** The item type of a tool the CLI ran without asking picp; the run was killed on it. */
+	bypass?: string;
 	coldStartMs?: number;
 	durationMs: number;
 	error?: string;
@@ -258,7 +242,11 @@ export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSp
 		const codexHome = options.codexHome ?? defaultCodexHome();
 		const login = await codexLoginRefusal(codex.path, { codexHome, home: dirs.home, pathEnv: hostEnv.PATH ?? "" });
 		if (login !== undefined) throw Object.assign(new CodexSpikeError(login), { cli: "auth" as const });
-		return await new CodexRun(options, codex, hostEnv, codexHome, dirs, join(scratch, "hook.sock"), containment).run();
+		const roots = {
+			worktree: options.job.worktree, gitDir: codexGitDir(options.job.worktree), codexDir: codexReleaseDir(codex.path, { homes: [hostEnv.HOME, userInfo().homedir], codexHome }),
+			artifactDir: options.job.artifactPath === undefined ? undefined : dirname(options.job.artifactPath), tmp: dirs.tmp,
+		};
+		return await new CodexRun(options, codex, hostEnv, codexHome, dirs, join(scratch, "hook.sock"), containment, codexPermissionProfile(roots)).run();
 	} finally {
 		if (options.scratchDir === undefined) rmSync(scratch, { recursive: true, force: true });
 	}
@@ -277,8 +265,12 @@ class CodexRun {
 	private readonly ticketMatch = { id: 0, payload: 0, none: 0 };
 	private readonly usages: Array<{ turnId: string; total: CodexTokenTotals }> = [];
 	private readonly known = new Map<string, number | undefined>();
+	private readonly acceptedItems = new Set<string>();
+	private readonly hookDenied = new Set<string>();
+	private readonly toolPhase = new Map<string, "start" | "end">();
 	private ready = false;
 	private hookFailed = false;
+	private bypass?: string;
 	private accepted?: Envelope;
 	private attempts = 0;
 	private rpc?: CodexRpc;
@@ -294,13 +286,14 @@ class CodexRun {
 	private readonly dirs: { home: string; tmp: string };
 	private readonly socket: string;
 	private readonly containment: CodexContainment;
+	private readonly profile: CodexProfile;
 
 	constructor(
 		options: CodexSpikeOptions, codex: { path: string; version: string }, hostEnv: NodeJS.ProcessEnv, codexHome: string,
-		dirs: { home: string; tmp: string }, socket: string, containment: CodexContainment,
+		dirs: { home: string; tmp: string }, socket: string, containment: CodexContainment, profile: CodexProfile,
 	) {
 		[this.options, this.codex, this.hostEnv, this.codexHome, this.dirs, this.socket] = [options, codex, hostEnv, codexHome, dirs, socket];
-		this.containment = containment;
+		[this.containment, this.profile] = [containment, profile];
 		const job = { ...options.job, tmp: dirs.tmp };
 		const secrets = [...secretPaths(null, [userInfo().homedir]), resolve(codexHome)];
 		this.guards = [...spikeGuards(job, secrets, "planner", false), codexSecretGuard(resolve(codexHome)), ...(options.extraGuards ?? [])];
@@ -347,11 +340,27 @@ class CodexRun {
 	private hookVerdict(hook: Record<string, unknown>): { decision: "allow" } | { decision: "deny"; reason: string } {
 		const tool = String(hook.tool_name ?? "");
 		const call = codexToolCall(tool, hook.tool_input);
-		const reason = this.closed() ?? (call === undefined ? `Refused: ${tool} is not in the Codex spike's tool set.` : this.guard(call));
-		if (reason !== undefined) return { decision: "deny", reason: this.deny(tool, reason, "hook") };
+		const reason = this.closed() ?? this.cwdRefusal(hook.cwd) ?? (call === undefined ? `Refused: ${tool} is not in the Codex spike's tool set.` : this.guard(call));
+		if (reason !== undefined) {
+			this.hookDenied.add(String(hook.tool_use_id ?? ""));
+			return { decision: "deny", reason: this.deny(tool, reason, "hook") };
+		}
 		const payload = call?.name === "bash" ? call.input.command : call?.input;
 		this.tickets.push({ id: String(hook.tool_use_id ?? ""), key: ticketKey(tool, payload) });
 		return { decision: "allow" };
+	}
+
+	/** E10: a model `workdir` moves the call's cwd; only the worktree itself is allowed. */
+	private cwdRefusal(cwd: unknown): string | undefined {
+		const real = (path: string) => {
+			try {
+				return realpathSync(path);
+			} catch {
+				return resolve(path);
+			}
+		};
+		if (typeof cwd === "string" && cwd !== "" && real(cwd) === real(this.options.job.worktree)) return undefined;
+		return `Refused: a native planner's command runs in its worktree only, not in ${String(cwd)}.`;
 	}
 
 	private hookServer(): Promise<Server> {
@@ -382,10 +391,14 @@ class CodexRun {
 	private approveCommand(params: CommandApprovalParams): { decision: "accept" | "decline" } {
 		const command = params.command ?? "";
 		const why = this.closed()
+			?? this.cwdRefusal(params.cwd)
 			?? (params.additionalPermissions != null || params.networkApprovalContext != null ? "Refused: the command asked for extra permissions or network; picp never grants them." : undefined)
 			?? this.guard({ name: "bash", input: { command } })
 			?? (this.take(params.itemId, ticketKey("Bash", command)) ? undefined : "Refused: no hook verdict for this command; a call picp's hook did not allow does not run.");
-		if (why === undefined) return { decision: "accept" };
+		if (why === undefined) {
+			this.acceptedItems.add(params.itemId);
+			return { decision: "accept" };
+		}
 		this.deny("Bash", why, "approval");
 		return { decision: "decline" };
 	}
@@ -458,18 +471,58 @@ class CodexRun {
 				this.turn = done.turn;
 				this.turnDone();
 			}
-		} else if (method === M.itemStarted && (params as ItemNotification).item?.type === "commandExecution") {
-			void this.listTerminals().catch(() => undefined);
+		} else if (method === M.itemStarted || method === M.itemCompleted) {
+			const item = (params as ItemNotification).item;
+			this.tripwire(item);
+			this.toolEvent(method === M.itemStarted ? "start" : "end", item);
+			if (method === M.itemStarted && item?.type === "commandExecution") void this.listTerminals().catch(() => undefined);
+		} else if (method === M.threadStarted) {
+			const id = (params as ThreadStartedNotification).thread?.id;
+			if (this.threadId !== undefined && id !== this.threadId) this.kill("thread/started");
 		} else if (method === M.hookCompleted) {
 			const status = (params as HookCompletedNotification).run?.status;
 			if (status !== "completed" && status !== "blocked" && status !== "running") {
 				this.hookFailed = true;
-				void this.interrupt();
+				this.rpc?.kill();
 			}
 		} else if (method === M.tokenUsageUpdated) {
 			const usage = params as TokenUsageUpdatedNotification;
 			if (usage.threadId === this.threadId || this.threadId === undefined) this.usages.push({ turnId: usage.turnId, total: totals(usage.tokenUsage.total) });
 		}
+	}
+
+	/** Kills the scope on a tool the CLI ran without asking picp: an unaccepted command or patch, an ungated tool. */
+	private tripwire(item: ItemNotification["item"] | undefined): void {
+		if (item === undefined) return;
+		const status = "status" in item ? item.status : undefined;
+		// 0.170.0 announces a command `inProgress` with no process before it asks; a process or an end means it ran.
+		const ran = item.type === "commandExecution" && (status !== "inProgress" || item.processId != null);
+		const unasked = item.type === "commandExecution"
+			? ran && status !== "declined" && !this.acceptedItems.has(item.id) && !this.hookDenied.has(item.id)
+			: item.type === "fileChange" ? status !== "declined" : UNGATED_ITEMS.includes(item.type);
+		if (unasked) this.kill(item.type);
+	}
+
+	private kill(type: string): void {
+		this.bypass ??= type;
+		this.rpc?.kill();
+	}
+
+	private toolEvent(phase: "start" | "end", item: ItemNotification["item"] | undefined): void {
+		if (this.options.onTool === undefined || (item?.type !== "commandExecution" && item?.type !== "dynamicToolCall")) return;
+		const seen = this.toolPhase.get(item.id);
+		if (seen === "end" || seen === phase) return;
+		const [name, args] = item.type === "commandExecution" ? ["bash", { command: item.command }] : [item.tool, item.arguments];
+		const fire = (event: CodexToolEvent) => {
+			try {
+				this.options.onTool?.(event);
+			} catch {
+				// An observer must never end the run.
+			}
+		};
+		if (seen === undefined) fire({ phase: "start", id: item.id, name, args });
+		if (phase === "end") fire({ phase: "end", id: item.id, name, isError: item.status !== "completed" });
+		this.toolPhase.set(item.id, phase);
 	}
 
 	/** Terminates every process the app-server lists, then SIGKILLs any reported pid still alive. */
@@ -510,7 +563,7 @@ class CodexRun {
 		const { job } = this.options;
 		const env = buildCodexChildEnv(this.dirs, this.hostEnv, this.codexHome, this.options.childEnv);
 		const hookCommand = codexHookCommand(this.socket, this.options.hookClientTimeoutMs);
-		const spawn = { hookCommand, hookTimeoutSec: this.options.hookTimeoutSec, surfaceFlags: this.options.surfaceFlags };
+		const spawn = { hookCommand, profile: this.profile, hookTimeoutSec: this.options.hookTimeoutSec, surfaceFlags: this.options.surfaceFlags };
 		const server = await this.hookServer();
 		let lockdown: CodexLockdown | undefined;
 		let error: string | undefined;
@@ -539,13 +592,18 @@ class CodexRun {
 				coldStartMs = Date.now() - this.started;
 				const pid = rpc.appServerPid();
 				if (pid !== undefined) this.options.onAppServer?.(pid);
-				const [account, hooks, mcp, skills] = await Promise.all([
+				const [account, hooks, mcp, skills, features, config] = await Promise.all([
 					rpc.request<GetAccountResponse>(M.accountRead, {}),
 					rpc.request<HooksListResponse>(M.hooksList, { cwds: [job.worktree] }),
 					rpc.request<ListMcpServerStatusResponse>(M.mcpServerStatusList, {}),
 					rpc.request<SkillsListResponse>(M.skillsList, { cwds: [job.worktree] }),
+					listFeatures(rpc),
+					rpc.request<ConfigReadResponse>(M.configRead, { cwd: job.worktree }),
 				]);
-				const surface = { codexHome: { passed: this.codexHome, reported: init.codexHome }, account: account.account != null, hookCommand, hooks, mcpServers: mcp, skills };
+				const surface = {
+					codexHome: { passed: this.codexHome, reported: init.codexHome }, account: account.account != null, hookCommand, hooks, mcpServers: mcp, skills,
+					features, config, profile: { id: CODEX_PROFILE, writableRoots: this.profile.writableRoots },
+				};
 				lockdown = codexLockdownVerdict(surface);
 				if (lockdown.verdict === "ok") {
 					const thread = await this.openThread(rpc);
@@ -567,11 +625,14 @@ class CodexRun {
 			server.close();
 		}
 		if (lockdown?.verdict === "refused") error = lockdown.refusal;
+		else if (this.bypass !== undefined) error = `Refused: the Codex CLI ran ${this.bypass} without asking picp; the run was killed.`;
+		else if (this.hookFailed) error = "Refused: picp's hook failed (killed, timed out or unreachable); the run was killed so nothing that failed open reaches the model.";
 		else if (this.turn === undefined && lockdown?.verdict === "ok" && error === undefined) {
 			error = exitedEarly ? "the app-server exited before turn/completed; its exit code is not an outcome" : "the turn did not complete before the stop";
 		}
 		const turn = this.turn;
-		const outcome: CodexSpikeResult["outcome"] = lockdown?.verdict !== "ok" ? "refused" : turn === undefined || turn.status === "inProgress" ? "stopped" : turn.status;
+		const killed = this.bypass !== undefined || this.hookFailed;
+		const outcome: CodexSpikeResult["outcome"] = lockdown?.verdict !== "ok" ? "refused" : killed || turn === undefined || turn.status === "inProgress" ? "stopped" : turn.status;
 		const { totals: latest, usage } = this.usage();
 		return {
 			codexPath: this.codex.path, codexVersion: this.codex.version, spawnedCommand: this.codex.path, spawnedEnvKeys: Object.keys(env).sort(),
@@ -579,7 +640,7 @@ class CodexRun {
 			...(turn?.error?.codexErrorInfo === undefined ? {} : { codexErrorInfo: turn.error.codexErrorInfo }),
 			...(this.accepted === undefined ? {} : { report: this.accepted }), reportRefusals: this.refusals, denials: this.denials, ticketMatch: this.ticketMatch,
 			...(lockdown === undefined ? {} : { lockdown }), ...(this.threadId === undefined ? {} : { threadId: this.threadId }),
-			...(latest === undefined ? {} : { totals: latest }), usage, leftovers, hookFailed: this.hookFailed,
+			...(latest === undefined ? {} : { totals: latest }), usage, leftovers, hookFailed: this.hookFailed, ...(this.bypass === undefined ? {} : { bypass: this.bypass }),
 			...(coldStartMs === undefined ? {} : { coldStartMs }), durationMs: Date.now() - this.started, ...(error === undefined ? {} : { error }),
 		};
 	}
@@ -587,7 +648,7 @@ class CodexRun {
 	private async openThread(rpc: CodexRpc): Promise<ThreadStartResponse> {
 		const { job, model, systemPrompt, resume } = this.options;
 		const common = {
-			cwd: job.worktree, approvalPolicy: "untrusted", sandbox: "read-only",
+			cwd: job.worktree, approvalPolicy: "untrusted",
 			...(model === undefined ? {} : { model }), ...(systemPrompt === undefined ? {} : { developerInstructions: systemPrompt }),
 		};
 		const reportSpec = {
