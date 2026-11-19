@@ -1,6 +1,7 @@
 /**
  * The Codex surface lockdown: before any thread only picp's trusted hook, no MCP server, the pinned skills, picp's
- * features off and web search disabled; after `thread/start` the profile read-back. Any miss refuses. Counts only.
+ * features off and web search disabled; after `thread/start` the profile read-back and only the MCP servers picp
+ * passed (C5). Any miss refuses. Counts only.
  */
 import { resolve } from "node:path";
 import { CODEX_OFF_FEATURES, CODEX_PROFILE } from "./codex-launch.ts";
@@ -29,8 +30,10 @@ export interface CodexSurface {
 	config: ConfigReadResponse;
 	/** What picp passed: the profile id and the roots it made writable. */
 	profile: { id: string; writableRoots: readonly string[] };
-	/** Present once `thread/start` (or `thread/resume`) answered. */
-	thread?: { response: ThreadStartResponse; cwd: string };
+	/** The MCP server names picp passed in the thread config (C5); the pre-thread list must still be empty. */
+	mcpServersPassed?: readonly string[];
+	/** Present once `thread/start` (or `thread/resume`) answered; `mcpListed` is that thread's server list (C5). */
+	thread?: { response: ThreadStartResponse; cwd: string; mcpListed?: ListMcpServerStatusResponse };
 }
 
 /** `features`: seen counts enabled ones; extra counts picp's off-list enabled or unlisted, and `hooks` off. */
@@ -53,14 +56,18 @@ export function codexLockdownVerdict(surface: CodexSurface): CodexLockdown {
 	const skills = surface.skills.data.flatMap((entry) => entry.skills);
 	const sources = surface.thread?.response.instructionSources ?? [];
 	const enabled = new Map(surface.features.map((feature) => [feature.name, feature.enabled]));
-	const wrongFeatures = CODEX_OFF_FEATURES.filter((name) => enabled.get(name) !== false).length + (enabled.get("hooks") === true ? 0 : 1);
+	const passed = new Set(surface.mcpServersPassed ?? []);
+	const listed = surface.thread?.mcpListed?.data ?? [];
+	// With a server passed, picp's MCP gate is the CLI asking before each tool call (M8): that feature must be on.
+	const elicitation = passed.size > 0 && enabled.get("tool_call_mcp_elicitation") !== true ? 1 : 0;
+	const wrongFeatures = CODEX_OFF_FEATURES.filter((name) => enabled.get(name) !== false).length + (enabled.get("hooks") === true ? 0 : 1) + elicitation;
 	const seen = {
-		hooks: hooks.length, mcpServers: surface.mcpServers.data.length, skills: skills.length, instructionSources: sources.length,
+		hooks: hooks.length, mcpServers: surface.mcpServers.data.length + listed.length, skills: skills.length, instructionSources: sources.length,
 		features: surface.features.filter((feature) => feature.enabled).length,
 	};
 	const extra = {
 		hooks: hooks.length - ours.length,
-		mcpServers: surface.mcpServers.data.length,
+		mcpServers: surface.mcpServers.data.length + listed.filter((server) => !passed.has(server.name)).length,
 		skills: skills.filter((skill) => skill.scope !== "system" || !builtin.includes(skill.name)).length,
 		instructionSources: sources.length,
 		features: wrongFeatures,

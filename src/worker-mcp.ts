@@ -80,8 +80,8 @@ function exposureOf(raw: Record<string, unknown>, tool: string): unknown {
 }
 
 /** pi's config value: `$NAME`/`${NAME}` from `env`, `$$` and `$!` escaped; a `!command` value is never run here. */
-function resolvedValue(value: string, env: NodeJS.ProcessEnv): string {
-	if (value.startsWith("!")) throw new Error("a !command value is not run for the Claude CLI");
+function resolvedValue(value: string, env: NodeJS.ProcessEnv, cli = "Claude CLI"): string {
+	if (value.startsWith("!")) throw new Error(`a !command value is not run for the ${cli}`);
 	return value.replace(/\$(\$|!|\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))/g, (_match, escaped: string, braced?: string, bare?: string) => {
 		const name = braced ?? bare;
 		if (name === undefined) return escaped;
@@ -136,14 +136,65 @@ export function claudeMcpServers(user: UserMcpServers, env: NodeJS.ProcessEnv = 
 }
 
 /** The system-prompt section naming the loaded servers (with their `description`); empty when none loaded. */
-export function claudeMcpSection(user: UserMcpServers, mcp: ClaudeMcpServers): string {
+export function claudeMcpSection(
+	user: UserMcpServers,
+	mcp: { path: string; servers: Record<string, unknown> },
+	how = "tools mcp__<server>__<tool>, deferred ones found with ToolSearch",
+): string {
 	const names = Object.keys(mcp.servers);
 	if (names.length === 0) return "";
 	const described = (name: string): string => {
 		const description = (user.servers[name] as { description?: unknown }).description;
 		return typeof description === "string" ? `${name}: ${description}` : name;
 	};
-	return `\n\nMCP servers (from ${mcp.path}; tools mcp__<server>__<tool>, deferred ones found with ToolSearch):\n${names.map((name) => `- ${described(name)}`).join("\n")}`;
+	return `\n\nMCP servers (from ${mcp.path}; ${how}):\n${names.map((name) => `- ${described(name)}`).join("\n")}`;
+}
+
+/** The CLI's built-in resource tools, offered whenever a server is loaded; they ask no approval (C5 R3). */
+export const CODEX_MCP_HELPER_TOOLS: readonly string[] = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"];
+
+export interface CodexMcpServers {
+	path: string;
+	/** `mcp_servers.<name>` to its thread-config entry; values travel only in the thread config, never on argv. */
+	config: Record<string, Record<string, unknown>>;
+	names: string[];
+	hidden: (server: string, tool: string) => boolean;
+	/** One line per server left out and why; never a config value. */
+	skipped: string[];
+}
+
+/**
+ * The Codex CLI's user servers (C5): each enabled stdio or HTTP entry as a thread-config entry whose every tool asks
+ * picp first (`default_tools_approval_mode: "prompt"`), values resolved from `env` as pi does. A name the CLI may
+ * spell differently, `auth`, `!command` or an unset `$VAR` is skipped by name.
+ */
+export function codexMcpConfig(user: UserMcpServers, env: NodeJS.ProcessEnv = process.env): CodexMcpServers {
+	const config: CodexMcpServers["config"] = {};
+	const kept: Record<string, Record<string, unknown>> = {};
+	const skipped = user.error ? [`${user.path} is not valid JSON with an "mcpServers" object; no MCP servers`] : [];
+	for (const [name, raw] of Object.entries(user.servers)) {
+		const skip = (why: string) => void skipped.push(`MCP server ${name} not loaded: ${why}`);
+		if (isRecord(raw) && (raw.enabled === false || (raw.exposure === "hidden" && !isRecord(raw.toolExposure)))) continue;
+		if (!isRecord(raw) || (typeof raw.command !== "string" && typeof raw.url !== "string")) skip(`it needs "command" (stdio) or "url" (HTTP)`);
+		else if (!/^[A-Za-z0-9_-]+$/.test(name)) skip("the Codex CLI takes server names of letters, digits, _ and - only");
+		else if (raw.auth !== undefined) skip(`"auth" has no Codex CLI equivalent`);
+		else {
+			try {
+				const values = (entries: unknown) => Object.fromEntries(Object.entries(isRecord(entries) ? entries : {}).map(([key, value]) => [key, resolvedValue(String(value), env, "Codex CLI")]));
+				config[`mcp_servers.${name}`] = typeof raw.command === "string"
+					? {
+						command: raw.command, ...(Array.isArray(raw.args) ? { args: raw.args.map(String) } : {}), ...(raw.env !== undefined ? { env: values(raw.env) } : {}),
+						...(raw.cwd !== undefined ? { cwd: resolvedValue(String(raw.cwd), env, "Codex CLI") } : {}), default_tools_approval_mode: "prompt",
+					}
+					: { url: String(raw.url), ...(raw.headers !== undefined ? { http_headers: values(raw.headers) } : {}), default_tools_approval_mode: "prompt" };
+				kept[name] = raw;
+			} catch (error) {
+				skip((error as Error).message);
+			}
+		}
+	}
+	const hidden = (server: string, tool: string) => kept[server] !== undefined && exposureOf(kept[server], tool) === "hidden";
+	return { path: user.path, config, names: Object.keys(kept), hidden, skipped };
 }
 
 /**

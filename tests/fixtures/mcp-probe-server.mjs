@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Minimal MCP stdio server for tests (cp-fl8b): newline-delimited JSON-RPC 2.0.
-// argv: <label> <log file>. Appends "start <label>" once and "call <label> <tool>" per tools/call.
+// argv: <label> <log file>. Appends "start <label>" once, "call <label> <tool>" per tools/call and
+// "resource <label> <uri>" per resources/read.
 import { appendFileSync } from "node:fs";
 
 const [label = "probe", log] = process.argv.slice(2);
@@ -36,6 +37,9 @@ process.stdin.on("data", (chunk) => {
 		} else if (method === "tools/call") {
 			note(`call ${label} ${params.name}`);
 			send({ id, result: { content: [{ type: "text", text: `ok:${params.name}` }] } });
+		} else if (method === "resources/read") {
+			note(`resource ${label} ${params.uri}`);
+			send({ id, result: { contents: [{ uri: params.uri, mimeType: "text/plain", text: `resource:${params.uri}` }] } });
 		} else if (method === "ping") {
 			send({ id, result: {} });
 		} else {

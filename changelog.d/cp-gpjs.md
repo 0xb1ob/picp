@@ -1,0 +1,1 @@
+- C5: Codex planners get `gh_read`, the operator's MCP servers (every tool call asks picp first; resource reads with a dead hook are the named R3 limit), per-job skills as sandbox read roots and the WP3 child env; the `ops` profile falls back to pi. Ships off behind `codex_research`.

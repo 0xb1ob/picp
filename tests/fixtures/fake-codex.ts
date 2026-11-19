@@ -21,7 +21,11 @@ type Step =
 	/** `account/rateLimits/updated` with this snapshot; no usage. */
 	| { kind: "rateLimits"; rateLimits: unknown }
 	/** Ends the turn `failed` after an `error` notification; no usage for the step. */
-	| { kind: "fail"; errorInfo?: unknown; message?: string };
+	| { kind: "fail"; errorInfo?: unknown; message?: string }
+	/** C5 (M10 order): hook `mcp__<server>__<tool>`, `inProgress`, the prompt-mode approval, then `tools/call`. */
+	| { kind: "mcp"; server: string; tool: string; arguments?: unknown; hook?: HookMode }
+	/** C5 (M7, R3): hook `read_mcp_resource`, no approval, then the server's `resources/read`. */
+	| { kind: "resource"; server: string; uri: string; hook?: HookMode };
 interface Knobs {
 	version?: string;
 	loginStatus?: number;
@@ -52,6 +56,10 @@ interface Knobs {
 	patchApply?: "unasked";
 	/** `refuse`: every `turn/steer` answers -32600, as the CLI does for a turn it no longer runs. */
 	steer?: "refuse";
+	/** Servers a thread-scoped `mcpServerStatus/list` names beside the ones its config passed. */
+	extraThreadMcpServers?: number;
+	/** `skip`: an MCP tool call runs with no approval request even in prompt mode, a CLI that bypasses picp. */
+	mcpApproval?: "skip";
 }
 interface Script { knobs?: Knobs; turns?: Step[][] }
 interface Totals { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number; outputTokens: number; reasoningOutputTokens: number; totalTokens: number }
@@ -90,7 +98,7 @@ const trusted = knobs.trust !== "ignore" && trustFlag !== null && JSON.parse(tru
 
 const FEATURES: Record<string, boolean> = {
 	apps: true, plugins: true, multi_agent: true, image_generation: true, memories: true, view_image: true, goals: true, sleep_tool: true,
-	unified_exec_tty: true, hooks: true, skip_host_skill_discovery: false,
+	unified_exec_tty: true, hooks: true, skip_host_skill_discovery: false, tool_call_mcp_elicitation: true,
 };
 argv.forEach((arg, i) => {
 	if ((arg === "--enable" || arg === "--disable") && argv[i + 1] !== undefined) FEATURES[argv[i + 1] as string] = arg === "--enable";
@@ -108,6 +116,26 @@ const inProfile = (path: string) => roots.some((root) => resolve(path) === root 
 /** The lexical stand-in for the kernel: an absolute path or workdir outside the profile's roots is denied. */
 const kernelDenies = (command: string, cwd: string): string | undefined =>
 	profileId === undefined ? undefined : [cwd, ...(command.match(/(?<![\w.-])\/[^\s'";|&<>()]*/g) ?? [])].find((path) => !inProfile(path));
+/** M12: `inherit="core"` keeps core names only; `"all"` the whole env minus `exclude`; no flag, the whole env. */
+const inherit = /^shell_environment_policy\.inherit="(\w+)"$/.exec(configs.find((c) => c.startsWith("shell_environment_policy.inherit=")) ?? "")?.[1];
+const excludes = (JSON.parse(configs.find((c) => c.startsWith("shell_environment_policy.exclude="))?.slice(33) ?? "[]") as string[]).map((glob) => new RegExp(`^${glob.replace(/\*/g, ".*")}$`));
+const CORE_ENV = /^(?:HOME|LOGNAME|PATH|SHELL|USER|TMPDIR|LANG|LC_\w+|PAGER|GIT_PAGER|GH_PAGER|TERM)$/;
+const shellEnv = (): NodeJS.ProcessEnv => Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+	inherit === "core" ? CORE_ENV.test(key) : inherit === "all" ? !excludes.some((glob) => glob.test(key)) : true));
+const MCP_FIELDS = ["command", "args", "env", "cwd", "url", "http_headers", "default_tools_approval_mode"];
+type McpEntry = { command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; default_tools_approval_mode?: string };
+/** M9/M13: a thread's servers are its config's `mcp_servers.<name>` entries; an unknown field fails by name. */
+function threadMcp(config: unknown): Record<string, McpEntry> {
+	const servers: Record<string, McpEntry> = {};
+	for (const [key, value] of Object.entries((config ?? {}) as Record<string, unknown>)) {
+		const name = /^mcp_servers\.(.+)$/.exec(key)?.[1];
+		if (name === undefined) continue;
+		const bad = Object.keys(value as object).find((field) => !MCP_FIELDS.includes(field));
+		if (bad !== undefined) throw Object.assign(new Error(`unknown configuration field \`mcp_servers.${name}.${bad}\``), { code: -32600 });
+		servers[name] = value as McpEntry;
+	}
+	return servers;
+}
 
 process.on("SIGTERM", () => process.exit(0));
 
@@ -123,7 +151,7 @@ function ask(method: string, params: unknown): Promise<unknown> {
 	});
 }
 
-interface Thread { id: string; total: Totals; lastTurnId?: string; cwd: string; policy: string; replay: boolean }
+interface Thread { id: string; total: Totals; lastTurnId?: string; cwd: string; policy: string; replay: boolean; mcp: Record<string, McpEntry> }
 let thread: Thread | undefined;
 let interrupted = false;
 let liveTurn: string | undefined;
@@ -173,6 +201,10 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
 		}));
 		return { data: [{ cwd: process.cwd(), hooks: [...ours, ...extra], errors: [], warnings: [] }] };
 	}
+	if (method === "mcpServerStatus/list" && params.threadId !== undefined) {
+		const names = [...Object.keys(thread?.id === params.threadId ? thread.mcp : {}), ...Array.from({ length: knobs.extraThreadMcpServers ?? 0 }, (_, i) => `stray-thread-mcp-${i}`)];
+		return { data: names.map((name) => ({ name, tools: {}, resources: [], resourceTemplates: [], authStatus: "unsupported" })) };
+	}
 	if (method === "mcpServerStatus/list") return { data: Array.from({ length: knobs.extraMcpServers ?? 0 }, (_, i) => ({ name: `stray-mcp-${i}`, tools: {}, resources: [], resourceTemplates: [], authStatus: "unsupported" })) };
 	if (method === "skills/list") {
 		const skills = Array.from({ length: knobs.extraSkills ?? 0 }, (_, i) => ({ name: `stray-skill-${i}`, scope: "user", enabled: true, description: "", path: "/stray" }));
@@ -189,14 +221,18 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
 		return { config: { web_search: value }, origins: webSearchFlag === undefined ? {} : { web_search: { name: { type: "sessionFlags" }, version: "1" } } };
 	}
 	if (method === "thread/start") {
-		thread = { id: `thr_${process.pid}_${Date.now()}`, total: zero(), cwd: String(params.cwd), policy: String(params.approvalPolicy), replay: false };
+		const mcp = threadMcp(params.config);
+		thread = { id: `thr_${process.pid}_${Date.now()}`, total: zero(), cwd: String(params.cwd), policy: String(params.approvalPolicy), replay: false, mcp };
+		log("threads.jsonl", { method, mcpServers: Object.keys(mcp), developerInstructions: params.developerInstructions ?? null });
 		save(thread);
 		return threadResponse(thread, params);
 	}
 	if (method === "thread/resume") {
 		const id = String(params.threadId);
 		const stored = JSON.parse(readFileSync(threadFile(id), "utf8")) as { total: Totals; lastTurnId?: string };
-		thread = { id, total: stored.total, lastTurnId: stored.lastTurnId, cwd: String(params.cwd), policy: String(params.approvalPolicy), replay: true };
+		const mcp = threadMcp(params.config);
+		thread = { id, total: stored.total, lastTurnId: stored.lastTurnId, cwd: String(params.cwd), policy: String(params.approvalPolicy), replay: true, mcp };
+		log("threads.jsonl", { method, mcpServers: Object.keys(mcp), developerInstructions: params.developerInstructions ?? null });
 		return threadResponse(thread, params);
 	}
 	if (method === "thread/delete") {
@@ -304,7 +340,7 @@ async function shellStep(step: Extract<Step, { kind: "shell" }>, turnId: string)
 	}
 	log("executed.jsonl", { command: step.command });
 	if (step.background === true) {
-		const child = spawn("sh", ["-c", `exec ${step.command}`], { cwd, detached: true, stdio: "ignore" });
+		const child = spawn("sh", ["-c", `exec ${step.command}`], { cwd, detached: true, stdio: "ignore", env: shellEnv() });
 		child.unref();
 		terminals.set(processId, { pid: child.pid ?? -1, command: step.command, itemId });
 		log("pids.jsonl", { pid: child.pid });
@@ -312,7 +348,7 @@ async function shellStep(step: Extract<Step, { kind: "shell" }>, turnId: string)
 		return;
 	}
 	notify("item/started", { threadId: thread?.id, turnId, item: { ...base, status: "inProgress", processId } });
-	const run = spawnSync("sh", ["-c", step.command], { cwd, encoding: "utf8" });
+	const run = spawnSync("sh", ["-c", step.command], { cwd, encoding: "utf8", env: shellEnv() });
 	notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: run.status === 0 ? "completed" : "failed", exitCode: run.status, aggregatedOutput: `${run.stdout}${run.stderr}` } });
 }
 
@@ -336,8 +372,60 @@ async function patchStep(step: Extract<Step, { kind: "patch" }>, turnId: string)
 	notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status: "completed" } });
 }
 
+/** One request to a stdio server: spawned with M2's env (`HOME, LANG, PATH, TMPDIR` plus the entry's), 10 s bound. */
+async function serverCall(entry: McpEntry, method: string, params: unknown): Promise<{ result?: { content?: unknown }; error?: { message?: string } }> {
+	const base = Object.fromEntries(["HOME", "LANG", "PATH", "TMPDIR"].flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]])));
+	const child = spawn(entry.command ?? "false", entry.args ?? [], { cwd: entry.cwd ?? thread?.cwd, env: { ...base, ...(entry.env ?? {}) }, stdio: ["pipe", "pipe", "ignore"] });
+	child.stdin?.on("error", () => {});
+	const answers = new Map<number, (message: Record<string, unknown>) => void>();
+	let buffer = "";
+	child.stdout?.setEncoding("utf8");
+	child.stdout?.on("data", (chunk: string) => {
+		buffer += chunk;
+		for (let cut = buffer.indexOf("\n"); cut >= 0; cut = buffer.indexOf("\n")) {
+			const message = JSON.parse(buffer.slice(0, cut)) as Record<string, unknown>;
+			buffer = buffer.slice(cut + 1);
+			answers.get(Number(message.id))?.(message);
+		}
+	});
+	const request = (id: number, m: string, p: unknown) => new Promise<Record<string, unknown>>((done) => {
+		answers.set(id, done);
+		child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: m, params: p })}\n`);
+	});
+	const bound = sleep(10_000).then(() => ({ error: { message: "the MCP server did not answer in 10 s" } }));
+	try {
+		return await Promise.race([request(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake-codex", version: "0" } })
+			.then(() => request(2, method, params)) as Promise<{ result?: { content?: unknown }; error?: { message?: string } }>, bound]);
+	} finally {
+		child.stdin?.end();
+		child.kill("SIGKILL");
+	}
+}
+
+async function mcpStep(step: Extract<Step, { kind: "mcp" | "resource" }>, turnId: string): Promise<void> {
+	const itemId = `item_${++counter}`;
+	const [tool, args] = step.kind === "mcp" ? [step.tool, step.arguments ?? {}] : ["read_mcp_resource", { server: step.server, uri: step.uri }];
+	if ((await runHook(step.kind === "mcp" ? `mcp__${step.server}__${tool}` : tool, args, itemId, turnId, step.hook)) === "blocked") return;
+	const base = { type: "mcpToolCall", id: itemId, server: step.server, tool, arguments: args };
+	const end = (status: string, more: Record<string, unknown>) => notify("item/completed", { threadId: thread?.id, turnId, item: { ...base, status, ...more } });
+	notify("item/started", { threadId: thread?.id, turnId, item: { ...base, status: "inProgress" } });
+	const entry = thread?.mcp[step.server];
+	if (entry === undefined) return void end("failed", { error: { message: `unknown MCP server ${step.server}` } });
+	if (step.kind === "mcp" && entry.default_tools_approval_mode === "prompt" && knobs.mcpApproval !== "skip") {
+		const answer = (await ask("mcpServer/elicitation/request", {
+			threadId: thread?.id, turnId, serverName: step.server, mode: "form", message: `Allow ${tool}?`, requestedSchema: { type: "object", properties: {} },
+			_meta: { codex_approval_kind: "mcp_tool_call", tool_name: tool, tool_params: args, persist: ["session", "always"] },
+		})) as { action?: unknown } | undefined;
+		if (answer?.action !== "accept") return void end("failed", { error: { message: "user rejected MCP tool call" } });
+	}
+	const called = await serverCall(entry, step.kind === "mcp" ? "tools/call" : "resources/read", step.kind === "mcp" ? { name: tool, arguments: args } : { uri: step.uri });
+	log("mcp.jsonl", { server: step.server, tool, ok: called.error === undefined });
+	end(called.error === undefined ? "completed" : "failed", called.error === undefined ? { result: called.result } : { error: called.error });
+}
+
 async function runStep(step: Exclude<Step, { kind: "rateLimits" | "fail" }>, turnId: string): Promise<void> {
 	if (step.kind === "shell") return shellStep(step, turnId);
+	if (step.kind === "mcp" || step.kind === "resource") return mcpStep(step, turnId);
 	if (step.kind === "message") {
 		notify("item/completed", { threadId: thread?.id, turnId, item: { type: "agentMessage", id: `item_${++counter}`, text: step.text } });
 		return;
