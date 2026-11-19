@@ -12,6 +12,7 @@ import { checkBudget } from "../../src/failures.ts";
 import { isPidAlive } from "../../src/fleet.ts";
 import { MandateStore } from "../../src/mandate.ts";
 import { AUTH_SENTINEL, codexFixture, type FakeCodexScript, fakeExecuted, fakePids, fakeRpcMethods, fakeScopes, fakeSpawns } from "../harness/codex-mock.ts";
+import { FAKE_NATIVE_MODEL, routeNativeModel } from "../harness/claude-mock-provider.ts";
 import { codexWorkerHome, FAKE_CODEX_REF } from "../harness/codex-worker.ts";
 import { startViewer } from "../harness/dashboard.ts";
 import { readRunEvents, readRunStatus, treehouseAvailable, waitFor } from "../harness/index.ts";
@@ -200,14 +201,18 @@ test("CX-1e: codex slots are counted per driver: a second codex job is occupied,
 	const h = await codexWorkerHome(t, { native: { codex_research: true, claude_research: true } });
 	const [first, second, rowed, claude] = await Promise.all([h.job(), h.job(), h.job(), h.job()]);
 	const piModel = h.b.provider.addScript(`cx1e-pi-${Math.random().toString(36).slice(2, 8)}`, [{ kind: "text", text: "idle" }]);
-	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*", FAKE_CODEX_REF, "anthropic/claude-opus-x"],
-		rubric: [{ id: "codex-research", role: "planner", model: FAKE_CODEX_REF, fallbacks: [piModel], driver: "codex" }] }));
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*", FAKE_CODEX_REF],
+		rubric: [
+			{ id: "codex-research", role: "planner", scope: ["S"], model: FAKE_CODEX_REF, fallbacks: [piModel], driver: "codex" },
+			{ id: "claude-research", role: "planner", scope: ["L"], model: FAKE_NATIVE_MODEL, fallbacks: [piModel], driver: "claude" },
+		] }));
+	routeNativeModel(h.b.home);
 	h.setScript({ turns: [[{ kind: "hold", marker: "held" }]] });
 	const ends = (await h.run([
 		first.dispatch(), h.awaitFile(join(h.state, "held")),
 		second.dispatch(),
-		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: rowed.id, task: "Report.", queue: false, when_ready: false, dry_run: true } }] },
-		claude.dispatch({ driver: "claude", model: "anthropic/claude-opus-x", dry_run: true }),
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: rowed.id, task: "Report.", scope: "S", queue: false, when_ready: false, dry_run: true } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: claude.id, task: "Report.", scope: "L", queue: false, when_ready: false, dry_run: true } }] },
 	])).filter((end) => end.toolName === "cp_dispatch");
 	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
 	assert.equal(ends[1]?.isError, true, text(ends[1]));
@@ -215,8 +220,9 @@ test("CX-1e: codex slots are counted per driver: a second codex job is occupied,
 	noRun(h, second.id);
 	assert.deepEqual([preview(ends[2])?.requested_driver, preview(ends[2])?.driver], ["codex", "pi"], text(ends[2]));
 	assert.match(preview(ends[2])?.driver_reason ?? "", new RegExp(`^occupied: codex concurrency is 1 and ${first.id}`));
-	// A live codex job takes no Claude slot: the Claude preview is never refused as occupied (it may lack a CLI here).
-	assert.doesNotMatch(text(ends[3]), /concurrency is 1/);
+	// A live codex job takes no Claude slot: the claude row's preview is never occupied (it may lack a CLI here).
+	assert.equal(preview(ends[3])?.requested_driver, "claude", text(ends[3]));
+	assert.doesNotMatch(preview(ends[3])?.driver_reason ?? "", /^occupied/);
 	assertClean(h);
 });
 
