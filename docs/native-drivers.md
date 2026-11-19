@@ -1124,6 +1124,9 @@ otherwise.
 job's artifact or a tool under the home cannot be followed. Resume, revive and steer: see C2 below. A paused grant lets the running turn finish. R1 (a rule-approved command with a dead hook) and R2
 stay as accepted for read-only research only; F5 and R1 are re-decided before C7.
 
+**C7 carry-in list** (open, not widened by C2): R1, F5, Q2 (the freeze checkpoint's WIP commit for codex; `checkpoint`
+stays refused until then) and Q3 (a fresh thread for a moved worktree; the resume stays refused by name until then).
+
 Kill-criteria verdicts (CI: `tests/e2e/codex-worker.test.ts` and `tests/e2e/codex-worker-spike.test.ts` on the fake;
 real CLI: `tests/e2e/codex-worker-live-smoke.test.ts` under `CP_LIVE_TESTS=1`):
 
