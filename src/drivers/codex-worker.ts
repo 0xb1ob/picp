@@ -101,6 +101,7 @@ async function serve(prompt: string): Promise<number> {
 	if (env.CP_KIND !== "research" || env.CP_ROLE !== "planner") throw new Error(`the Codex CLI runs research/planner jobs only in C1b, not ${env.CP_KIND}/${env.CP_ROLE}`);
 	if (!env.CP_JOB_ID || !runDir || !worktree || !artifactPath) throw new Error("Codex CLI worker started without its job identity");
 	const model = env.CP_CODEX_MODEL ?? "codex";
+	const routed = env.CP_CODEX_MODEL ? { model: env.CP_CODEX_MODEL } : {};
 	const systemPrompt = readSystemPrompt();
 	const session = freshSession(worktree);
 	const transcript = codexTranscript(nativeTranscriptFile(runDir, jobId), { id: jobId, cwd: worktree }, model);
@@ -112,7 +113,7 @@ async function serve(prompt: string): Promise<number> {
 	try {
 		result = await runCodexSpike({
 			job: { job_id: jobId, kind: "research", role: "planner", delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath },
-			prompt, model, systemPrompt, hostEnv: env, timeoutMs: RUN_TIMEOUT_MS, signal: abort.signal, scratchDir: session.scratch_dir,
+			prompt, ...routed, systemPrompt, hostEnv: env, timeoutMs: RUN_TIMEOUT_MS, signal: abort.signal, scratchDir: session.scratch_dir,
 			...(env.CP_CODEX_HOME ? { codexHome: env.CP_CODEX_HOME } : {}), ...(env.CP_NATIVE_THINKING ? { effort: env.CP_NATIVE_THINKING } : {}),
 			onMessage: (method, params) => onMessage(session, transcript, method, params),
 			onTool: (event) => onTool(transcript, event),

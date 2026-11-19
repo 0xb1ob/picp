@@ -9087,8 +9087,11 @@ keeps the model it has. An invalid `deny_by_role` (unknown role key, non-array,
 empty or overlong pattern) makes the whole file invalid, exactly like any
 invalid `routing.json` today. Absent, nothing is denied.
 
-**Driver (native routing S1).** A rubric row may carry `driver: "pi" | "claude"`; absent (every legacy row) is
-`pi`, and any other value makes the whole file invalid. `claude` is a preference, resolved at dispatch by
+**Driver (native routing S1).** A rubric row may carry `driver: "pi" | "claude" | "codex"`; absent (every legacy row)
+is `pi`, and any other value makes the whole file invalid. A `codex` row (C1b) works the same way for planner research
+with delivery `local` or `answer`, on the Codex CLI with the row's explicit OpenAI GPT model (provider `openai`, model
+id starting `gpt-`); a build before C1b
+cannot read a file holding one ([`docs/native-drivers.md`](native-drivers.md#c1b-research-wiring)). `claude` is a preference, resolved at dispatch by
 `src/dispatch-driver.ts`: an eligible job runs on the Claude CLI with the row's own `model`, which must be an
 explicit Anthropic Claude id (provider `anthropic`, model id starting `claude-`; anything else refuses the dispatch
 before any lease, never a silent fallback), and
@@ -9852,10 +9855,13 @@ added, removed or reordered row is 400. The rest of `routing.json` (`profiles`,
 
 **CLI writes.** A `workers.driver` write touches two owners in one transaction. `claude` sets `driver: "claude"` on
 every rubric row and `claude_research`, `claude_ship` and `claude_review: true` in `data/native.json` (created if
-absent). `pi` deletes every row's `driver` and those three keys. `max_concurrent` and every other key stay. In the same
+absent). `pi` deletes every row's `driver` and those three keys. `max_concurrent` and every other key stay, the four
+Codex keys too (`codex_research`, `codex_ship`, `codex_review`, `codex_max_concurrent` 1-4): the Workers CLI never sets
+or deletes them, and no Settings field sets a row's driver to `codex`. In the same
 write a `models.rubric` edit applies first, so one Save can switch the CLI and pick the new models. Any routing write is
 then refused 400, with one error per row, when a `claude` row's `model` is not an Anthropic Claude model or its
-`thinking` has no Claude effort (`minimal`). It is also refused when a row's changed `model` fails `models.allow` or
+`thinking` has no Claude effort (`minimal`), when a `codex` row's `model` is not an OpenAI GPT model or its `thinking` is not
+`low`…`max`, and when a new or changed `codex` row is written while `codex_research` is off. It is also refused when a row's changed `model` fails `models.allow` or
 matches its role's `deny_by_role`. Fallbacks are never checked or dropped. `claude` with no rubric rows is 409. A `set`
 naming both `workers.driver` and `workers.native_claude_research` is 400. A parent write touching `models.parent_driver`,
 `models.parent` or `models.parent_thinking` is refused 400 when the result pairs `driver: "claude"` with a model

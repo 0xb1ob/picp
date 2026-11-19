@@ -4,7 +4,7 @@
  * deleted, counts and statuses only. picp passes the operator's Codex home as CODEX_HOME and never opens it.
  */
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
@@ -38,6 +38,8 @@ import {
 	codexSpawnArgs,
 	runCodexSpike,
 } from "../../src/drivers/codex-spike.ts";
+import { deleteCodexThread, codexThreadDelete } from "../../src/drivers/codex-teardown.ts";
+import { NATIVE_CODEX_SESSION_FILE, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { spawnSpikeDriver } from "../harness/codex-mock.ts";
 import { type MockModelTurn, startCodexMockProvider } from "../harness/codex-mock-provider.ts";
 import { LIVE_TESTS_ENABLED } from "../harness/index.ts";
@@ -85,19 +87,11 @@ function scratch(t: TestContext) {
 	return { root, worktree, artifactPath, run, options };
 }
 
-/** Deletes a thread a killed or self-exited run could not, through its own contained app-server. */
+/** Deletes a thread a killed or self-exited run could not, through teardown's own contained bare app-server (C1b). */
 async function deleteThread(root: string, worktree: string, threadId: string | undefined): Promise<void> {
 	if (threadId === undefined) return;
 	const env = buildCodexChildEnv({ home: join(root, "home"), tmp: join(root, "tmp") }, process.env, defaultCodexHome());
-	const rpc = spawnCodexRpc({ command: CODEX as string, args: codexBareArgs(), cwd: worktree, env, containment: resolveCodexContainment() });
-	try {
-		await rpc.request(CODEX_METHODS.initialize, { clientInfo: { name: "picp-smoke", version: "0" }, capabilities: { experimentalApi: true } });
-		rpc.notify(CODEX_METHODS.initialized);
-		await rpc.request(CODEX_METHODS.threadDelete, { threadId }).catch(() => undefined);
-	} finally {
-		rpc.closeInput();
-		await rpc.exited;
-	}
+	await codexThreadDelete({ codexPath: CODEX as string, containment: resolveCodexContainment(), env, cwd: worktree, threadId }).catch(() => undefined);
 }
 
 /** C1's permission profile over a scratch case's own roots, as `runCodexSpike` builds it. */
@@ -302,8 +296,10 @@ const OUTSIDE_SENTINEL = "SYNTHETIC-OUTSIDE-WORKTREE-SENTINEL";
 
 interface C1Session {
 	codexHome: string;
-	/** `allow`: picp's hook client on a socket that allows every call; `selfkill`: a hook that dies by SIGKILL. */
-	hook: "allow" | "selfkill";
+	/** `allow`/`deny`: picp's hook client on a socket that allows (denies) every call; `selfkill`: a hook that dies by SIGKILL. */
+	hook: "allow" | "deny" | "selfkill";
+	/** The answer to every `fileChange` approval; default `decline`, picp's only answer. */
+	fileDecision?: "accept" | "decline";
 	/** Every approval is accepted unless `decline`: the worst case, where only the kernel profile stands. */
 	decline?: boolean;
 	extraArgs?: string[];
@@ -322,12 +318,13 @@ async function c1Session(s: { root: string; worktree: string; artifactPath: stri
 	mkdirSync(outside, { recursive: true, mode: 0o700 });
 	writeFileSync(join(outside, "secret.txt"), `${OUTSIDE_SENTINEL}\n`);
 	const socket = join(s.root, "hook.sock");
-	const allow = createServer((conn) => conn.once("data", () => conn.end(`${JSON.stringify({ decision: "allow" })}\n`)));
+	const verdict = options.hook === "deny" ? { decision: "deny", reason: "Refused: deny-all probe hook." } : { decision: "allow" };
+	const allow = createServer((conn) => conn.once("data", () => conn.end(`${JSON.stringify(verdict)}\n`)));
 	await new Promise<void>((done) => allow.listen(socket, done));
 	let stop = false;
 	// The allow server and the kill poll end here whatever throws above the inner try, or the test file never exits.
 	try {
-		const hookCommand = options.hook === "allow" ? codexHookCommand(socket) : `'${process.execPath}' '${HOOK_FAIL}' selfkill`;
+		const hookCommand = options.hook === "selfkill" ? `'${process.execPath}' '${HOOK_FAIL}' selfkill` : codexHookCommand(socket);
 		const profile = c1Profile(s);
 		const env = buildCodexChildEnv({ home: join(s.root, "home"), tmp: join(s.root, "tmp") }, process.env, options.codexHome);
 		const containment = resolveCodexContainment();
@@ -335,14 +332,18 @@ async function c1Session(s: { root: string; worktree: string; artifactPath: stri
 		const spawn = { hookCommand, profile, hookTimeoutSec: 5 };
 		const trust = await codexHookTrust(CODEX as string, [...codexSpawnArgs(spawn), ...extra], s.worktree, env, containment);
 		const rpc = spawnCodexRpc({ command: CODEX as string, args: [...codexSpawnArgs({ ...spawn, trust }), ...extra], cwd: s.worktree, env, containment });
-		const seen = { approvals: 0, approvalCwds: [] as string[], notes: [] as string[], hooks: [] as string[], commands: [] as string[], killed: false };
+		const seen = { approvals: 0, patchApprovals: 0, approvalCwds: [] as string[], notes: [] as string[], hooks: [] as string[], commands: [] as string[], killed: false };
 		let threadId: string | undefined;
 		rpc.onRequest(CODEX_METHODS.commandApproval, (params) => {
 			seen.approvals++;
 			seen.approvalCwds.push(String((params as { cwd?: unknown }).cwd));
 			return { decision: options.decline === true ? "decline" : "accept" };
 		});
-		rpc.onRequest(CODEX_METHODS.fileChangeApproval, () => ({ decision: "decline" }));
+		rpc.onRequest(CODEX_METHODS.fileChangeApproval, () => {
+			seen.patchApprovals++;
+			seen.notes.push("approval fileChange");
+			return { decision: options.fileDecision ?? "decline" };
+		});
 		const done = new Promise<void>((ok) => rpc.onNotification(({ method, params }) => {
 			seen.notes.push(`${method} ${JSON.stringify(params)}`);
 			const p = params as { item?: { type?: string; status?: string }; run?: { status?: string }; threadId?: string };
@@ -522,4 +523,149 @@ test("LS-4o-I (offline): through runCodexSpike, a hook denial and an accepted co
 	} finally {
 		await provider.close();
 	}
+});
+
+const patchJs = (target: string): MockModelTurn => ({
+	custom: [{ name: "exec", input: `// @exec: {"yield_time_ms": 60000}\ntext(JSON.stringify(await tools.apply_patch(${JSON.stringify(`*** Begin Patch\n*** Add File: ${target}\n+patched\n*** End Patch\n`)})));` }],
+});
+
+test("LS-4o-F (carry-in 1, KC1/KC2, offline): a patch is announced inProgress before its approval, declined and absent; a denied hook leaves no item; an allow rule still asks", { skip, timeout: 300_000 }, async (t) => {
+	// The real-CLI order behind C1b's tripwire rule: hook, `item/started fileChange inProgress`, the approval, then
+	// `declined`. A patch applied after a decline, or with no approval request, fires KC2.
+	const declined = await offline(t, [patchJs("@ROOT/work/ls4o-f.txt"), { message: "done" }], { hook: "allow", model: "gpt-6.2-sol" });
+	const at = (pattern: RegExp) => declined.notes.findIndex((note) => pattern.test(note));
+	const started = at(/^item\/started .*"type":"fileChange".*"status":"inProgress"/);
+	const asked = declined.notes.indexOf("approval fileChange");
+	const ended = at(/^item\/completed .*"type":"fileChange".*"status":"declined"/);
+	t.diagnostic(`pass 1: inProgress at ${started}, approval at ${asked}, declined at ${ended}, approvals ${declined.patchApprovals}`);
+	assert.ok(started >= 0 && asked > started && ended > asked, "the fileChange order is not inProgress, approval, declined");
+	assert.equal(existsSync(join(declined.root, "work", "ls4o-f.txt")), false, "KC1 fired: a declined patch was applied");
+
+	const denied = await offline(t, [patchJs("@ROOT/work/ls4o-f.txt"), { message: "done" }], { hook: "deny", model: "gpt-6.2-sol" });
+	t.diagnostic(`pass 2: hooks ${JSON.stringify(denied.hooks)}, approvals ${denied.patchApprovals}`);
+	assert.ok(!denied.notes.some((note) => note.includes('"type":"fileChange"')), "a hook-denied patch still produced a fileChange item");
+	assert.equal(existsSync(join(denied.root, "work", "ls4o-f.txt")), false);
+
+	const rule = await offline(t, [patchJs("@ROOT/outside/ls4o-f.txt"), { message: "done" }], { hook: "selfkill", model: "gpt-6.2-sol", rules: 'prefix_rule(pattern=["apply_patch"], decision="allow")\n' });
+	t.diagnostic(`pass 3: hooks ${JSON.stringify(rule.hooks)}, approvals ${rule.patchApprovals}`);
+	assert.equal(rule.patchApprovals, 1, "an allow rule with a dead hook skipped the patch approval");
+	assert.equal(existsSync(join(rule.root, "outside", "ls4o-f.txt")), false, "KC2 fired: a patch outside every root was applied");
+});
+
+const WORKER = new URL("../../src/drivers/codex-worker.ts", import.meta.url).pathname;
+
+/** C1b's worker entry as a child speaking pi RPC lines: one prompt, its events until it settles or exits, then stdin end. */
+async function workerRun(s: { root: string; worktree: string; artifactPath: string }, options: { codexHome: string; model?: string; prompt: string }) {
+	const runDir = join(s.root, "state", "runs", JOB);
+	mkdirSync(runDir, { recursive: true });
+	const systemPrompt = join(runDir, "codex-system-prompt.md");
+	writeFileSync(systemPrompt, "You are a picp research planner. Do exactly what the user message says.\n", { mode: 0o600 });
+	const env = {
+		PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`,
+		CP_JOB_ID: JOB, CP_RUN_DIR: runDir, CP_WORKTREE: s.worktree, CP_ARTIFACT_PATH: s.artifactPath, CP_KIND: "research", CP_ROLE: "planner", CP_DELIVERY: "local",
+		CP_CODEX_SYSTEM_PROMPT_FILE: systemPrompt, CP_CODEX_HOME: options.codexHome, ...(options.model ? { CP_CODEX_MODEL: options.model } : {}),
+	};
+	const child = spawn(process.execPath, [WORKER], { env, stdio: ["pipe", "pipe", "pipe"] });
+	const events: Array<Record<string, unknown>> = [];
+	let buffer = "";
+	let stderr = "";
+	child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+		buffer += chunk;
+		for (let cut = buffer.indexOf("\n"); cut >= 0; cut = buffer.indexOf("\n")) {
+			events.push(JSON.parse(buffer.slice(0, cut)) as Record<string, unknown>);
+			buffer = buffer.slice(cut + 1);
+		}
+	});
+	child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+	const exited = new Promise<number | null>((done) => child.once("exit", (code) => done(code)));
+	child.stdin.write(`${JSON.stringify({ id: "1", type: "get_state" })}\n${JSON.stringify({ id: "2", type: "prompt", message: options.prompt })}\n`);
+	await Promise.race([until(() => events.some((event) => event.type === "agent_settled"), 170_000), exited]);
+	child.stdin.end();
+	const code = await exited;
+	const sessionFile = join(runDir, NATIVE_CODEX_SESSION_FILE);
+	return { events, code, stderr, runDir, sessionFile, session: readNativeSession(sessionFile) };
+}
+
+const of = (events: Array<Record<string, unknown>>, type: string) => events.filter((event) => event.type === type);
+
+/** A throwaway Codex home signed in with a synthetic API key and pointed at the loopback mock model (as LS-4o-I). */
+function mockHome(s: { root: string }, url: string): string {
+	const codexHome = join(s.root, "codex-home");
+	mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+	execFileSync(CODEX as string, ["login", "--with-api-key"], { input: "picp-synthetic-not-a-key\n", env: { PATH: process.env.PATH ?? "", HOME: join(s.root, "home"), CODEX_HOME: codexHome }, stdio: ["pipe", "ignore", "ignore"] });
+	writeFileSync(join(codexHome, "config.toml"), `model_provider = "mock"\n[model_providers.mock]\nname = "mock"\nbase_url = ${JSON.stringify(url)}\nwire_api = "responses"\nrequires_openai_auth = true\n`);
+	return codexHome;
+}
+
+const smokeReport = (artifactPath: string) => ({ job_id: JOB, kind: "research", status: "done", summary: "live smoke ok", artifact_path: artifactPath, plan_summary: { goal: "g", approach: ["a"], acceptance: ["x"], risk: "r", touched: ["t"] } });
+
+test("LS-5o-W (KC1/KC6, offline): the worker entry denies a touch, runs a cat, reports once at an unknown cost, and its thread is deleted", { skip, timeout: 300_000 }, async (t) => {
+	const s = scratch(t);
+	const denied = join(s.root, "ls5o-w-denied");
+	writeFileSync(join(s.worktree, "README.md"), "live smoke readme\n");
+	const provider = await startCodexMockProvider([
+		{ calls: [{ name: "exec_command", arguments: { cmd: `touch ${denied}` } }] },
+		{ calls: [{ name: "exec_command", arguments: { cmd: "cat README.md" } }] },
+		{ calls: [{ name: "report_result", arguments: smokeReport(s.artifactPath) }] },
+		{ message: "done" },
+	]);
+	try {
+		const run = await workerRun(s, { codexHome: mockHome(s, provider.url), model: "gpt-picp-mock", prompt: "go" });
+		const [native] = of(run.events, "native_run");
+		t.diagnostic(`exit ${run.code}; native_run ${JSON.stringify({ lockdown: native?.lockdown, outcome: native?.outcome, denials: native?.denials, report: native?.report, bypass: native?.bypass })}`);
+		assert.equal(native?.driver, "codex");
+		assert.equal(native?.lockdown, "ok");
+		assert.equal(native?.report, true);
+		assert.equal(existsSync(denied), false);
+		assert.ok(existsSync(join(run.runDir, "envelope.json")), "one envelope");
+		assert.equal(of(run.events, "tool_execution_start").length, 3, "a pair for the denied touch, the cat and the report");
+		assert.equal(of(run.events, "tool_execution_end").length, 3);
+		assert.equal(of(run.events, "message_end")[0]?.cost_unknown, true);
+		assert.ok(run.session.thread_id, "the record holds the thread id");
+		const deleted = await deleteCodexThread({ sessionFile: run.sessionFile });
+		assert.equal(deleted.deleted, true, deleted.error);
+		rmSync(run.session.scratch_dir, { recursive: true, force: true });
+	} finally {
+		await provider.close();
+	}
+});
+
+test("LS-5o-V (R2, carry-in 3, offline): on the worker entry a spawn_agent call is denied at picp's hook and nothing outlives the worker", { skip, timeout: 300_000 }, async (t) => {
+	const s = scratch(t);
+	const spawnAgent = { name: "spawn_agent", namespace: "collaboration", arguments: { task_name: "probe", message: "SUBAGENT-TASK", fork_turns: "none" } };
+	const provider = await startCodexMockProvider([{ calls: [spawnAgent] }, { calls: [{ name: "report_result", arguments: smokeReport(s.artifactPath) }] }, { message: "done" }]);
+	try {
+		const run = await workerRun(s, { codexHome: mockHome(s, provider.url), model: "gpt-6.2-sol", prompt: "go" });
+		const [native] = of(run.events, "native_run");
+		t.diagnostic(`exit ${run.code}; native_run ${JSON.stringify({ lockdown: native?.lockdown, outcome: native?.outcome, denied: native?.denied, report: native?.report, bypass: native?.bypass })}`);
+		assert.equal(native?.bypass, undefined, "a subAgentActivity item reached the tripwire");
+		assert.ok((native?.denials as number) >= 1, "the spawn was not denied at picp's hook");
+		await deleteCodexThread({ sessionFile: run.sessionFile });
+		const survivors = await until(() => pgrep(run.session.scratch_dir) === 0, 10_000);
+		rmSync(run.session.scratch_dir, { recursive: true, force: true });
+		assert.ok(survivors, "KC5 fired: a process naming the worker's scratch root outlived it");
+	} finally {
+		await provider.close();
+	}
+});
+
+test("LS-5 (live, one turn): the worker entry on the operator's login runs pwd and reports; tokens counted at cost 0; the thread is deleted once", { skip, timeout: 300_000 }, async (t) => {
+	if (!(await live(t))) return;
+	const s = scratch(t);
+	const run = await workerRun(s, { codexHome: defaultCodexHome(), prompt: `Run the shell command \`pwd\` once. Then ${REPORT(s.artifactPath)}. Then stop.` });
+	const [end] = of(run.events, "message_end");
+	const usage = (end?.message as { usage?: { totalTokens?: number; cost?: { total?: number } } } | undefined)?.usage;
+	spent += usage?.totalTokens ?? 0;
+	t.diagnostic(`exit ${run.code}; tokens ${usage?.totalTokens}; report ${of(run.events, "native_run")[0]?.report}`);
+	assert.ok(spent <= BUDGET, `the live smoke passed its token budget (${spent} > ${BUDGET})`);
+	assert.ok(existsSync(join(run.runDir, "envelope.json")), "one envelope");
+	assert.ok((usage?.totalTokens ?? 0) > 0);
+	assert.equal(usage?.cost?.total, 0);
+	const first = await deleteCodexThread({ sessionFile: run.sessionFile });
+	const second = await deleteCodexThread({ sessionFile: run.sessionFile });
+	rmSync(run.session.scratch_dir, { recursive: true, force: true });
+	t.diagnostic(`delete: first ${first.deleted}; second ${second.deleted} (${second.error?.slice(0, 120) ?? "no error"})`);
+	assert.equal(first.deleted, true, first.error);
+	assert.equal(second.deleted, false, "a second delete of the same thread is named, not silent");
+	assert.ok(second.error);
 });

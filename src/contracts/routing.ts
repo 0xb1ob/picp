@@ -209,7 +209,7 @@ export const RoutingRuleSchema = Type.Object(
 		note: Type.Optional(Type.String({ maxLength: 300 })),
 		/**
 		 * Native routing S1: `claude` (or `codex`, C1b) prefers that native driver for eligible jobs; absent or `pi` is pi.
-		 * A claude row's `model` is an explicit Anthropic Claude id, a codex row's an `openai/gpt-…` id.
+		 * A claude row's `model` is an explicit Anthropic Claude id, a codex row's an explicit OpenAI GPT id.
 		 */
 		driver: Type.Optional(RoutingDriverSchema),
 	},
