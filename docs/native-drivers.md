@@ -1045,6 +1045,7 @@ anything; the ship and review keys have no class behind them yet. Settings never
 | not planner research | `ineligible` |
 | `codex_research` off | `switch` |
 | delivery not `local` or `answer` | `ineligible` |
+| profile `ops` (C5: the Codex shell has no network and no ssh agent) | `ineligible` |
 | `codex_max_concurrent` live codex jobs | `occupied` |
 | no `systemd-run`, or a malformed `CP_WORKER_MEMORY_MAX` | `containment` |
 | `codex` missing or below `0.170.0` | `cli_missing` / `cli_version` |
@@ -1124,8 +1125,10 @@ otherwise.
 job's artifact or a tool under the home cannot be followed. Resume, revive and steer: see C2 below. A paused grant lets the running turn finish. R1 (a rule-approved command with a dead hook) and R2
 stay as accepted for read-only research only; F5 and R1 are re-decided before C7.
 
-**C7 carry-in list** (open, not widened by C2): R1, F5, Q2 (the freeze checkpoint's WIP commit for codex; `checkpoint`
-stays refused until then) and Q3 (a fresh thread for a moved worktree; the resume stays refused by name until then).
+**C7 carry-in list** (open; C5 added R3 on the main session's condition): R1, F5, Q2 (the freeze checkpoint's WIP commit
+for codex; `checkpoint` stays refused until then), Q3 (a fresh thread for a moved worktree; the resume stays refused by
+name until then) and R3 (MCP resource reads with a dead hook, C5 below). Each is re-decided before any write-capable
+codex job.
 
 Kill-criteria verdicts (CI: `tests/e2e/codex-worker.test.ts` and `tests/e2e/codex-worker-spike.test.ts` on the fake;
 real CLI: `tests/e2e/codex-worker-live-smoke.test.ts` under `CP_LIVE_TESTS=1`):
@@ -1264,3 +1267,55 @@ failed with `usageLimitExceeded` (U2); both rest on the 0.170.0 schema and T3's 
 ready gate are cleared in a `finally` (CX-3f pins the handle's lifetime on every reachable end; no input throws between
 the set and the clear today, so the `finally` is defence). Cases: `tests/e2e/codex-worker-usage.test.ts` (CX-3a…3e),
 CX-3f in `tests/e2e/codex-worker-spike.test.ts`, S3-codex-line in `tests/e2e/viewer-full-match-status.test.ts`.
+
+### C5 tool parity
+
+C5 gives a Codex planner the four things a pi and a Claude CLI planner already have, still for planner research only
+and behind `codex_research` (off). No `data/*.json` or `defaults/routing*.json` was edited.
+
+| Item | What happens |
+|---|---|
+| `gh_read` | WP1's core moved to the SDK-free `src/drivers/native-gh-read.ts` (Claude's `forgeTools` keeps its `zod` shape and calls it). The run core declares `gh_read` beside `report_result` as a dynamic tool and serves it in the worker process with the worker's env; the hook's guard chain runs first and leaves a ticket, the handler refuses a call with none. Bash `gh` stays refused naming `gh_read` |
+| MCP servers | the worker reads `<agent dir>/mcp.json` once (`codexMcpConfig`, `src/worker-mcp.ts`; values resolved from its env as pi does). Each enabled stdio or HTTP server goes into the thread `config` (`mcp_servers.<name>`) on `thread/start` and every `thread/resume` (P2: a resume without it has no server, M13), never on argv, an event or a log line. A disabled or server-hidden entry never loads; a name outside `[A-Za-z0-9_-]`, `auth`, `!command` or an unset `$VAR` is one stderr line and one `native_mcp_skipped` event. The system prompt gains the servers section |
+| skills | the manager hands the per-job skill dirs to the spawn (`CP_CODEX_SKILL_DIRS`); each is a `read` root of the kernel profile. A dir that is or holds a home, the Codex home, the agent dir or the CP home refuses the run before any app-server |
+| child env | the app-server gets `nativeWorkerChildEnv` with no profile (WP3: pi's non-interactive variables, the job identity, tool, CA and proxy names; never `CP_HOME`, `CP_RUN_DIR`, `GH_*`, `SSH_AUTH_SOCK` or a secret name; a credentialed proxy is one `native_env_dropped` event). The shell policy is `inherit="all"` with `exclude=["CODEX_*","OPENAI_*","INVOCATION_ID"]`: "all" of picp's own allow-list, which still throws on an `OPENAI_*`, `CODEX_*` (but `CODEX_HOME`) or secret-named key |
+
+**The MCP gate.** Every server entry holds `default_tools_approval_mode: "prompt"`, so the CLI asks picp
+(`mcpServer/elicitation/request`) before every tool call, a read-only-hinted one included (M8). picp's hook allows a
+passed server's visible tool (as `mcp_call` runs unguarded on pi) and leaves a ticket of the tool name and its input;
+the approval is `accept` only for a `mcp_tool_call` form of a passed server's visible tool whose ticket is open, else
+`decline` (a server's own question included); never `content`, a persist choice or `cancel`. A hidden tool is refused
+by name at the hook. Tripwire (P1): an `mcpToolCall` item the hook never allowed, or a tool call that completed with no
+accepted approval, kills the run (`bypass: "mcpToolCall"`); once killed, no later call is allowed. Lockdown: the list
+before any thread must still be empty; with a server passed the run reads every page of
+`mcpServerStatus/list {threadId}` once per run (Q2, starting each stdio server one more time per turn) and refuses any
+listed name it did not pass, and the `tool_call_mcp_elicitation` feature must read back on. A stdio server runs outside
+the kernel profile with `HOME, LANG, PATH, TMPDIR` (the scratch `HOME`) plus its own `env` (M2), as under the Claude
+CLI, and dies with the app-server's scope.
+
+**R3, a C5 limit (accepted by the main session for read-only research only).** `list_mcp_resources`,
+`list_mcp_resource_templates` and `read_mcp_resource` are built into the CLI whenever a server is loaded and ask no
+approval; no feature or per-server setting removes them (M7, M8, M11). With a dead hook one such call can reach an
+operator server before the scope kill. Bound: the MCP read verbs only (`resources/list`, `resources/templates/list`,
+`resources/read`), on servers the operator enabled for workers; picp's healthy hook allows the same call with no guard,
+so no decision is bypassed; a failed hook kills the run and the job fails by name (`hook_failed`, `stop: "lockdown"`).
+R3 is on the C7 carry-in list, re-decided before any write-capable codex job.
+
+**Known limits.** No hosted web search and no network for the shell (D4), so a planner profile with web on pi has none
+here; the `ops` profile is `ineligible` (a codex row falls back to pi; an explicit codex dispatch refuses by name),
+since the shell has no ssh agent. A server whose name the CLI may spell differently is skipped. A thread started before
+C5 has no `gh_read` after a resume (dynamic tools are fixed at `thread/start`).
+
+**Shipped off (C5).** C5 persists no new value: no session-record field, no contract schema, no golden change; with
+every codex switch off no codex job runs (T-row and CX-off-2 unchanged). Recovery: switch `codex_research` off (new jobs
+route to pi; a live codex job still tears down), remove the server from `mcp.json`, or revert the PR. No data migration.
+
+| KC | Criterion | CI (fake) | Real CLI |
+|---|---|---|---|
+| 1 | a forbidden action executes | held: CX-5a (Bash `gh`, `-R`), CX-5b (hidden tool) | not run in C5 (LS-7o-M not added) |
+| 2 | a dead hook lets a tool have an effect | held: CX-5a job B (`gh_read`), CX-5c (MCP tools declined, no server call); R3 is the named residual | M7, M8 (cp-wh89 probes) |
+| 5 | a process survives teardown | held: CX-5b (every started scope killed or collected) | M2 (cp-wh89 probes: the server is gone after the exit) |
+| 6 | an extra loaded surface is not refused | held: CX-5f (a stray thread server), CX-0e unchanged | unchanged |
+
+Cases: `tests/e2e/codex-worker-tools.test.ts` (CX-5a…5i, CX-5i the `ops` fallback). The opt-in live cases LS-7o-M and
+LS-7o-D were not added in C5; the real-CLI verdicts above rest on the cp-wh89 offline probes.

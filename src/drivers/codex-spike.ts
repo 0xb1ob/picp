@@ -2,23 +2,15 @@
  * Codex run core: one planner run on `codex app-server`, unwired. Gates: picp's hook, its ticket, `untrusted` approvals
  * and the kernel profile; a lockdown; a tripwire that kills on any unasked tool; usage from totals; a full stop.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { ENVELOPE_FILE, formatRejection, type JobContext, localChecks } from "../../extensions/worker-reporter/index.ts";
-import {
-	ENVELOPE_REPAIR_MAX_ATTEMPTS,
-	type Envelope,
-	type EnvelopeRecord,
-	EnvelopeSchema,
-	isoTimestamp,
-	SCHEMA_VERSION,
-	validateEnvelope,
-} from "../contracts.ts";
+import type { Envelope } from "../contracts.ts";
 import { isPidAlive } from "../fleet.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
+import { agentDirOf, type CodexMcpServers } from "../worker-mcp.ts";
 import { secretPaths } from "./claude-bash-policy.ts";
 import { CodexSpikeError, codexLoginRefusal, defaultCodexHome, resolveCodex } from "./codex-cli.ts";
 import { type CodexContainment, resolveCodexContainment } from "./codex-containment.ts";
@@ -30,6 +22,7 @@ import {
 	codexPermissionProfile,
 	type CodexProfile,
 	codexReleaseDir,
+	codexSkillRoots,
 	codexSpawnArgs,
 } from "./codex-launch.ts";
 import { type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
@@ -48,7 +41,10 @@ import {
 	type HooksListResponse,
 	type InitializeResponse,
 	type ItemNotification,
+	type ListMcpServerStatusParams,
 	type ListMcpServerStatusResponse,
+	type McpElicitationParams,
+	type McpElicitationResponse,
 	type SkillsListResponse,
 	type TerminalsListResponse,
 	type ThreadStartedNotification,
@@ -62,6 +58,7 @@ import {
 	type TurnSteerResponse,
 } from "./codex-protocol.ts";
 import { type CodexRpc, CodexRpcError, type CodexRpcExit, spawnCodexRpc } from "./codex-rpc.ts";
+import { type CodexDynamicTool, codexMcpApproval, codexMcpRoute, codexRoleTools, type CodexReportState, codexSecretGuard, codexToolCall } from "./codex-tools.ts";
 import { type NormalizedCall, type SpikeGuard, type SpikeJob, spikeGuards } from "./native-guards.ts";
 
 export { CODEX_BUILTIN_SKILLS, type CodexLockdown, codexLockdownVerdict } from "./codex-lockdown.ts";
@@ -76,12 +73,12 @@ export {
 	SURFACE_FLAGS,
 } from "./codex-launch.ts";
 
-export const REPORT_TOOL = "report_result";
+export { codexSecretGuard, codexToolCall, REPORT_TOOL } from "./codex-tools.ts";
 const EXIT_GRACE_MS = 10_000;
 const STOP_WAIT_MS = 10_000;
 const PID_WAIT_MS = 2_000;
 /** Item types of tools that never ask picp (E5); any of them, or another thread, kills the run. */
-const UNGATED_ITEMS: readonly string[] = ["imageView", "subAgentActivity", "collabAgentToolCall", "mcpToolCall", "webSearch", "imageGeneration", "sleep"];
+const UNGATED_ITEMS: readonly string[] = ["imageView", "subAgentActivity", "collabAgentToolCall", "webSearch", "imageGeneration", "sleep"];
 
 const CLIENT_INFO = { clientInfo: { name: "picp", version: "0.0.0" }, capabilities: { experimentalApi: true } };
 
@@ -99,6 +96,20 @@ async function listFeatures(rpc: CodexRpc): Promise<ExperimentalFeature[]> {
 		const page = await rpc.request<ExperimentalFeatureListResponse>(M.experimentalFeatureList, cursor === undefined ? {} : { cursor });
 		features.push(...page.data);
 		if (page.nextCursor == null || cursors.has(page.nextCursor)) return features;
+		cursor = page.nextCursor;
+		cursors.add(cursor);
+	}
+}
+
+/** Every page of the thread's `mcpServerStatus/list`; a cursor that repeats ends the walk. */
+async function listMcp(rpc: CodexRpc, threadId: string): Promise<ListMcpServerStatusResponse> {
+	const data: ListMcpServerStatusResponse["data"] = [];
+	const cursors = new Set<string>();
+	for (let cursor: string | undefined; ; ) {
+		const params: ListMcpServerStatusParams = { threadId, detail: "toolsAndAuthOnly", ...(cursor === undefined ? {} : { cursor }) };
+		const page = await rpc.request<ListMcpServerStatusResponse>(M.mcpServerStatusList, params);
+		data.push(...page.data);
+		if (page.nextCursor == null || cursors.has(page.nextCursor)) return { data };
 		cursor = page.nextCursor;
 		cursors.add(cursor);
 	}
@@ -127,24 +138,6 @@ export async function codexHookTrust(
 	} finally {
 		await closeRpc(rpc);
 	}
-}
-
-/** Closes the lexical gap for Codex: `$CODEX_HOME`, an `OPENAI_*`/`CODEX_*` variable, the home path or a `.codex` path. */
-export function codexSecretGuard(codexHome: string): SpikeGuard {
-	return (call) => {
-		if (call.name !== "bash" || typeof call.input.command !== "string") return undefined;
-		const command = call.input.command;
-		const hit = /\$\{?(?:OPENAI|CODEX)_\w*/.exec(command)?.[0] ?? (command.includes(codexHome) ? codexHome : undefined) ?? /(?<![\w.-])\.codex(?![\w-])/.exec(command)?.[0];
-		return hit === undefined ? undefined : `Refused: a native planner's Bash never touches the Codex home, its login or an OPENAI_/CODEX_ variable (${hit}).`;
-	};
-}
-
-/** A Codex hook's tool in picp's guard vocabulary; any other name (apply_patch included) is refused by the caller. */
-export function codexToolCall(toolName: string, toolInput: unknown): NormalizedCall | undefined {
-	const args = (toolInput !== null && typeof toolInput === "object" ? toolInput : {}) as Record<string, unknown>;
-	if (toolName === "Bash") return { name: "bash", input: { command: args.command } };
-	if (toolName === REPORT_TOOL) return { name: "report_result", input: args };
-	return undefined;
 }
 
 export type CodexTokenTotals = Required<TokenUsageBreakdown>;
@@ -197,6 +190,10 @@ export interface CodexSpikeOptions {
 	onTool?: (event: CodexToolEvent) => void;
 	/** Caller-owned: `steer` is set while the turn is live and deleted when it ends (C2b). */
 	control?: CodexRunControl;
+	/** The operator's MCP servers (C5), sent as thread config on start and every resume. */
+	mcp?: CodexMcpServers;
+	/** Per-job skill dirs the brief names (C5), each a sandbox read root. */
+	skillDirs?: readonly string[];
 }
 
 /** `steered` only on the CLI's ack; `-32600` (no or another active turn) or no live turn is `steered: false`. */
@@ -260,6 +257,7 @@ export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSp
 		const roots = {
 			worktree: options.job.worktree, gitDir: codexGitDir(options.job.worktree), codexDir: codexReleaseDir(codex.path, { homes: [hostEnv.HOME, userInfo().homedir], codexHome }),
 			artifactDir: options.job.artifactPath === undefined ? undefined : dirname(options.job.artifactPath), tmp: dirs.tmp,
+			skills: options.skillDirs?.length ? codexSkillRoots(options.skillDirs, { homes: [hostEnv.HOME, userInfo().homedir], codexHome, others: [agentDirOf(hostEnv), hostEnv.CP_HOME] }) : undefined,
 		};
 		return await new CodexRun(options, codex, hostEnv, codexHome, dirs, join(scratch, "hook.sock"), containment, codexPermissionProfile(roots)).run();
 	} finally {
@@ -282,14 +280,16 @@ class CodexRun {
 	private readonly known = new Map<string, number | undefined>();
 	private readonly acceptedItems = new Set<string>();
 	private readonly hookDenied = new Set<string>();
+	/** The MCP item ids picp's hook allowed, by route kind: a tool call (asks picp) or a resource read (asks nothing). */
+	private readonly allowedMcp = new Map<string, "mcp" | "resource">();
+	private readonly reported: CodexReportState = { attempts: 0, refusals: [] };
+	private readonly tools: CodexDynamicTool[];
 	private readonly toolPhase = new Map<string, "start" | "end">();
 	/** picp's own answer per item: an approval refusal or a dynamic tool's reply, for the end event's `output`. */
 	private readonly answers = new Map<string, string>();
 	private ready = false;
 	private hookFailed = false;
 	private bypass?: string;
-	private accepted?: Envelope;
-	private attempts = 0;
 	private rpc?: CodexRpc;
 	private threadId?: string;
 	private turnId?: string;
@@ -315,6 +315,7 @@ class CodexRun {
 		const job = { ...options.job, tmp: dirs.tmp };
 		const secrets = [...secretPaths(null, [userInfo().homedir]), resolve(codexHome)];
 		this.guards = [...spikeGuards(job, secrets, "planner", false), codexSecretGuard(resolve(codexHome)), ...(options.extraGuards ?? [])];
+		this.tools = codexRoleTools(options.job, hostEnv, this.reported);
 	}
 
 	private guard(call: NormalizedCall): string | undefined {
@@ -334,33 +335,38 @@ class CodexRun {
 		return reason;
 	}
 
-	/** Consumes the hook's allow for this call, by id first, then by tool and payload. */
-	private take(id: string, key: string): boolean {
+	/** Consumes the hook's allow for this call, by id first, then by tool and payload; the ticket's id, or undefined. */
+	private take(id: string, key: string): string | undefined {
 		let at = this.tickets.findIndex((ticket) => ticket.id !== "" && ticket.id === id);
 		const by = at >= 0 ? "id" : "payload";
 		if (at < 0) at = this.tickets.findIndex((ticket) => ticket.key === key);
 		if (at < 0) {
 			this.ticketMatch.none++;
-			return false;
+			return undefined;
 		}
-		this.tickets.splice(at, 1);
+		const [ticket] = this.tickets.splice(at, 1);
 		this.ticketMatch[by]++;
-		return true;
+		return ticket?.id ?? "";
 	}
 
 	private closed(): string | undefined {
 		if (!this.ready) return "Refused: picp's lockdown has not passed; no tool runs before it does.";
 		if (this.hookFailed) return "Refused: picp's hook failed in this run, so there is no hook verdict; nothing more runs.";
+		if (this.bypass !== undefined) return "Refused: picp killed this run on a tool the CLI ran without asking; nothing more runs.";
 		return undefined;
 	}
 
 	/** The hook socket's verdict: deny unless the lockdown passed, no hook failed, and every guard allows. */
 	private hookVerdict(hook: Record<string, unknown>): { decision: "allow" } | { decision: "deny"; reason: string } {
 		const tool = String(hook.tool_name ?? "");
-		const call = codexToolCall(tool, hook.tool_input);
-		const reason = this.closed() ?? this.cwdRefusal(hook.cwd) ?? (call === undefined ? `Refused: ${tool} is not in the Codex spike's tool set.` : this.guard(call));
+		const route = codexMcpRoute(this.options.mcp, tool);
+		const mapped = codexToolCall(tool, hook.tool_input);
+		// A forge name the thread did not declare is not in the tool set.
+		const call = mapped !== undefined && mapped.name !== "bash" && !this.tools.some((each) => each.spec.name === tool) ? undefined : mapped;
+		const id = String(hook.tool_use_id ?? "");
+		const reason = this.closed() ?? this.cwdRefusal(hook.cwd)
+			?? (route !== undefined ? route.refusal : call === undefined ? `Refused: ${tool} is not in the Codex spike's tool set.` : this.guard(call));
 		if (reason !== undefined) {
-			const id = String(hook.tool_use_id ?? "");
 			this.hookDenied.add(id);
 			// A blocked call gets no item from the CLI (F2): its pair is fired here, so bounds and the Log count it.
 			if (!this.toolPhase.has(id)) {
@@ -370,8 +376,10 @@ class CodexRun {
 			}
 			return { decision: "deny", reason: this.deny(tool, reason, "hook") };
 		}
-		const payload = call?.name === "bash" ? call.input.command : call?.input;
-		this.tickets.push({ id: String(hook.tool_use_id ?? ""), key: ticketKey(tool, payload) });
+		if (route !== undefined) this.allowedMcp.set(id, route.kind);
+		if (route?.kind === "resource") return { decision: "allow" };
+		const payload = route !== undefined ? hook.tool_input : call?.name === "bash" ? call.input.command : call?.input;
+		this.tickets.push({ id, key: ticketKey(tool, payload) });
 		return { decision: "allow" };
 	}
 
@@ -419,7 +427,7 @@ class CodexRun {
 			?? this.cwdRefusal(params.cwd)
 			?? (params.additionalPermissions != null || params.networkApprovalContext != null ? "Refused: the command asked for extra permissions or network; picp never grants them." : undefined)
 			?? this.guard({ name: "bash", input: { command } })
-			?? (this.take(params.itemId, ticketKey("Bash", command)) ? undefined : "Refused: no hook verdict for this command; a call picp's hook did not allow does not run.");
+			?? (this.take(params.itemId, ticketKey("Bash", command)) !== undefined ? undefined : "Refused: no hook verdict for this command; a call picp's hook did not allow does not run.");
 		if (why === undefined) {
 			this.acceptedItems.add(params.itemId);
 			return { decision: "accept" };
@@ -429,49 +437,29 @@ class CodexRun {
 		return { decision: "decline" };
 	}
 
-	private toolCall(params: DynamicToolCallParams): DynamicToolCallResponse {
-		const why = this.closed()
-			?? (params.tool !== REPORT_TOOL ? `Refused: ${params.tool} is not a picp tool.` : undefined)
-			?? this.guard({ name: "report_result", input: (params.arguments ?? {}) as Record<string, unknown> })
-			?? (this.take(params.callId, ticketKey(params.tool, params.arguments)) ? undefined : "Refused: no hook verdict for this call; a call picp's hook did not allow does not run.");
-		const reply = why === undefined ? this.report(params.arguments) : text(this.deny(params.tool, why, "tool_call"), false);
-		this.answers.set(params.callId, reply.contentItems.map((item) => item.text).join("\n"));
-		return reply;
+	/** C5: accepts only an MCP tool-call approval of a passed server's visible tool whose hook ticket is still open. */
+	private approveMcp(params: McpElicitationParams): McpElicitationResponse {
+		const mapped = codexMcpApproval(this.options.mcp, params);
+		const tool = typeof mapped === "string" ? `mcp__${params.serverName}__${String(params._meta?.tool_name ?? "")}` : mapped.tool;
+		const why = this.closed() ?? (typeof mapped === "string" ? mapped : undefined);
+		const id = why === undefined && typeof mapped !== "string" ? this.take("", ticketKey(mapped.tool, mapped.payload)) : undefined;
+		if (why === undefined && id !== undefined) {
+			this.acceptedItems.add(id);
+			return { action: "accept" };
+		}
+		this.deny(tool, why ?? "Refused: no hook verdict for this MCP tool call; a call picp's hook did not allow does not run.", "approval");
+		return { action: "decline" };
 	}
 
-	/** picp's `report_result`, as the Claude driver's: validated, written once, wrong-job and conflicting refused. */
-	private report(args: unknown): DynamicToolCallResponse {
-		const job = this.options.job;
-		const context: JobContext = {
-			job_id: job.job_id, kind: job.kind, delivery: job.delivery, role: job.role, runDir: job.runDir, worktree: job.worktree,
-			artifactPath: job.artifactPath, mayAskOperator: false,
-		};
-		const refuse = (value: string) => {
-			this.refusals.push(value);
-			return text(value, false);
-		};
-		this.attempts += 1;
-		const left = Math.max(0, ENVELOPE_REPAIR_MAX_ATTEMPTS - this.attempts);
-		const checked = validateEnvelope(args, context);
-		const errors = checked.ok ? localChecks(checked.value, context) : checked.errors;
-		if (!checked.ok || errors.length > 0) return refuse(formatRejection(errors, this.attempts, left, REPORT_TOOL));
-		const recordFile = join(job.runDir, ENVELOPE_FILE);
-		if (existsSync(recordFile)) {
-			let filed: unknown;
-			try {
-				filed = (JSON.parse(readFileSync(recordFile, "utf8")) as EnvelopeRecord).envelope;
-			} catch (err) {
-				return refuse(`report_result: ${recordFile} exists but is unreadable (${(err as Error).message}); refused.`);
-			}
-			if (JSON.stringify(filed) === JSON.stringify(checked.value)) return text(`Already recorded (no-op): ${recordFile}`, true);
-			return refuse(`report_result: your report was already filed at ${recordFile}; a different report is refused.`);
-		}
-		const record: EnvelopeRecord = { schema_version: SCHEMA_VERSION, job_id: job.job_id, received_at: isoTimestamp(), attempt: this.attempts, envelope: checked.value };
-		mkdirSync(job.runDir, { recursive: true });
-		writeFileSync(`${recordFile}.tmp`, `${JSON.stringify(record, null, 2)}\n`);
-		renameSync(`${recordFile}.tmp`, recordFile);
-		this.accepted = checked.value;
-		return text(`Reported ${job.job_id}. Stop now.`, true);
+	private async toolCall(params: DynamicToolCallParams): Promise<DynamicToolCallResponse> {
+		const tool = this.tools.find((each) => each.spec.name === params.tool);
+		const why = this.closed()
+			?? (tool === undefined ? `Refused: ${params.tool} is not a picp tool.` : undefined)
+			?? this.guard({ name: params.tool, input: (params.arguments ?? {}) as Record<string, unknown> })
+			?? (this.take(params.callId, ticketKey(params.tool, params.arguments)) !== undefined ? undefined : "Refused: no hook verdict for this call; a call picp's hook did not allow does not run.");
+		const reply = why === undefined && tool !== undefined ? await tool.run(params.arguments) : { text: this.deny(params.tool, why ?? "", "tool_call"), success: false };
+		this.answers.set(params.callId, reply.text);
+		return text(reply.text, reply.success);
 	}
 
 	private async listTerminals(): Promise<TerminalsListResponse["data"]> {
@@ -528,9 +516,13 @@ class CodexRun {
 		const ran = item.type === "commandExecution" && (status !== "inProgress" || item.processId != null);
 		// 0.170.0 announces a patch `inProgress` after the hook and before it asks (F1); picp accepts none, so only an
 		// end other than `declined` (`completed`, or a `failed` apply it never accepted) is an unasked patch.
+		// C5: an MCP item the hook never allowed, or a tool call that ended `completed` with no accepted approval (P1).
+		const mcp = item.type === "mcpToolCall" ? this.allowedMcp.get(item.id) : undefined;
 		const unasked = item.type === "commandExecution"
 			? ran && status !== "declined" && !this.acceptedItems.has(item.id) && !this.hookDenied.has(item.id)
-			: item.type === "fileChange" ? status !== "inProgress" && status !== "declined" : UNGATED_ITEMS.includes(item.type);
+			: item.type === "fileChange" ? status !== "inProgress" && status !== "declined"
+			: item.type === "mcpToolCall" ? (mcp === undefined && !this.hookDenied.has(item.id)) || (mcp === "mcp" && status === "completed" && !this.acceptedItems.has(item.id))
+			: UNGATED_ITEMS.includes(item.type);
 		if (unasked) this.kill(item.type);
 	}
 
@@ -548,15 +540,18 @@ class CodexRun {
 	}
 
 	private toolEvent(phase: "start" | "end", item: ItemNotification["item"] | undefined): void {
-		if (this.options.onTool === undefined || (item?.type !== "commandExecution" && item?.type !== "dynamicToolCall" && item?.type !== "fileChange")) return;
+		if (this.options.onTool === undefined || (item?.type !== "commandExecution" && item?.type !== "dynamicToolCall" && item?.type !== "fileChange" && item?.type !== "mcpToolCall")) return;
 		const seen = this.toolPhase.get(item.id);
 		if (seen === "end" || seen === phase) return;
 		const [name, args] = item.type === "commandExecution" ? ["bash", { command: item.command }]
-			: item.type === "fileChange" ? ["apply_patch", { changes: item.changes }] : [item.tool, item.arguments];
+			: item.type === "fileChange" ? ["apply_patch", { changes: item.changes }]
+			: item.type === "mcpToolCall" ? [this.allowedMcp.get(item.id) === "resource" ? item.tool : `mcp__${item.server}__${item.tool}`, item.arguments]
+			: [item.tool, item.arguments];
 		if (seen === undefined) this.fire({ phase: "start", id: item.id, name, args });
 		if (phase === "end") {
 			const own = this.answers.get(item.id);
-			const output = item.type === "commandExecution" ? (item.status === "declined" ? own : item.aggregatedOutput ?? undefined) : own;
+			const mcpOut = item.type === "mcpToolCall" ? item.error?.message ?? item.result?.content?.map((part) => part.text ?? "").join("\n") : undefined;
+			const output = item.type === "commandExecution" ? (item.status === "declined" ? own : item.aggregatedOutput ?? undefined) : item.type === "mcpToolCall" ? mcpOut : own;
 			const isError = item.status !== "completed" || (item.type === "dynamicToolCall" && item.success === false);
 			this.fire({
 				phase: "end", id: item.id, name, isError, ...(output == null ? {} : { output }),
@@ -630,6 +625,7 @@ class CodexRun {
 				return { decision: "decline" };
 			});
 			rpc.onRequest(M.toolCall, (params) => this.toolCall(params as DynamicToolCallParams));
+			rpc.onRequest(M.mcpElicitation, (params) => this.approveMcp(params as McpElicitationParams));
 			try {
 				const init = await initialize(rpc);
 				coldStartMs = Date.now() - this.started;
@@ -645,12 +641,14 @@ class CodexRun {
 				]);
 				const surface = {
 					codexHome: { passed: this.codexHome, reported: init.codexHome }, account: account.account != null, hookCommand, hooks, mcpServers: mcp, skills,
-					features, config, profile: { id: CODEX_PROFILE, writableRoots: this.profile.writableRoots },
+					features, config, profile: { id: CODEX_PROFILE, writableRoots: this.profile.writableRoots }, mcpServersPassed: this.options.mcp?.names ?? [],
 				};
 				lockdown = codexLockdownVerdict(surface);
 				if (lockdown.verdict === "ok") {
 					const thread = await this.openThread(rpc);
-					lockdown = codexLockdownVerdict({ ...surface, thread: { response: thread, cwd: job.worktree } });
+					// Q2: one thread-scoped list per run, so a server picp did not pass is refused before any turn.
+					const mcpListed = this.options.mcp?.names.length ? await listMcp(rpc, thread.thread.id) : undefined;
+					lockdown = codexLockdownVerdict({ ...surface, thread: { response: thread, cwd: job.worktree, ...(mcpListed ? { mcpListed } : {}) } });
 				}
 				lockdown = { ...lockdown, checkMs: Date.now() - this.started - coldStartMs };
 				if (lockdown.verdict === "ok" && this.threadId !== undefined) exitedEarly = await this.runTurn(rpc, abort.signal);
@@ -681,7 +679,7 @@ class CodexRun {
 			codexPath: this.codex.path, codexVersion: this.codex.version, spawnedCommand: this.codex.path, spawnedEnvKeys: Object.keys(env).sort(),
 			...(exit === undefined ? {} : { exit }), outcome, ...(turn === undefined ? {} : { turnStatus: turn.status }),
 			...(turn?.error?.codexErrorInfo === undefined ? {} : { codexErrorInfo: turn.error.codexErrorInfo }),
-			...(this.accepted === undefined ? {} : { report: this.accepted }), reportRefusals: this.refusals, denials: this.denials, ticketMatch: this.ticketMatch,
+			...(this.reported.accepted === undefined ? {} : { report: this.reported.accepted }), reportRefusals: this.reported.refusals, denials: this.denials, ticketMatch: this.ticketMatch,
 			...(lockdown === undefined ? {} : { lockdown }), ...(this.threadId === undefined ? {} : { threadId: this.threadId }),
 			...(latest === undefined ? {} : { totals: latest }), usage, ...(this.limits === undefined ? {} : { rateLimits: this.limits }), leftovers, hookFailed: this.hookFailed, ...(this.bypass === undefined ? {} : { bypass: this.bypass }),
 			...(coldStartMs === undefined ? {} : { coldStartMs }), durationMs: Date.now() - this.started, ...(error === undefined ? {} : { error }),
@@ -694,13 +692,11 @@ class CodexRun {
 			cwd: job.worktree, approvalPolicy: "untrusted",
 			...(model === undefined ? {} : { model }), ...(systemPrompt === undefined ? {} : { developerInstructions: systemPrompt }),
 		};
-		const reportSpec = {
-			type: "function", name: REPORT_TOOL, inputSchema: JSON.parse(JSON.stringify(EnvelopeSchema)) as unknown,
-			description: "Finish this job by reporting the envelope (job_id, kind, status, summary, artifact_path, plan_summary). Call it once.",
-		};
+		// P2: a resume without the config has no server (M13), so it goes on every thread/resume too.
+		const config = this.options.mcp?.names.length ? { config: this.options.mcp.config } : {};
 		const thread = resume === undefined
-			? await rpc.request<ThreadStartResponse>(M.threadStart, { ...common, dynamicTools: [reportSpec] })
-			: await rpc.request<ThreadStartResponse>(M.threadResume, { ...common, threadId: resume.threadId });
+			? await rpc.request<ThreadStartResponse>(M.threadStart, { ...common, ...config, dynamicTools: this.tools.map((tool) => tool.spec) })
+			: await rpc.request<ThreadStartResponse>(M.threadResume, { ...common, ...config, threadId: resume.threadId });
 		this.threadId = thread.thread.id;
 		return thread;
 	}

@@ -23,7 +23,9 @@ export type FakeCodexStep =
 	| { kind: "message"; text: string }
 	| { kind: "hold"; marker: string; forMs?: number }
 	| { kind: "rateLimits"; rateLimits: unknown }
-	| { kind: "fail"; errorInfo?: unknown; message?: string };
+	| { kind: "fail"; errorInfo?: unknown; message?: string }
+	| { kind: "mcp"; server: string; tool: string; arguments?: unknown; hook?: "run" | "skip" | "kill" | "stall" | "unlink" }
+	| { kind: "resource"; server: string; uri: string; hook?: "run" | "skip" | "kill" | "stall" | "unlink" };
 export interface FakeCodexScript { knobs?: Record<string, unknown>; turns?: FakeCodexStep[][] }
 
 export function writeCodexScript(file: string, script: FakeCodexScript): void {
@@ -56,6 +58,8 @@ export const fakeScopes = (state: string) => lines<{ unit: string; started?: tru
 export const fakePatched = (state: string) => lines<{ path: string }>(join(state, "patched.jsonl")).map((entry) => entry.path);
 /** Each `turn/start` and acked `turn/steer` the fake took, with its thread, turn and text. */
 export const fakePrompts = (state: string) => lines<{ method: string; threadId: string; turnId: string; text: string }>(join(state, "prompts.jsonl"));
+/** Each `thread/start` and `thread/resume` the fake took: the MCP server names its config passed, never a value. */
+export const fakeThreads = (state: string) => lines<{ method: string; mcpServers: string[]; developerInstructions: string | null }>(join(state, "threads.jsonl"));
 export const fakeThreadTotal = (state: string, threadId: string) =>
 	(JSON.parse(readFileSync(join(state, "threads", `${threadId}.json`), "utf8")) as { total: { totalTokens: number } }).total;
 

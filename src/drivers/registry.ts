@@ -25,7 +25,8 @@ export interface NativeDriverSpec {
 	steers: boolean;
 	/** What the CLI resumes: a Claude "session", a Codex "thread". */
 	session: string;
-	spawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string, options?: { web?: boolean; profile?: string }): SpawnOptions;
+	/** `skills`: the per-job skill dirs (the Codex sandbox reads them; Claude's brief note and Read serve them). */
+	spawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string, options?: { web?: boolean; profile?: string; skills?: readonly string[] }): SpawnOptions;
 }
 
 // Arrow wrappers: the specs are read lazily, so an import cycle through doctor.ts never sees an uninitialised binding.
@@ -42,7 +43,7 @@ export const NATIVE_DRIVER_SPECS: Readonly<Record<NativeDriver, NativeDriverSpec
 		availability: (home, model, options) => codexAvailability(home, model, options),
 		isModel: (model) => isCodexModel(model), modelId: (model) => codexModelId(model), assertEffort: (level) => assertCodexEffort(level),
 		selectionRefusal: (input) => codexSelectionRefusal(input), maxConcurrent: (home) => codexMaxConcurrent(home),
-		spawnOptions: (model, env, systemPrompt) => codexSpawnOptions(model, env, systemPrompt),
+		spawnOptions: (model, env, systemPrompt, options) => codexSpawnOptions(model, env, systemPrompt, { ...(options?.skills ? { skills: options.skills } : {}) }),
 	},
 };
 

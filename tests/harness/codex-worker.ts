@@ -75,5 +75,6 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 	};
 	const run = async (steps: ScriptStep[], extraEnv: Record<string, string> = {}, prompt?: string) =>
 		(await b.run(steps, { ...env, ...extraEnv }, prompt, 240_000)) as Array<{ toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } }>;
-	return { b, root, bin, state, codexHome, outside, nativeFile, env, record, job, report, reporting, setScript, awaitEnvelope, awaitFile, waitEvent, pause, runs, session, homeListing, lines, run };
+	const agentDir = b.agent.path;
+	return { b, agentDir, root, bin, state, codexHome, outside, nativeFile, env, record, job, report, reporting, setScript, awaitEnvelope, awaitFile, waitEvent, pause, runs, session, homeListing, lines, run };
 }

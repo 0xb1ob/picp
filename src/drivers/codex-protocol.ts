@@ -23,6 +23,7 @@ export const CODEX_METHODS = {
 	commandApproval: "item/commandExecution/requestApproval",
 	fileChangeApproval: "item/fileChange/requestApproval",
 	toolCall: "item/tool/call",
+	mcpElicitation: "mcpServer/elicitation/request",
 	threadStarted: "thread/started",
 	turnStarted: "turn/started",
 	turnCompleted: "turn/completed",
@@ -69,6 +70,7 @@ export interface HooksListEntry { cwd: string; hooks: HookMetadata[]; errors: un
 export interface HooksListResponse { data: HooksListEntry[] }
 
 export interface McpServerStatus { name: string }
+export interface ListMcpServerStatusParams { threadId?: string; cursor?: string; detail?: "full" | "toolsAndAuthOnly" }
 export interface ListMcpServerStatusResponse { data: McpServerStatus[]; nextCursor?: string | null }
 
 export type SkillScope = "user" | "repo" | "system" | "admin";
@@ -141,7 +143,11 @@ export type ThreadItem =
 	}
 	| { type: "dynamicToolCall"; id: string; tool: string; arguments: unknown; status: string; success?: boolean | null; contentItems?: Array<{ type: string; text?: string }> | null }
 	| { type: "fileChange"; id: string; status: "inProgress" | "completed" | "failed" | "declined"; changes?: unknown }
-	| { type: "imageView" | "subAgentActivity" | "collabAgentToolCall" | "mcpToolCall" | "webSearch" | "imageGeneration" | "sleep"; id: string };
+	| {
+		type: "mcpToolCall"; id: string; server: string; tool: string; status: "inProgress" | "completed" | "failed"; arguments?: unknown;
+		result?: { content?: Array<{ type: string; text?: string }> } | null; error?: { message?: string } | null;
+	}
+	| { type: "imageView" | "subAgentActivity" | "collabAgentToolCall" | "webSearch" | "imageGeneration" | "sleep"; id: string };
 
 /** `cwd` is the call's working directory (a model `workdir` moves it); `command` is the shell-wrapped form (E16). */
 export interface CommandApprovalParams {
@@ -159,6 +165,17 @@ export interface CommandApprovalResponse { decision: "accept" | "decline" }
 export interface FileChangeApprovalParams { itemId: string; threadId: string; turnId: string }
 export interface DynamicToolCallParams { tool: string; arguments: unknown; callId: string; threadId: string; turnId: string }
 export interface DynamicToolCallResponse { contentItems: Array<{ type: "inputText"; text: string }>; success: boolean }
+/** An MCP server's question; picp answers only a `mcp_tool_call` approval (M5, M10). There is no item id. */
+export interface McpElicitationParams {
+	threadId: string;
+	turnId?: string | null;
+	serverName: string;
+	mode?: string;
+	message?: string;
+	_meta?: { codex_approval_kind?: string; tool_name?: string; tool_params?: unknown } | null;
+}
+/** picp never sends `content`, a persist choice or `cancel`. */
+export interface McpElicitationResponse { action: "accept" | "decline" }
 
 export interface ThreadStartedNotification { thread: { id: string } }
 export interface TurnCompletedNotification { threadId: string; turn: Turn }

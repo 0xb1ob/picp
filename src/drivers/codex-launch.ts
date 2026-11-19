@@ -4,7 +4,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SECRET_ENV_NAME } from "../web-egress.ts";
 import { CodexSpikeError } from "./codex-cli.ts";
@@ -63,6 +63,8 @@ export interface CodexProfileRoots {
 	codexDir?: string;
 	artifactDir?: string;
 	tmp: string;
+	/** Per-job skill dirs the brief names (C5), each a read root; `codexSkillRoots` vets them. */
+	skills?: readonly string[];
 }
 export interface CodexProfile { config: string[]; writableRoots: string[] }
 
@@ -72,7 +74,7 @@ export interface CodexProfile { config: string[]; writableRoots: string[] }
  */
 export function codexPermissionProfile(roots: CodexProfileRoots): CodexProfile {
 	const access = new Map<string, "read" | "write" | "deny">([["/", "deny"], [":minimal", "read"]]);
-	for (const path of [roots.worktree, roots.gitDir, roots.codexDir]) if (path !== undefined) access.set(resolve(path), "read");
+	for (const path of [roots.worktree, roots.gitDir, roots.codexDir, ...(roots.skills ?? [])]) if (path !== undefined) access.set(resolve(path), "read");
 	for (const path of [roots.artifactDir, roots.tmp]) if (path !== undefined) access.set(resolve(path), "write");
 	const filesystem = [...access].map(([path, mode]) => `${toml(path)}=${toml(mode)}`).join(",");
 	return {
@@ -91,6 +93,16 @@ export function codexGitDir(worktree: string): string | undefined {
 	}
 }
 
+const realOrResolved = (path: string): string => {
+	try {
+		return realpathSync(path);
+	} catch {
+		return resolve(path);
+	}
+};
+/** Whether `dir` is `path` or one of its ancestors. */
+const holds = (dir: string, path: string): boolean => realOrResolved(path) === dir || realOrResolved(path).startsWith(`${dir === sep ? "" : dir}${sep}`);
+
 /**
  * Two levels above the real codex binary, unless it is a system install the `:minimal` root already reads. A dir that
  * is or holds a home or the Codex home would open it to the sandbox, so it throws and the driver does not start.
@@ -98,18 +110,21 @@ export function codexGitDir(worktree: string): string | undefined {
 export function codexReleaseDir(codexPath: string, guarded: { homes: ReadonlyArray<string | undefined>; codexHome: string }): string | undefined {
 	const dir = dirname(dirname(realpathSync(codexPath)));
 	if (["/usr", "/opt"].some((root) => dir === root || dir.startsWith(`${root}${sep}`))) return undefined;
-	const real = (path: string) => {
-		try {
-			return realpathSync(path);
-		} catch {
-			return resolve(path);
-		}
-	};
-	const holds = (path: string) => real(path) === dir || real(path).startsWith(`${dir === sep ? "" : dir}${sep}`);
-	const home = guarded.homes.find((path): path is string => path !== undefined && path !== "" && holds(path));
-	const why = home !== undefined ? "is or holds the home" : holds(guarded.codexHome) ? "is or holds the Codex home" : undefined;
+	const home = guarded.homes.find((path): path is string => path !== undefined && path !== "" && holds(dir, path));
+	const why = home !== undefined ? "is or holds the home" : holds(dir, guarded.codexHome) ? "is or holds the Codex home" : undefined;
 	if (why === undefined) return dir;
 	throw Object.assign(new CodexSpikeError(`Refused: the codex release dir (two levels above the real codex binary) ${why}; picp will not open it to the sandbox. Reinstall the Codex CLI under its own release dir.`), { cli: "version" as const });
+}
+
+/** The skill dirs' realpaths; one that is relative, or is or holds a home, the Codex home or a guarded dir, throws. */
+export function codexSkillRoots(dirs: readonly string[], guarded: { homes: ReadonlyArray<string | undefined>; codexHome: string; others: ReadonlyArray<string | undefined> }): string[] {
+	return dirs.map((each) => {
+		if (!isAbsolute(each)) throw Object.assign(new CodexSpikeError(`Refused: the skill dir ${each} is not an absolute path.`), { cli: "version" as const });
+		const dir = realOrResolved(each);
+		const hit = [...guarded.homes, guarded.codexHome, ...guarded.others].find((path): path is string => path !== undefined && path !== "" && holds(dir, path));
+		if (hit === undefined) return dir;
+		throw Object.assign(new CodexSpikeError(`Refused: the skill dir ${each} is or holds a home, the Codex home, the agent dir or the CP home; picp will not open it to the sandbox.`), { cli: "version" as const });
+	});
 }
 
 /** `codex app-server` argv: the reduced surface, the profile, picp's hook, and its trust entry when known. */
@@ -127,8 +142,9 @@ export function codexSpawnArgs(options: {
 		"-c", WEB_SEARCH_OFF,
 		...options.profile.config,
 		"-c", "project_doc_max_bytes=0",
-		"-c", 'shell_environment_policy.inherit="core"',
-		"-c", 'shell_environment_policy.exclude=["CODEX_*","OPENAI_*"]',
+		// "all" over picp's own allow-listed app-server env, so the WP3 names reach the model's shell (C5, M12).
+		"-c", 'shell_environment_policy.inherit="all"',
+		"-c", 'shell_environment_policy.exclude=["CODEX_*","OPENAI_*","INVOCATION_ID"]',
 		...(options.trust === undefined ? [] : ["-c", `hooks.state={${toml(options.trust.key)}={trusted_hash=${toml(options.trust.currentHash)}}}`]),
 	];
 }

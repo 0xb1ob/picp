@@ -15,6 +15,7 @@ import { resolveCodexContainment } from "./codex-containment.ts";
 
 const WORKER_ENTRY = fileURLToPath(new URL("./codex-worker.ts", import.meta.url));
 const SYSTEM_PROMPT_FILE = "codex-system-prompt.md";
+export const SKILL_DIRS_ENV = "CP_CODEX_SKILL_DIRS";
 const DELIVERIES: readonly Delivery[] = ["local", "answer"];
 export const CODEX_MODEL = /^openai\/(gpt-[A-Za-z0-9][A-Za-z0-9._-]*)$/;
 /** Routed levels the Codex CLI serves as `effort`; `off` and `minimal` have none. */
@@ -66,7 +67,7 @@ export function codexPersistRefusal(home: string, what: string): string | undefi
 	return on ? undefined : `${what} names the codex driver while codex_research is off (data/native.json); turn it on first. Nothing was written`;
 }
 
-/** The first C1b selection condition that fails, in order: switch file, class, switch, delivery, slot, scope, CLI, login. */
+/** The first selection refusal, in order: switch file, class, switch, delivery, profile, slot, scope, CLI, login. */
 export async function codexSelectionRefusal(input: NativeSelection): Promise<{ category: NativeRefusal; why: string } | undefined> {
 	let config: ReturnType<typeof loadNativeConfig>;
 	try {
@@ -79,6 +80,8 @@ export async function codexSelectionRefusal(input: NativeSelection): Promise<{ c
 	if (codexClass === undefined) return ineligible;
 	if (!config[codexClass]) return { category: "switch", why: `the switch ${codexClass} is off (data/native.json codex_research)` };
 	if (!DELIVERIES.includes(input.delivery)) return ineligible;
+	// C5 Q3: the Codex shell has no network and no agent socket, so an ops job falls back rather than run without ssh.
+	if (input.profile === "ops") return { category: "ineligible", why: "profile ops runs no Codex CLI job: the Codex shell has no network and no ssh agent" };
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs, "codex"), input.jobId, config.codex_max_concurrent, "live", "codex");
 	if (occupied) return occupied;
 	const env = input.env ?? process.env;
@@ -101,14 +104,20 @@ export async function codexSelectionRefusal(input: NativeSelection): Promise<{ c
 
 /** What the Codex model is told after the profile body: its tools, its read-only reach, and how the artifact is written. */
 export const CODEX_ADDENDUM = [
-	"Codex worker: your tools are the Codex shell and report_result; ignore any other tool names above. The shell reads",
-	"the worktree and system paths only, has no network, and writes only the artifact directory. Write the artifact with a",
-	"quoted heredoc to the literal artifact path in the brief (no CP_* variable is set in the shell). apply_patch,",
-	"sub-agents and web search are refused. Then call report_result once.",
+	"Codex worker: your tools are the Codex shell, gh_read for GitHub reads (never gh in the shell), the MCP servers named",
+	"below if any, and report_result; ignore any other tool names above. The shell reads the worktree, the skill",
+	"directories your brief names and system paths only, has no network, and writes only the artifact directory. Write",
+	"the artifact with a quoted heredoc to the predeclared artifact path (CP_ARTIFACT_PATH). apply_patch, sub-agents and",
+	"web search are refused. Then call report_result once.",
 ].join("\n");
 
-/** Overrides pi's argv with the Codex worker; the role contract goes to a 0600 file in the run dir, not the argv or env. */
-export function codexSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env" | "shutdownGraceMs"> {
+/**
+ * Overrides pi's argv with the Codex worker; the role contract goes to a 0600 file in the run dir, not the argv or env.
+ * `skills` (C5): the per-job skill dirs, as `CP_CODEX_SKILL_DIRS` (a JSON array) for the sandbox's read roots.
+ */
+export function codexSpawnOptions(
+	model: string, env: NodeJS.ProcessEnv, systemPrompt: string, options: { skills?: readonly string[] } = {},
+): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env" | "shutdownGraceMs"> {
 	const runDir = env.CP_RUN_DIR;
 	if (!runDir) throw new NativeDriverError("the Codex CLI worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, SYSTEM_PROMPT_FILE);
@@ -116,11 +125,12 @@ export function codexSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemP
 	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${CODEX_ADDENDUM}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	const memory = process.env[WORKER_MEMORY_MAX_ENV];
+	const { [SKILL_DIRS_ENV]: _inherited, ...rest } = env;
 	return {
 		piBin: process.execPath,
 		argv: [WORKER_ENTRY],
 		env: {
-			...env, CP_CODEX_MODEL: codexModelId(model), CP_CODEX_SYSTEM_PROMPT_FILE: file, CP_CODEX_HOME: codexHomeOf(process.env),
+			...rest, ...(options.skills?.length ? { [SKILL_DIRS_ENV]: JSON.stringify(options.skills) } : {}), CP_CODEX_MODEL: codexModelId(model), CP_CODEX_SYSTEM_PROMPT_FILE: file, CP_CODEX_HOME: codexHomeOf(process.env),
 			...(memory ? { CP_CODEX_MEMORY_MAX: memory } : {}),
 		},
 		shutdownGraceMs: CODEX_SHUTDOWN_GRACE_MS,

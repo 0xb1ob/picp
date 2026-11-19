@@ -9,15 +9,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
+import { agentDirOf, claudeMcpSection, type CodexMcpServers, codexMcpConfig, readUserMcpServers } from "../worker-mcp.ts";
 import {
 	assertNativeResume, claimFollowUps, enqueueFollowUp, NATIVE_CODEX_SCRATCH_PREFIX, NATIVE_CODEX_SESSION_FILE, type NativeSession, nativeSessionMoved,
 	readNativeSession, removeNativeScratch, returnClaim, settleClaim, writeNativeSession,
 } from "./claude-followup.ts";
 import { startIdlePrompt } from "./claude-lifecycle.ts";
+import { nativeWorkerChildEnv } from "./claude-roles.ts";
 import { nativeTranscriptFile } from "./claude-transcript.ts";
 import { nativeDenials } from "./claude-usage.ts";
 import { OBSERVATION_EVENT } from "./claude-observation.ts";
-import { codexDoorRefusal, codexPersistRefusal } from "./codex.ts";
+import { codexDoorRefusal, codexPersistRefusal, SKILL_DIRS_ENV } from "./codex.ts";
 import { codexErrorCode, codexLimit, USAGE_LIMIT } from "./codex-observation.ts";
 import type { ItemNotification, TokenUsageUpdatedNotification } from "./codex-protocol.ts";
 import { type CodexRunControl, type CodexRunUsage, type CodexSpikeResult, type CodexTokenTotals, type CodexToolEvent, runCodexSpike, ZERO_TOTALS } from "./codex-spike.ts";
@@ -77,6 +79,38 @@ function readSystemPrompt(): string {
 	return body;
 }
 
+let childEnv: Record<string, string | undefined> | undefined;
+/** WP3 (C5): the app-server's named env, built once per process with no profile, so never an agent socket. */
+const workerChildEnv = (): Record<string, string | undefined> => (childEnv ??= nativeWorkerChildEnv(env, undefined, (line) => {
+	say(line);
+	write({ type: "native_env_dropped", line });
+}));
+let userMcp: { mcp: CodexMcpServers; section: string } | undefined;
+/** WP5 (C5): the agent dir's mcp.json, read once per process; a skipped server is one stderr line and a run event. */
+function loadUserMcp(): { mcp: CodexMcpServers; section: string } {
+	if (userMcp) return userMcp;
+	const user = readUserMcpServers(agentDirOf(env));
+	const mcp = codexMcpConfig(user, env);
+	for (const line of mcp.skipped) say(line);
+	if (mcp.skipped.length > 0) write({ type: "native_mcp_skipped", lines: mcp.skipped });
+	const servers = Object.fromEntries(mcp.names.map((name) => [name, true]));
+	return (userMcp = { mcp, section: claudeMcpSection(user, { path: mcp.path, servers }, "tools mcp__<server>__<tool>") });
+}
+
+/** The per-job skill dirs the dispatch named (C5); anything but a JSON array of absolute paths stops the turn. */
+function skillDirs(): string[] {
+	const raw = env[SKILL_DIRS_ENV];
+	if (!raw) return [];
+	let dirs: unknown;
+	try {
+		dirs = JSON.parse(raw);
+	} catch {
+		dirs = undefined;
+	}
+	if (!Array.isArray(dirs) || dirs.some((dir) => typeof dir !== "string" || !dir.startsWith("/"))) throw new Error(`${SKILL_DIRS_ENV} is not a JSON array of absolute paths`);
+	return dirs as string[];
+}
+
 /** pi's usage shape at cost 0: the USD side is unknown (D3), so token caps are the bound. */
 const piUsage = (u: { input: number; cache_read: number; cache_write: number; output: number; total: number }) =>
 	({ input: u.input, output: u.output, cacheRead: u.cache_read, cacheWrite: u.cache_write, totalTokens: u.total, cost: { total: 0 } });
@@ -131,7 +165,10 @@ async function turn(prompt: string): Promise<Turn> {
 	if (env.CP_KIND !== "research" || env.CP_ROLE !== "planner") throw new Error(`the Codex CLI runs research/planner jobs only, not ${env.CP_KIND}/${env.CP_ROLE}`);
 	if (!env.CP_JOB_ID || !runDir || !worktree || !artifactPath) throw new Error("Codex CLI worker started without its job identity");
 	const model = env.CP_CODEX_MODEL ?? "codex";
-	const systemPrompt = readSystemPrompt();
+	const user = loadUserMcp();
+	const contract = readSystemPrompt();
+	const systemPrompt = user.section === "" ? contract : `${contract.trimEnd()}${user.section}\n`;
+	const skills = skillDirs();
 	const resumed = resuming;
 	const session = resumed ? resumedSession(worktree) : freshSession(worktree);
 	const base = resumed ? session.totals : ZERO_TOTALS;
@@ -149,7 +186,7 @@ async function turn(prompt: string): Promise<Turn> {
 		result = await runCodexSpike({
 			job: { job_id: jobId, kind: "research", role: "planner", delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath },
 			prompt, ...(env.CP_CODEX_MODEL ? { model: env.CP_CODEX_MODEL } : {}), systemPrompt, hostEnv: env, timeoutMs: RUN_TIMEOUT_MS, signal: abort.signal,
-			scratchDir: session.scratch_dir, control,
+			scratchDir: session.scratch_dir, control, childEnv: workerChildEnv(), ...(user.mcp.names.length > 0 ? { mcp: user.mcp } : {}), ...(skills.length > 0 ? { skillDirs: skills } : {}),
 			...(resumed ? { resume: { threadId: session.thread_id as string, ...(session.totals ? { baseline: session.totals } : {}) } } : {}),
 			...(env.CP_CODEX_HOME ? { codexHome: env.CP_CODEX_HOME } : {}), ...(env.CP_NATIVE_THINKING ? { effort: env.CP_NATIVE_THINKING } : {}),
 			onMessage: (method, params) => onMessage(session, base, method, params),
