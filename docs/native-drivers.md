@@ -1034,17 +1034,17 @@ it) and an explicit `openai/gpt-…` model, runs `src/drivers/codex-worker.ts`, 
 Every other role, kind and delivery stays on pi. No `data/*.json` or `defaults/routing*.json` was edited.
 
 **Switches (`data/native.json`).** `codex_research`, `codex_ship`, `codex_review` (booleans, default off) and
-`codex_max_concurrent` (1-4, default 1, counted apart from Claude's `max_concurrent`). Only `codex_research` selects
-anything; the ship and review keys have no class behind them yet. Settings never sets or deletes them.
+`codex_max_concurrent` (1-4, default 1, counted apart from Claude's `max_concurrent`). `codex_research` and (C6)
+`codex_review` select; `codex_ship` has no class behind it yet. Settings never sets or deletes them.
 
 **Selection** (`codexSelectionRefusal` in `src/drivers/codex.ts`), each a named refusal before any lease, in order:
 
 | Check | Category |
 |---|---|
 | `data/native.json` unreadable | `switch` |
-| not planner research | `ineligible` |
-| `codex_research` off | `switch` |
-| delivery not `local` or `answer` | `ineligible` |
+| neither planner research nor a gate reviewer | `ineligible` |
+| the class's switch off (`codex_research`, or C6 `codex_review`) | `switch` |
+| delivery not `local` or `answer` (research only) | `ineligible` |
 | profile `ops` (C5: the Codex shell has no network and no ssh agent) | `ineligible` |
 | `codex_max_concurrent` live codex jobs | `occupied` |
 | no `systemd-run`, or a malformed `CP_WORKER_MEMORY_MAX` | `containment` |
@@ -1303,7 +1303,9 @@ R3 is on the C7 carry-in list, re-decided before any write-capable codex job.
 
 **Known limits.** No hosted web search and no network for the shell (D4), so a planner profile with web on pi has none
 here; the `ops` profile is `ineligible` (a codex row falls back to pi; an explicit codex dispatch refuses by name),
-since the shell has no ssh agent. A server whose name the CLI may spell differently is skipped. A thread started before
+since the shell has no ssh agent. A server whose name the CLI spells differently in its tool names is not skipped:
+`codexMcpConfig` (`src/worker-mcp.ts`) loads a hyphenated name, picp's route then does not recognise its tools and
+refuses each call at the hook, so it fails closed (only a name outside `[A-Za-z0-9_-]` is skipped). A thread started before
 C5 has no `gh_read` after a resume (dynamic tools are fixed at `thread/start`).
 
 **Shipped off (C5).** C5 persists no new value: no session-record field, no contract schema, no golden change; with
@@ -1319,3 +1321,74 @@ route to pi; a live codex job still tears down), remove the server from `mcp.jso
 
 Cases: `tests/e2e/codex-worker-tools.test.ts` (CX-5a…5i, CX-5i the `ops` fallback). The opt-in live cases LS-7o-M and
 LS-7o-D were not added in C5; the real-CLI verdicts above rest on the cp-wh89 offline probes.
+
+### C6 reviewer
+
+C6 runs a `gate-reviewer` on the Codex CLI behind `codex_review` (off). No `data/*.json` or `defaults/routing*.json`
+was edited. `cp_review`, `cp_gate` and the quality panel resolve their reviewer through `resolveReviewerRoute`
+(`src/reviewer-route.ts`); a `gate-reviewer` rubric row naming `driver: "codex"` and an explicit `openai/gpt-…` model
+runs on Codex when `codex_review` is on and a codex slot is free (`codex_max_concurrent`, shared with research). In
+every other case it runs the row's pi fallback, as a Claude row's reviewer does; the delivery check is research-only.
+
+**Surface.** A reviewer's app-servers (trust probe and turn) get `SURFACE_FLAGS` plus `--disable shell_tool`, and the
+lockdown requires `shell_tool` to read back off. The thread declares four dynamic tools, served in the worker process:
+`report_verdict` (pi's handler through the SDK-free `src/drivers/native-verdict.ts`: lenient check, clamp,
+`verdictChecks`, repair cap, write-once `verdict.json`) and `read`, `grep`, `find` (`src/drivers/native-packet-tools.ts`,
+`node:` only). Their keys are the guard vocabulary's (`path`, `pattern`), so `reviewerReadGuard` runs at the hook and
+again in the tool call, and each handler checks the realpath against the packet itself; a symlink is never followed,
+and `grep` matches literal text, never a model-written regular expression. The guard chain is built with the
+reviewer's role, so any Bash call is refused ("a reviewer has no Bash") and every patch is declined. The kernel profile
+reads the packet and system paths and writes scratch tmp; it has no git dir and no artifact dir. No MCP server, no
+`mcp.json` read, no skill dir, no `gh_read`, no network, no `ls`. `report_result` is "not in the tool set".
+
+**Probes** (cp-6sq6, codex 0.170.0, mock model, zero tokens, picp's own `spawnCodexRpc` and profile, a throwaway
+Codex home; no login checked):
+
+| # | Setup | Observed |
+|---|---|---|
+| V0 | `codex features list` | `shell_tool`, `unified_exec` and `hooks` stable and on |
+| V1 | default surface, the four dynamic tools | offered: `exec_command`, `write_stdin`, `request_user_input` and the four; the hook fires for `read` under its own name |
+| V2 | `--disable shell_tool --disable unified_exec` | `shell_tool` reads back off; offered: `request_user_input` and the four; a model `exec_command` gets no hook, item or approval |
+| V3 | `--disable shell_tool` only | as V2: this one flag is enough |
+| V4 | `--disable unified_exec` only | nothing changes: the shell stays offered |
+| V5 | `gpt-6.2-sol`, shell off | nested tools `apply_patch`, `clock__curr_time`, the MCP resource tools and the four; `exec_command` is not a function; `apply_patch` asks and is declined |
+| V6 | a user allow rule for `cat`, a dead hook, shell off | `exec_command` is "unsupported call": no item, no approval, no command (with the shell on the rule-approved `cat` ran unasked) |
+| V7 | `gpt-6.2-sol`, dead hook, shell off | `clock__curr_time` answered; `list_mcp_resources` an empty list as an `mcpToolCall` item (the tripwire kills on it); `apply_patch` declined |
+| V8 | `gpt-6.2-sol`, `spawn_agent` let through, shell off | the sub-agent has `apply_patch`, `clock__curr_time` and the resource tools: no shell and no packet tool |
+
+R1 does not arise for a reviewer (V6: no shell), and R3 does not either (no MCP server is passed). R2 holds for the
+reviewer on its accepted condition: a healthy hook blocks `spawn_agent` and the tripwire kills on `subAgentActivity`;
+with the shell off the sub-agent has no shell and no packet tool (V8). The dead-hook residual is the wall clock and an
+empty resource list (V7). `request_user_input` stays offered; the hook refuses it.
+
+**End of a review.** A reviewer has no fleet record and no teardown, so its worker ends its one busy period as teardown
+ends a job: `deleteCodexThread` (one contained bare app-server, D5), then `removeNativeScratch`, as the run events
+`native_thread_deleted` and `native_scratch_removed` in the review's run dir. Its transcript is
+`<review run dir>/native-transcript.jsonl`; its `message_end` counts tokens at cost 0 with `cost_unknown` (D3).
+`src/quality.ts` now re-routes a voter that lost a codex slot at spawn ("codex concurrency") to pi, as for Claude.
+
+**Shipped off (C6).** No persisted shape, contract schema or golden changed; a reviewer writes codex values only while
+`codex_review` is on, and with every switch off a codex reviews row runs pi with no codex value in any file (CX-6d).
+Recovery: `codex_review` off or the row's `driver` removed (the next review routes pi; a running one finishes), or revert
+the PR. No data migration. The flip, by hand: add the row, then turn on `codex_review`.
+
+**Known limits.** No MCP server and no `ls`; a full codex slot runs pi; a reviewer's limit observation is not recorded
+(as a Claude reviewer's is not); the footer and the Settings rubric write still key on `codex_research`; a SIGKILLed
+reviewer worker leaves its thread and scratch dir; a thread refused between `thread/start` and its first turn is not
+deleted, as for the planner. A reviewer's route reason (`driver_reason`, `requested_driver`) is not in its
+`routing_resolved` event, only `driver=` in its line.
+
+**C8 carry-in list** (opened in C6): Q3, `codexPersistRefusal` keys on `codex_research` alone, so with only
+`codex_review` on a Settings rubric write that adds a codex row is refused naming `codex_research`, and a reviewer's pi
+fallback record omits `requested_driver`. C8 owns Settings.
+
+| KC | Criterion | CI (fake) | Real CLI |
+|---|---|---|---|
+| 1 | a forbidden action executes | held: CX-6b (shell, patch), CX-6c (reads outside the packet) | V2-V5 (cp-6sq6 probes) |
+| 2 | a dead hook lets a tool have an effect | held: CX-6c part 2 (no packet text, no verdict), CX-6b part 3 | V6, V7 |
+| 3 | the verdict tool accepts another job | held: CX-6a (a wrong-job verdict refused) | none (no CLI part) |
+| 5 | a process survives the review | held: CX-6a, CX-6c (every started scope, the delete server's included, killed or collected) | not run in C6 |
+| 6 | an extra loaded surface is not refused | held: CX-6b part 2 (`shell_tool` read back on) | V2-V5 read-backs |
+
+Cases: `tests/e2e/codex-reviewer.test.ts` (CX-6a…6g). The opt-in live case LS-8o-R was not added in C6; the real-CLI
+verdicts above rest on the cp-6sq6 offline probes.

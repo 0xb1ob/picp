@@ -59,7 +59,10 @@ export const fakePatched = (state: string) => lines<{ path: string }>(join(state
 /** Each `turn/start` and acked `turn/steer` the fake took, with its thread, turn and text. */
 export const fakePrompts = (state: string) => lines<{ method: string; threadId: string; turnId: string; text: string }>(join(state, "prompts.jsonl"));
 /** Each `thread/start` and `thread/resume` the fake took: the MCP server names its config passed, never a value. */
-export const fakeThreads = (state: string) => lines<{ method: string; mcpServers: string[]; developerInstructions: string | null }>(join(state, "threads.jsonl"));
+export const fakeThreads = (state: string) =>
+	lines<{ method: string; mcpServers: string[]; developerInstructions: string | null; dynamicTools?: string[] }>(join(state, "threads.jsonl"));
+/** Each shell call the fake answered "unsupported" because `shell_tool` was off (C6, V6). */
+export const fakeUnsupported = (state: string) => lines<{ command: string }>(join(state, "unsupported.jsonl")).map((entry) => entry.command);
 export const fakeThreadTotal = (state: string, threadId: string) =>
 	(JSON.parse(readFileSync(join(state, "threads", `${threadId}.json`), "utf8")) as { total: { totalTokens: number } }).total;
 

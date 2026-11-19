@@ -165,8 +165,8 @@ export interface CodexMcpServers {
 
 /**
  * The Codex CLI's user servers (C5): each enabled stdio or HTTP entry as a thread-config entry whose every tool asks
- * picp first (`default_tools_approval_mode: "prompt"`), values resolved from `env` as pi does. A name the CLI may
- * spell differently, `auth`, `!command` or an unset `$VAR` is skipped by name.
+ * picp first (`default_tools_approval_mode: "prompt"`), values resolved from `env` as pi does. A name outside
+ * `[A-Za-z0-9_-]`, `auth`, `!command` or an unset `$VAR` is skipped by name.
  */
 export function codexMcpConfig(user: UserMcpServers, env: NodeJS.ProcessEnv = process.env): CodexMcpServers {
 	const config: CodexMcpServers["config"] = {};

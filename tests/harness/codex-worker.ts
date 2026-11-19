@@ -3,12 +3,14 @@
  * says otherwise), a routing allow for `openai/gpt-picp-fake`, fake-codex and the fake `systemd-run` first on PATH,
  * and `CP_CODEX_HOME` on a temp dir holding the synthetic auth sentinel. The real `cp_dispatch` selects the driver.
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
-import { type Delivery, type JobKind, LAYOUT, paths } from "../../src/contracts.ts";
+import { DEFAULT_ORIGIN, type Delivery, type DiffVerdict, EMPTY_USAGE, isoTimestamp, type JobKind, LAYOUT, paths } from "../../src/contracts.ts";
 import { NATIVE_CODEX_SESSION_FILE, readNativeSession } from "../../src/drivers/claude-followup.ts";
+import { FleetStore } from "../../src/fleet.ts";
 import { routeNativeModel } from "./claude-mock-provider.ts";
 import { AUTH_SENTINEL, type FakeCodexScript, type FakeCodexStep, installCodexStub, writeCodexScript } from "./codex-mock.ts";
 import { dispatchS29 } from "./dispatch-s29.ts";
@@ -76,5 +78,47 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 	const run = async (steps: ScriptStep[], extraEnv: Record<string, string> = {}, prompt?: string) =>
 		(await b.run(steps, { ...env, ...extraEnv }, prompt, 240_000)) as Array<{ toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } }>;
 	const agentDir = b.agent.path;
-	return { b, agentDir, root, bin, state, codexHome, outside, nativeFile, env, record, job, report, reporting, setScript, awaitEnvelope, awaitFile, waitEvent, pause, runs, session, homeListing, lines, run };
+
+	/** C6: a held ship job whose branch (one commit) is pushed to the project's origin, as cp_review needs. */
+	async function heldShipJob(id: string): Promise<void> {
+		const origin = execFileSync("git", ["-C", b.clone, "remote", "get-url", "origin"], { encoding: "utf8" }).trim();
+		const work = join(root, `src-${id}`);
+		execFileSync("git", ["clone", "--quiet", origin, work]);
+		const git = (...args: string[]) => execFileSync("git", ["-C", work, "-c", "user.name=picp", "-c", "user.email=picp@example.invalid", ...args], { stdio: "ignore" });
+		git("checkout", "--quiet", "-b", id);
+		writeFileSync(join(work, `${id}.txt`), `${id} REVIEWED-CHANGE-LINE\n`);
+		git("add", "-A");
+		git("commit", "--quiet", "-m", id);
+		git("push", "--quiet", "-u", "origin", id);
+		const now = isoTimestamp();
+		await new FleetStore({ home: b.home }).add({
+			job_id: id, project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held", reported_at: now, dispatched_at: now, usage: EMPTY_USAGE, branch: id,
+			worker: { pid: process.pid, session_id: "legacy", session_file: join(b.home, "legacy.jsonl"), profile: "implementer", role: "implementer", model: "mock/model", started_at: now },
+			worktree: join(b.home, "recycled", id),
+		});
+	}
+	/** C6: the `reviews` row on codex with a pi `fallback`, replacing any earlier one. */
+	function reviewsRow(fallback: string): void {
+		const file = join(b.home, LAYOUT.routingFile);
+		const config = JSON.parse(readFileSync(file, "utf8")) as { allow: string[]; rubric: Array<{ id: string }> };
+		config.rubric = [...config.rubric.filter((row) => row.id !== "reviews"), { id: "reviews", role: "gate-reviewer", model: FAKE_CODEX_REF, fallbacks: [fallback], driver: "codex" } as { id: string }];
+		config.allow = [...new Set([...config.allow, "mock/*", FAKE_CODEX_REF])];
+		writeFileSync(file, JSON.stringify(config));
+	}
+	const review = (id: string): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: id } }] });
+	/** A finished review's run dir, events, routing payload, `verdict.json` review (if any) and `review-<n>.json`. */
+	async function reviewRun(id: string, attempt = 1) {
+		const file = join(b.home, paths.reviewFile(id, attempt));
+		await waitFor(() => existsSync(file), Boolean, { timeoutMs: 180_000, what: `${id}'s review-${attempt}.json` });
+		const run = join(b.home, paths.reviewRunDir(id, attempt));
+		const events = readFileSync(join(run, "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; payload: Record<string, unknown> });
+		const routed = events.find((event) => event.type === "routing_resolved")?.payload;
+		const verdictFile = join(b.home, paths.reviewVerdictFile(id, attempt));
+		const verdict = existsSync(verdictFile) ? (JSON.parse(readFileSync(verdictFile, "utf8")) as { review: unknown }).review : undefined;
+		return { run, events, routed, verdict, result: JSON.parse(readFileSync(file, "utf8")) as DiffVerdict };
+	}
+	return {
+		b, agentDir, root, bin, state, codexHome, outside, nativeFile, env, record, job, report, reporting, setScript, awaitEnvelope, awaitFile, waitEvent, pause, runs, session, homeListing,
+		lines, run, heldShipJob, reviewsRow, review, reviewRun,
+	};
 }

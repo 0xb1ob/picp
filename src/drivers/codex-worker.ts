@@ -1,7 +1,6 @@
 /**
- * The Codex CLI research worker (C1b; follow-ups, revive and steer C2): the pi RPC lines dispatch reads (`get_state`,
- * `prompt`, `follow_up`, `steer`). Each turn is one `runCodexSpike` with every C1a gate on: the first starts the
- * thread, every later one resumes it. A clean or reported turn settles idle; a named stop or an unclean end exits 1.
+ * The Codex CLI research worker (C1b, C2) and (C6) one-shot reviewer on pi's RPC lines (`get_state`, `prompt`,
+ * `follow_up`, `steer`): one `runCodexSpike` per turn, the first starting the thread and later ones resuming it.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -23,6 +22,7 @@ import { codexDoorRefusal, codexPersistRefusal, SKILL_DIRS_ENV } from "./codex.t
 import { codexErrorCode, codexLimit, USAGE_LIMIT } from "./codex-observation.ts";
 import type { ItemNotification, TokenUsageUpdatedNotification } from "./codex-protocol.ts";
 import { type CodexRunControl, type CodexRunUsage, type CodexSpikeResult, type CodexTokenTotals, type CodexToolEvent, runCodexSpike, ZERO_TOTALS } from "./codex-spike.ts";
+import { deleteCodexThread } from "./codex-teardown.ts";
 import { type CodexTranscript, codexTranscript } from "./codex-transcript.ts";
 
 const RUN_TIMEOUT_MS = 24 * 60 * 60_000;
@@ -33,6 +33,7 @@ const say = (line: string): void => void process.stderr.write(`[codex cli] ${lin
 const jobId = env.CP_JOB_ID ?? "this job";
 const runDir = env.CP_RUN_DIR ?? "";
 const sessionFile = join(runDir, NATIVE_CODEX_SESSION_FILE);
+const reviewer = env.CP_ROLE === "gate-reviewer";
 let abort = new AbortController();
 let run: Promise<number> | undefined;
 let busy = false;
@@ -162,18 +163,21 @@ interface Turn { reported: boolean; settles: boolean; stopped: boolean; code: nu
 /** One app-server run: fresh on a dispatch, else a resume of the recorded thread over its recorded totals. */
 async function turn(prompt: string): Promise<Turn> {
 	const [worktree, artifactPath] = [env.CP_WORKTREE, env.CP_ARTIFACT_PATH];
-	if (env.CP_KIND !== "research" || env.CP_ROLE !== "planner") throw new Error(`the Codex CLI runs research/planner jobs only, not ${env.CP_KIND}/${env.CP_ROLE}`);
-	if (!env.CP_JOB_ID || !runDir || !worktree || !artifactPath) throw new Error("Codex CLI worker started without its job identity");
+	if (env.CP_KIND !== "research" || (env.CP_ROLE !== "planner" && !reviewer)) {
+		throw new Error(`the Codex CLI runs research/planner and research/gate-reviewer jobs only, not ${env.CP_KIND}/${env.CP_ROLE}`);
+	}
+	if (!env.CP_JOB_ID || !runDir || !worktree || (!reviewer && !artifactPath)) throw new Error("Codex CLI worker started without its job identity");
 	const model = env.CP_CODEX_MODEL ?? "codex";
-	const user = loadUserMcp();
+	// C6 (Q2): a reviewer gets no MCP server and no skill dir, so it reads no mcp.json.
+	const user = reviewer ? undefined : loadUserMcp();
 	const contract = readSystemPrompt();
-	const systemPrompt = user.section === "" ? contract : `${contract.trimEnd()}${user.section}\n`;
-	const skills = skillDirs();
+	const systemPrompt = !user || user.section === "" ? contract : `${contract.trimEnd()}${user.section}\n`;
+	const skills = reviewer ? [] : skillDirs();
 	const resumed = resuming;
 	const session = resumed ? resumedSession(worktree) : freshSession(worktree);
 	const base = resumed ? session.totals : ZERO_TOTALS;
 	if (!transcript) {
-		transcript = codexTranscript(nativeTranscriptFile(runDir, jobId), { id: jobId, cwd: worktree }, model);
+		transcript = codexTranscript(reviewer ? join(runDir, "native-transcript.jsonl") : nativeTranscriptFile(runDir, jobId), { id: jobId, cwd: worktree }, model);
 		write({ type: "native_transcript", transcript_file: transcript.file });
 	}
 	transcript.prompt(prompt, resumed);
@@ -184,9 +188,12 @@ async function turn(prompt: string): Promise<Turn> {
 	let error: string | undefined;
 	try {
 		result = await runCodexSpike({
-			job: { job_id: jobId, kind: "research", role: "planner", delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath },
+			job: {
+				job_id: jobId, kind: "research", role: reviewer ? "gate-reviewer" : "planner", delivery: env.CP_DELIVERY as Delivery, runDir, worktree,
+				...(artifactPath ? { artifactPath } : {}),
+			},
 			prompt, ...(env.CP_CODEX_MODEL ? { model: env.CP_CODEX_MODEL } : {}), systemPrompt, hostEnv: env, timeoutMs: RUN_TIMEOUT_MS, signal: abort.signal,
-			scratchDir: session.scratch_dir, control, childEnv: workerChildEnv(), ...(user.mcp.names.length > 0 ? { mcp: user.mcp } : {}), ...(skills.length > 0 ? { skillDirs: skills } : {}),
+			scratchDir: session.scratch_dir, control, childEnv: workerChildEnv(), ...(user?.mcp.names.length ? { mcp: user.mcp } : {}), ...(skills.length > 0 ? { skillDirs: skills } : {}),
 			...(resumed ? { resume: { threadId: session.thread_id as string, ...(session.totals ? { baseline: session.totals } : {}) } } : {}),
 			...(env.CP_CODEX_HOME ? { codexHome: env.CP_CODEX_HOME } : {}), ...(env.CP_NATIVE_THINKING ? { effort: env.CP_NATIVE_THINKING } : {}),
 			onMessage: (method, params) => onMessage(session, base, method, params),
@@ -213,7 +220,7 @@ async function turn(prompt: string): Promise<Turn> {
 	const spent = result?.turnStatus === "failed" && limit?.reached === USAGE_LIMIT;
 	const stop = stopOf(result, cli === "other" ? undefined : cli) ?? (spent ? "window" : undefined);
 	const clean = stop === undefined && cli === undefined && result?.outcome === "completed" && error === undefined;
-	const reported = result?.report !== undefined;
+	const reported = result?.report !== undefined || result?.verdict !== undefined;
 	const runId = randomUUID();
 	const code = codexErrorCode(result?.codexErrorInfo);
 	write({
@@ -254,6 +261,16 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 	return queued;
 }
 
+/** A reviewer has no teardown: its thread (D5) and scratch dir end with its one busy period, as teardown.ts's do. */
+async function endReviewerSession(): Promise<void> {
+	try {
+		write({ type: "native_thread_deleted", ...(await deleteCodexThread({ sessionFile, hostEnv: env })) });
+		write({ type: "native_scratch_removed", ...removeNativeScratch(sessionFile) });
+	} catch (error) {
+		say(`the reviewer's thread or scratch dir was not removed: ${(error as Error).message}`);
+	}
+}
+
 /** Turns until no admitted follow-up is queued; settles when any turn reported or the last ended clean, else fails. */
 async function serve(first: string): Promise<number> {
 	busy = true;
@@ -278,6 +295,7 @@ async function serve(first: string): Promise<number> {
 			prompt = claimed.length > 0 ? claimed.join("\n\n") : undefined;
 		}
 	} finally {
+		if (reviewer) await endReviewerSession();
 		busy = false;
 	}
 	if (!reported && !last?.settles) return last?.code ?? 1;

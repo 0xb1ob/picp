@@ -30,6 +30,8 @@ export interface CodexSurface {
 	config: ConfigReadResponse;
 	/** What picp passed: the profile id and the roots it made writable. */
 	profile: { id: string; writableRoots: readonly string[] };
+	/** Role features that must also read back off (C6: a reviewer's `shell_tool`). */
+	offFeatures?: readonly string[];
 	/** The MCP server names picp passed in the thread config (C5); the pre-thread list must still be empty. */
 	mcpServersPassed?: readonly string[];
 	/** Present once `thread/start` (or `thread/resume`) answered; `mcpListed` is that thread's server list (C5). */
@@ -60,7 +62,8 @@ export function codexLockdownVerdict(surface: CodexSurface): CodexLockdown {
 	const listed = surface.thread?.mcpListed?.data ?? [];
 	// With a server passed, picp's MCP gate is the CLI asking before each tool call (M8): that feature must be on.
 	const elicitation = passed.size > 0 && enabled.get("tool_call_mcp_elicitation") !== true ? 1 : 0;
-	const wrongFeatures = CODEX_OFF_FEATURES.filter((name) => enabled.get(name) !== false).length + (enabled.get("hooks") === true ? 0 : 1) + elicitation;
+	const off = [...CODEX_OFF_FEATURES, ...(surface.offFeatures ?? [])];
+	const wrongFeatures = off.filter((name) => enabled.get(name) !== false).length + (enabled.get("hooks") === true ? 0 : 1) + elicitation;
 	const seen = {
 		hooks: hooks.length, mcpServers: surface.mcpServers.data.length + listed.length, skills: skills.length, instructionSources: sources.length,
 		features: surface.features.filter((feature) => feature.enabled).length,

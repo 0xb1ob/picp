@@ -1,0 +1,1 @@
+- C6: a `gate-reviewer` can run on the Codex CLI behind `data/native.json` `codex_review`, which ships off: no shell, picp's own `read`/`grep`/`find` over the review packet and pi's `report_verdict`, the thread deleted when the review ends; a quality voter that loses a codex slot votes on pi (`docs/native-drivers.md` "C6 reviewer").

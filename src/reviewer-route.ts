@@ -1,4 +1,7 @@
-/** N4h: a reviewer's route through the driver resolver; native only for a `driver: "claude"` row with claude_review on. */
+/**
+ * N4h/C6: a reviewer's route through the driver resolver; native only for a row naming `claude` or `codex` whose review
+ * switch (`claude_review`, `codex_review`) is on.
+ */
 import type { Delivery, FleetRecord, RoutingConfig, RoutingDecision } from "./contracts.ts";
 import { holdNativeSlot, liveNativeWorkers, resolveDriverRoute } from "./dispatch-driver.ts";
 import type { ModelProbe, RouteRequest, resolveWithCapacity } from "./routing.ts";

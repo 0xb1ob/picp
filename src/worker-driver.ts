@@ -19,7 +19,7 @@ export const nativeConfigFile = (home: string): string => join(home, LAYOUT.data
 /** The per-class switches (N4f): research, ship implementers and reviewers; each defaults to off. */
 export const NATIVE_CLASSES = ["claude_research", "claude_ship", "claude_review"] as const;
 export type NativeClass = (typeof NATIVE_CLASSES)[number];
-/** The Codex CLI's switches (C1b): only `codex_research` selects anything; ship and review have no class behind them. */
+/** The Codex CLI's switches: `codex_research` (C1b) and `codex_review` (C6) select; `codex_ship` has no class yet. */
 export const CODEX_CLASSES = ["codex_research", "codex_ship", "codex_review"] as const;
 export type CodexClass = (typeof CODEX_CLASSES)[number];
 export type NativeConfig = Record<NativeClass | CodexClass, boolean> & { max_concurrent: number; codex_max_concurrent: number };

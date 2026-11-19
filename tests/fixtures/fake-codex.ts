@@ -60,6 +60,8 @@ interface Knobs {
 	extraThreadMcpServers?: number;
 	/** `skip`: an MCP tool call runs with no approval request even in prompt mode, a CLI that bypasses picp. */
 	mcpApproval?: "skip";
+	/** `keep`: the shell stays offered though `shell_tool` reads back off, a CLI that ignores picp's flag (C6). */
+	shellTool?: "keep";
 }
 interface Script { knobs?: Knobs; turns?: Step[][] }
 interface Totals { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number; outputTokens: number; reasoningOutputTokens: number; totalTokens: number }
@@ -98,7 +100,7 @@ const trusted = knobs.trust !== "ignore" && trustFlag !== null && JSON.parse(tru
 
 const FEATURES: Record<string, boolean> = {
 	apps: true, plugins: true, multi_agent: true, image_generation: true, memories: true, view_image: true, goals: true, sleep_tool: true,
-	unified_exec_tty: true, hooks: true, skip_host_skill_discovery: false, tool_call_mcp_elicitation: true,
+	unified_exec_tty: true, hooks: true, skip_host_skill_discovery: false, tool_call_mcp_elicitation: true, shell_tool: true,
 };
 argv.forEach((arg, i) => {
 	if ((arg === "--enable" || arg === "--disable") && argv[i + 1] !== undefined) FEATURES[argv[i + 1] as string] = arg === "--enable";
@@ -223,7 +225,8 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
 	if (method === "thread/start") {
 		const mcp = threadMcp(params.config);
 		thread = { id: `thr_${process.pid}_${Date.now()}`, total: zero(), cwd: String(params.cwd), policy: String(params.approvalPolicy), replay: false, mcp };
-		log("threads.jsonl", { method, mcpServers: Object.keys(mcp), developerInstructions: params.developerInstructions ?? null });
+		const dynamicTools = ((params.dynamicTools ?? []) as Array<{ name?: string }>).map((tool) => String(tool.name)).sort();
+		log("threads.jsonl", { method, mcpServers: Object.keys(mcp), developerInstructions: params.developerInstructions ?? null, dynamicTools });
 		save(thread);
 		return threadResponse(thread, params);
 	}
@@ -318,6 +321,8 @@ async function runHook(tool: string, input: unknown, useId: string, turnId: stri
 }
 
 async function shellStep(step: Extract<Step, { kind: "shell" }>, turnId: string): Promise<void> {
+	// V6: with `shell_tool` off the CLI answers "unsupported call": no hook, no item, no approval.
+	if (FEATURES.shell_tool === false && knobs.shellTool !== "keep") return void log("unsupported.jsonl", { command: step.command });
 	const itemId = `item_${++counter}`;
 	const cwd = step.workdir ?? thread?.cwd ?? process.cwd();
 	if ((await runHook("Bash", { command: step.command }, itemId, turnId, step.hook, cwd)) === "blocked") return;

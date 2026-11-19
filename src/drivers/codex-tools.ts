@@ -1,19 +1,25 @@
 /**
- * The Codex planner's tools (C5): picp's dynamic tools (`report_result`, `gh_read`), the hook's tool vocabulary, the
- * Codex secret guard, and the MCP route and approval rules for the operator's servers. SDK-free.
+ * The Codex planner's and (C6) reviewer's tools: picp's dynamic tools (`report_result`, `gh_read`; `report_verdict`,
+ * `read`, `grep`, `find`), the hook's tool vocabulary, the Codex secret guard, and the MCP route and approval rules for
+ * the operator's servers. SDK-free.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ENVELOPE_FILE, formatRejection, type JobContext, localChecks } from "../../extensions/worker-reporter/index.ts";
-import { ENVELOPE_REPAIR_MAX_ATTEMPTS, type Envelope, type EnvelopeRecord, EnvelopeSchema, isoTimestamp, SCHEMA_VERSION, validateEnvelope } from "../contracts.ts";
+import { ENVELOPE_FILE, formatRejection, type JobContext, LenientGateReviewSchema, localChecks } from "../../extensions/worker-reporter/index.ts";
+import {
+	ENVELOPE_REPAIR_MAX_ATTEMPTS, type Envelope, type EnvelopeRecord, EnvelopeSchema, type GateReview, isoTimestamp, SCHEMA_VERSION, validateEnvelope,
+} from "../contracts.ts";
 import { CODEX_MCP_HELPER_TOOLS, type CodexMcpServers } from "../worker-mcp.ts";
 import { FORGE_TOOL_NAMES } from "./claude-roles.ts";
 import type { DynamicToolSpec, McpElicitationParams } from "./codex-protocol.ts";
 import { capped, type ForgeState, GH_READ_INPUT_SCHEMA, ghRead, parseGhReadArgs, processState } from "./native-gh-read.ts";
 import type { NormalizedCall, SpikeGuard, SpikeJob } from "./native-guards.ts";
+import { PACKET_TOOL_NAMES, packetTools } from "./native-packet-tools.ts";
+import { verdictReport } from "./native-verdict.ts";
 
 export const REPORT_TOOL = "report_result";
 export const GH_READ_TOOL = "gh_read";
+export const VERDICT_TOOL_NAME = "report_verdict";
 
 /** Closes the lexical gap for Codex: `$CODEX_HOME`, an `OPENAI_*`/`CODEX_*` variable, the home or a `.codex` path. */
 export function codexSecretGuard(codexHome: string): SpikeGuard {
@@ -31,6 +37,8 @@ export function codexToolCall(toolName: string, toolInput: unknown): NormalizedC
 	if (toolName === "Bash") return { name: "bash", input: { command: args.command } };
 	if (toolName === REPORT_TOOL) return { name: "report_result", input: args };
 	if ((FORGE_TOOL_NAMES as readonly string[]).includes(toolName)) return { name: toolName, input: args };
+	// C6: the guard vocabulary's own keys (`path`, `pattern`), so reviewerReadGuard checks the raw arguments.
+	if (toolName === VERDICT_TOOL_NAME || (PACKET_TOOL_NAMES as readonly string[]).includes(toolName)) return { name: toolName, input: args };
 	return undefined;
 }
 
@@ -40,7 +48,8 @@ export interface CodexDynamicTool {
 	run(args: unknown): Promise<{ text: string; success: boolean }>;
 }
 
-export interface CodexReportState { accepted?: Envelope; attempts: number; refusals: string[] }
+/** `verdict` (C6): a reviewer's accepted `report_verdict`, so the state also serves as pi's `VerdictState`. */
+export interface CodexReportState { accepted?: Envelope; verdict?: GateReview; attempts: number; refusals: string[] }
 
 /** picp's `report_result`, as the Claude driver's: validated, written once, wrong-job and conflicting refused. */
 export function reportTool(job: SpikeJob, state: CodexReportState): CodexDynamicTool {
@@ -99,8 +108,39 @@ function ghReadTool(job: SpikeJob, hostEnv: NodeJS.ProcessEnv, state: ForgeState
 	};
 }
 
-/** The planner's dynamic tools: `report_result` and `gh_read` (forge writes stay off). */
+/** C6: pi's `report_verdict` handler (clamp, checks, write-once `verdict.json`) as the reviewer's dynamic tool. */
+function verdictTool(job: SpikeJob, state: CodexReportState): CodexDynamicTool {
+	const report = verdictReport(job, state);
+	return {
+		spec: {
+			type: "function", name: VERDICT_TOOL_NAME, inputSchema: JSON.parse(JSON.stringify(LenientGateReviewSchema)) as unknown,
+			description: "Finish this review by reporting your verdict (job_id, verdict, flags, reasons; revisions only when revise). Call it once, as your final action.",
+		},
+		async run(args) {
+			const { text, isError } = await report(args);
+			return { text, success: !isError };
+		},
+	};
+}
+
+/** C6: the reviewer's `read`, `grep` and `find` over its packet; a handler that throws answers an error text. */
+function packetDynamicTools(root: string): CodexDynamicTool[] {
+	return packetTools(root).map((tool) => ({
+		spec: { type: "function", name: tool.name, description: tool.description, inputSchema: tool.inputSchema },
+		async run(args) {
+			try {
+				const { text, isError } = tool.run(args);
+				return { text, success: !isError };
+			} catch (error) {
+				return { text: `${tool.name} failed: ${(error as Error).message}`, success: false };
+			}
+		},
+	}));
+}
+
+/** Planner: `report_result` and `gh_read` (forge writes off). Reviewer (C6): `report_verdict` and the packet reads. */
 export function codexRoleTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv, report: CodexReportState, forge: ForgeState = processState): CodexDynamicTool[] {
+	if (job.role === "gate-reviewer") return [verdictTool(job, report), ...packetDynamicTools(job.worktree)];
 	return [reportTool(job, report), ghReadTool(job, hostEnv, forge)];
 }
 
