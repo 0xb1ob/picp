@@ -114,8 +114,8 @@ test("CX-7a: a codex ship job commits, pushes only its branch, opens a draft PR,
 	const [down] = (await h.run([tool("cp_teardown", { job_id: job.id })])).filter((end) => end.toolName === "cp_teardown");
 	assert.notEqual(down?.isError, true, text(down));
 	assert.equal((ofType(h, job.id, "native_thread_deleted")[0]?.payload as { deleted?: boolean } | undefined)?.deleted, true);
-	// KC5 for teardown's own delete server: its pid is gone (the fake kernel's scope bookkeeping lags on a loaded CI runner).
-	await waitFor(() => appServers(h).map((each) => each.pid).filter(isPidAlive), (alive) => alive.length === 0, { timeoutMs: 60_000, what: "every app-server pid gone" });
+	// KC5 for teardown's own delete server too: its scope is killed or collected.
+	await allScopesKilled(h);
 	assertClean(h);
 });
 
