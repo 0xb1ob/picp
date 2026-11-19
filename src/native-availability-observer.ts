@@ -1,4 +1,4 @@
-/** Native routing S2 and C3: the parent-side subscriber that writes each driver's availability snapshot from its events. */
+/** Native routing S2 and C3: the parent-side subscriber that writes each driver's availability snapshot. */
 import { OBSERVATION_EVENT } from "./drivers/claude-observation.ts";
 import { recordCodexObservation, recordNativeObservation } from "./native-availability.ts";
 import type { WorkerDriverHandle } from "./worker-driver.ts";

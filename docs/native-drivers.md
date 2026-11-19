@@ -1167,7 +1167,8 @@ revive of a record with no thread id (a run stopped before its first `turn/start
 
 **Usage across resumes (KC4).** The session record's `totals` is the thread's cumulative total at the last counted run,
 written as zero at a fresh session. Each resumed run passes it as the run core's `resume.baseline`, so its usage is the
-growth over that total. The worker saves `totals` before it writes the turn's `message_end`; a crash between the two
+growth over that total. The worker saves `totals` before it writes the turn's `message_end`, and updates a record that
+already holds `totals` even while codex is off (C3, CX-3e); a crash between the two
 leaves that run uncounted until the next resume counts it, and never counts it twice. A run with no measured usage saves
 nothing, so the next run counts both. Live `message_update` is the same growth, skipped while the total has not grown.
 Cost stays 0 with `cost_unknown` (D3).
@@ -1198,3 +1199,68 @@ CLI still rests on probe P4 and the fake (U2).
 
 Cases: `tests/e2e/codex-worker-followups.test.ts` (CX-2a…2h), CX-2s in `tests/e2e/codex-worker-spike.test.ts`,
 CX-off-2 in `tests/e2e/codex-worker.test.ts`, and the opt-in LS-6o-S in `tests/e2e/codex-worker-live-smoke.test.ts`.
+
+### C3 usage and availability
+
+C3 measures every codex turn and names the usage limit, still for planner research only and behind `codex_research`.
+
+**Totals across a switch flip (KC4).** `totals` is first written only while `codex_research` is on; a record that already
+holds it is updated by every counted run, the switch either way. Before C3 a turn that ended after the switch went off
+left a stale baseline, and the next resume counted that turn again (1210 tokens against a thread total of 770; CX-3e).
+
+**Every turn end is measured.** The run core's usage is the turn's latest cumulative total minus the baseline whatever
+the turn's status, so a completed, failed or interrupted turn carries its tokens (CX-3a), a SIGKILLed turn is counted
+once by the run that resumes it (CX-3b), and a run with no token update is `usage_unavailable`, never 0 (CX-3c).
+`native_run` gains `turn_status` and `error_info`: the `codexErrorInfo` as a code (a string, or a one-key object's key),
+never the CLI's message text. Cost stays 0 with `cost_unknown` (D3); there is no price table.
+
+**The usage limit.** A turn the CLI fails with `codexErrorInfo: "usageLimitExceeded"` is the named stop `window`:
+`native_run` carries `stop: "window"`, `window: "usage_limit"` and the reset, the worker exits 1, the failure class is
+`provider_limit` with Codex wording, and bounded recovery never revives it (a named stop, `cp_revive` after the reset).
+`rateLimitExceeded`, a 429 exhaustion and `unauthorized` mid-turn stay an unclean end (`crash`, one bounded revive): none
+was observed on the real CLI and none carries a reset (Q2).
+
+**The limit observation.** The run core merges each `account/rateLimits/updated` of the main allowance (a snapshot whose
+`limitId` is another allowance is ignored; a null never clears an earlier value), from the run's own notifications only:
+picp sends no `account/rateLimits/read`. After a run the worker relays `native_observation` `{kind: "limit", reached,
+resets_at?}` when the turn failed on the usage limit or the merged snapshot carries a `rateLimitReachedType` (a turn
+that still completed is no stop, but blocks the next selection), else `{kind: "turn_ok"}` after a clean turn. The reset
+is the latest `resetsAt` (epoch seconds) of the windows at 100 % or more; none, or one without a reset, is "reset
+unknown". Both rules follow T3's `codexUsageLimits.ts` at the pin (`mergeCodexRateLimits`, `codexUsageLimitResetAt`);
+the code is picp's (`src/drivers/codex-observation.ts`). Codes, numbers and times only: no account, plan or percentage.
+
+**The snapshot.** The parent observer routes a codex worker's observation to `state/native-availability-codex.json`
+(`{version: 1, limit?: {reached, observed_at, resets_at?}}`, closed schema); the Claude snapshot's file, schema and
+behaviour are unchanged. An older limit never replaces a newer one; `turn_ok` clears a limit observed before it whose
+reset is unknown or has passed. `NativeDriverSpec.availability` is the driver's snapshot reader, so the resolver and the
+resume admission read it for codex as they read S2 for Claude:
+
+| Snapshot | New codex selection | Resume, revive, queued follow-up |
+|---|---|---|
+| no file, no limit, or a no-reset limit older than `data/native.json`'s mtime | allowed | allowed |
+| a limit whose reset is ahead | a row falls back to pi with `window: usage limit reached until <iso>`; an explicit dispatch is refused by name | refused by name |
+| a limit whose reset passed | attempted, with the note `usage limit unknown since its reset <iso>` | allowed |
+| a no-reset limit newer than the switch file | `window: usage limit reached, reset unknown …` (as above) | refused by name |
+
+A no-reset limit blocks until a completed codex turn or the switch file rewritten after it (off then on), as Claude's
+no-reset window does; while it blocks no codex turn runs to clear it (U6). Deleting the file reads unknown again.
+
+**The chat footer.** `/api/workspace/status` gains an optional `codex` item beside `claude` while `codex_research` is on:
+`Codex unknown` (no readable snapshot, a passed or voided limit), `Codex limited until HH:MMZ`, `Codex limited (reset
+unknown)` or `Codex ok`, read with a contracts-free parse that accepts exactly what the snapshot schema accepts.
+
+**Shipped off (C3).** With every codex switch off no codex job runs: no codex snapshot is written, the Claude snapshot is
+not touched and no `native_observation` is relayed (CX-off-2). The codex snapshot is a new file a C2 build ignores, and
+no contract schema changed. Recovery: switch `codex_research` off, delete `state/native-availability-codex.json`, or
+revert the PR; no data migration.
+
+| KC | Criterion | CI (fake) | Real CLI |
+|---|---|---|---|
+| 4 | usage double-counted across a resume | held: CX-3e (off and on), CX-3b (killed turn), CX-2a and CX-2b unchanged | LS-3c (the usage arithmetic is unchanged in C3) |
+| 1, 2, 5, 6 | forbidden action, dead hook, surviving process, extra surface | held: C3 edits no approval, tripwire, lockdown or stop-sequence code; CX-1 and CX-0 cases unchanged | unchanged |
+
+Not observed on the real CLI (no live case): the shape of `account/rateLimits/updated` at a spent window (U1) and a turn
+failed with `usageLimitExceeded` (U2); both rest on the 0.170.0 schema and T3's adapter. The steer handle and the run's
+ready gate are cleared in a `finally` (CX-3f pins the handle's lifetime on every reachable end; no input throws between
+the set and the clear today, so the `finally` is defence). Cases: `tests/e2e/codex-worker-usage.test.ts` (CX-3a…3e),
+CX-3f in `tests/e2e/codex-worker-spike.test.ts`, S3-codex-line in `tests/e2e/viewer-full-match-status.test.ts`.

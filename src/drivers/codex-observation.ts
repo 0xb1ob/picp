@@ -37,7 +37,7 @@ export function codexErrorCode(info: unknown): string | undefined {
 	return code(typeof info === "string" ? info : keys.length === 1 ? keys[0] : undefined) ?? "other";
 }
 
-/** The limit a run observed: a turn failed on the usage limit, or a reached type; the reset is the latest spent window's. */
+/** A run's limit: a turn failed on the usage limit, or a reached type; the reset is the latest spent window's. */
 export function codexLimit(result: { turnStatus?: string; codexErrorInfo?: unknown; rateLimits?: CodexRateLimits }): { reached: string; resets_at?: number } | undefined {
 	const spent = result.turnStatus === "failed" && codexErrorCode(result.codexErrorInfo) === USAGE_LIMIT;
 	const reached = spent ? USAGE_LIMIT : result.rateLimits?.rateLimitReachedType === undefined ? undefined : (code(result.rateLimits.rateLimitReachedType) ?? "other");

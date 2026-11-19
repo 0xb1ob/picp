@@ -1,5 +1,5 @@
 /**
- * Native routing S2 (Claude) and C3 (Codex): home-local snapshots of passive subscription evidence, one file per driver,
+ * Native routing S2 (Claude) and C3 (Codex): home-local snapshots of passive subscription evidence, a file per driver,
  * kept apart from gateway quota. Evidence, never authorization: they turn NEW native selection (and a resume) away.
  * Missing or corrupt reads as unknown. Contract: docs/native-drivers.md "Availability snapshot (S2)" and C3.
  */
@@ -196,7 +196,7 @@ export function recordCodexObservation(home: string, input: unknown): boolean {
 	return true;
 }
 
-/** What the Codex snapshot says about a new codex run at `now`; a no-reset limit holds until the switch file is rewritten. */
+/** The Codex snapshot's word on a new codex run at `now`; a no-reset limit holds until the switch file is rewritten. */
 export async function codexAvailability(home: string, _model: string, options: { now?: number } = {}): Promise<NativeAvailability> {
 	const limit = readCodexAvailability(home)?.limit;
 	if (!limit) return {};

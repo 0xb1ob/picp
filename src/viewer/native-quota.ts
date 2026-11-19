@@ -91,13 +91,13 @@ export function nativeQuotaLine(stateDir: string, now: number): ClaudeItem | und
 function parseCodex(raw: Json | undefined): { limit?: { reached: string; observed_at: number; resets_at?: number } } | undefined {
 	if (!raw || raw.version !== 1 || !only(raw, ["version", "limit"])) return undefined;
 	if (raw.limit === undefined) return {};
-	const l = obj(raw.limit);
-	if (!l || !only(l, ["reached", "observed_at", "resets_at"]) || typeof l.reached !== "string" || l.reached.length < 1 || l.reached.length > 64) return undefined;
-	if (at(l.observed_at) === undefined || (l.resets_at !== undefined && at(l.resets_at) === undefined)) return undefined;
-	return { limit: { reached: l.reached, observed_at: at(l.observed_at)!, ...(l.resets_at === undefined ? {} : { resets_at: at(l.resets_at)! }) } };
+	const l = obj(raw.limit), reached = l?.reached, observed = at(l?.observed_at), resets = at(l?.resets_at);
+	if (!l || !only(l, ["reached", "observed_at", "resets_at"]) || typeof reached !== "string" || reached.length < 1 || reached.length > 64) return undefined;
+	return observed === undefined || (l.resets_at !== undefined && resets === undefined) ? undefined
+		: { limit: { reached, observed_at: observed, ...(resets === undefined ? {} : { resets_at: resets }) } };
 }
 
-/** The separate Codex item while `codex_research` is on: limited, unknown (no snapshot, a passed or voided limit), ok. */
+/** The Codex item while `codex_research` is on: limited, unknown (no snapshot, a passed or voided limit), or ok. */
 export function codexQuotaLine(stateDir: string, now: number): CodexItem | undefined {
 	const switchFile = join(dirname(stateDir), "data", "native.json");
 	const config = readJson(switchFile);
@@ -110,8 +110,8 @@ export function codexQuotaLine(stateDir: string, now: number): CodexItem | undef
 		return now < limit.resets_at ? { state: "limited", label: `Codex limited until ${iso(limit.resets_at).slice(11, 16)}Z`, detail: `usage limit reached until ${iso(limit.resets_at)}` }
 			: { state: "unknown", label: "Codex unknown", detail: `usage limit unknown since its reset ${iso(limit.resets_at)}` };
 	}
-	let switched: number | undefined;
-	try { switched = statSync(switchFile).mtimeMs; } catch { switched = undefined; }
-	if (switched !== undefined && switched > limit.observed_at) return { state: "unknown", label: "Codex unknown", detail: "a usage limit was voided by the switch; unknown until the next codex run" };
+	let voided = false;
+	try { voided = statSync(switchFile).mtimeMs > limit.observed_at; } catch { /* no switch file: nothing voided it */ }
+	if (voided) return { state: "unknown", label: "Codex unknown", detail: "a usage limit was voided by the switch; unknown until the next codex run" };
 	return { state: "limited", label: "Codex limited (reset unknown)", detail: `usage limit reached, reset unknown (observed ${iso(limit.observed_at)})` };
 }
