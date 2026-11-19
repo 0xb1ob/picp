@@ -556,7 +556,7 @@ const WORKER = new URL("../../src/drivers/codex-worker.ts", import.meta.url).pat
 
 /** C1b's worker entry as a child speaking pi RPC lines: one prompt, its events until it settles or exits, then stdin end. */
 async function workerRun(s: { root: string; worktree: string; artifactPath: string }, options: { codexHome: string; model?: string; prompt: string }) {
-	const runDir = join(s.root, "state", "runs", JOB);
+	const runDir = join(s.root, "worker", "runs", JOB);
 	mkdirSync(runDir, { recursive: true });
 	const systemPrompt = join(runDir, "codex-system-prompt.md");
 	writeFileSync(systemPrompt, "You are a picp research planner. Do exactly what the user message says.\n", { mode: 0o600 });
