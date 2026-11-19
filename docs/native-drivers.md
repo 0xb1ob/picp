@@ -1407,7 +1407,7 @@ verdicts above rest on the cp-6sq6 offline probes.
 C7a is steps 1-3 of the C7 plan (cp-95u6, approved es-3e598d): the pieces a Codex implementer needs, with **no
 selection reaching them**. `codex_ship` still selects nothing, `codexClassOf` and `codex-worker.ts` are unchanged, and no
 `data/*.json` or `defaults/routing*.json` was edited. C7b (steps 4-5: selection, spawn env, worker, checkpoint, moved
-thread, the CX-7 ship e2e cases) follows only after C7a merges.
+thread, the ship cases CX-7e/7k, planned for C7b) follows only after C7a merges.
 
 **Profile `picp_implementer`** (`codexPermissionProfile` with `role: "implementer"`, `codexRunRoots`): `/` deny,
 `:minimal` read, the worktree **write**; `<worktree>/.git`, the git common dir, the codex release dir, skill dirs,
