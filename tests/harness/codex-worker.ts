@@ -4,34 +4,51 @@
  * and `CP_CODEX_HOME` on a temp dir holding the synthetic auth sentinel. The real `cp_dispatch` selects the driver.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 import { DEFAULT_ORIGIN, type Delivery, type DiffVerdict, EMPTY_USAGE, isoTimestamp, type JobKind, LAYOUT, paths } from "../../src/contracts.ts";
 import { NATIVE_CODEX_SESSION_FILE, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { FleetStore } from "../../src/fleet.ts";
+import { SCAFFOLD_MANDATE_DEFAULTS } from "../../src/mandate-defaults.ts";
 import { routeNativeModel } from "./claude-mock-provider.ts";
 import { AUTH_SENTINEL, type FakeCodexScript, type FakeCodexStep, installCodexStub, writeCodexScript } from "./codex-mock.ts";
 import { dispatchS29 } from "./dispatch-s29.ts";
 import { readFleet, readRunEvents, type ScriptStep, waitFor } from "./index.ts";
+import { EXCLUDE_PATHS } from "./native-worker.ts";
 
 export const FAKE_CODEX_REF = "openai/gpt-picp-fake";
+/** The scripted forge gh (N4d's): it logs each call to FORGE_GH_LOG and answers `pr create` with this URL. */
+const FORGE_GH = fileURLToPath(new URL("../fixtures/forge-gh", import.meta.url));
+export const FORGE_PR_URL = "https://github.com/picp-e2e/forge/pull/7";
 
-export async function codexWorkerHome(t: TestContext, opts: { native?: Record<string, unknown> | null } = {}) {
-	const b = await dispatchS29(t);
+/** `ship` (C7b): EXCLUDE_PATHS in the mandate defaults, a commit identity, and the scripted forge `gh` first on PATH. */
+export async function codexWorkerHome(t: TestContext, opts: { native?: Record<string, unknown> | null; files?: Record<string, string>; ship?: boolean } = {}) {
+	const b = await dispatchS29(t, opts.files ? { files: opts.files } : {});
 	const nativeFile = join(b.home, LAYOUT.data, "native.json");
 	if (opts.native !== null) writeFileSync(nativeFile, JSON.stringify(opts.native ?? { codex_research: true }));
 	routeNativeModel(b.home, [FAKE_CODEX_REF]);
 	const root = mkdtempSync(join(tmpdir(), "cp-codex-worker-e2e-"));
 	t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 5 }));
-	const [bin, state, codexHome, outside] = ["codex-release/bin", "state", "codex-home", "outside"].map((name) => join(root, name)) as [string, string, string, string];
-	for (const dir of [bin, state, codexHome, outside]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const [bin, state, codexHome, outside, forge] = ["codex-release/bin", "state", "codex-home", "outside", "forge"].map((name) => join(root, name)) as [string, string, string, string, string];
+	for (const dir of [bin, state, codexHome, outside, forge]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	writeFileSync(join(codexHome, "auth.json"), `${AUTH_SENTINEL}\n`, { mode: 0o600 });
 	const script = join(root, "script.json");
 	writeCodexScript(script, { turns: [] });
 	installCodexStub(bin, { script, stateDir: state });
-	const env = { PATH: `${bin}:${process.env.PATH ?? ""}`, CP_CODEX_HOME: codexHome };
+	const ghLog = join(forge, "calls.log");
+	if (opts.ship) {
+		writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS }));
+		copyFileSync(FORGE_GH, join(forge, "gh"));
+		chmodSync(join(forge, "gh"), 0o755);
+		writeFileSync(join(forge, "gitconfig"), "[user]\n\tname = codex ship e2e\n\temail = codex-ship@test.invalid\n");
+	}
+	const env = {
+		PATH: `${opts.ship ? `${forge}:` : ""}${bin}:${process.env.PATH ?? ""}`, CP_CODEX_HOME: codexHome,
+		...(opts.ship ? { FORGE_GH_LOG: ghLog, GIT_CONFIG_GLOBAL: join(forge, "gitconfig") } : {}),
+	};
 	const record = (id: string) => readFleet(b.home).jobs.find((job) => job.job_id === id);
 
 	/** A ledger job, its artifact dir made, and the parent step that dispatches it (explicit codex unless `driver` says). */
@@ -117,8 +134,23 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 		const verdict = existsSync(verdictFile) ? (JSON.parse(readFileSync(verdictFile, "utf8")) as { review: unknown }).review : undefined;
 		return { run, events, routed, verdict, result: JSON.parse(readFileSync(file, "utf8")) as DiffVerdict };
 	}
+	/** C7b: a ship envelope whose `head_sha` the fake fills with the worktree HEAD at the call. */
+	const shipReport = (id: string, delivery: Delivery = "pr", over: Record<string, unknown> = {}) => ({
+		job_id: id, kind: "ship", status: "done", summary: "Codex ship filed.", branch: id, head_sha: "{{HEAD}}", ...(delivery === "pr" ? { pr_url: FORGE_PR_URL } : {}), ...over,
+	});
+	/** Every ref on the project's bare origin, `ref → sha`. */
+	const originRefs = (): Record<string, string> => Object.fromEntries(execFileSync("git", ["ls-remote", "origin"], { cwd: b.clone, encoding: "utf8" })
+		.trim().split("\n").filter(Boolean).map((line) => line.split("\t").reverse() as [string, string]));
+	/** The forge gh calls (`pr create …`), one per line. */
+	const ghCalls = (): string[] => (existsSync(ghLog) ? readFileSync(ghLog, "utf8").trim().split("\n").filter(Boolean) : []);
+	const worktree = (id: string): string => {
+		const found = record(id)?.worktree;
+		if (!found || !existsSync(found)) throw new Error(`${id} has no worktree yet`);
+		return found;
+	};
+	const git = (id: string, ...args: string[]): string => execFileSync("git", args, { cwd: worktree(id), encoding: "utf8" }).trim();
 	return {
 		b, agentDir, root, bin, state, codexHome, outside, nativeFile, env, record, job, report, reporting, setScript, awaitEnvelope, awaitFile, waitEvent, pause, runs, session, homeListing,
-		lines, run, heldShipJob, reviewsRow, review, reviewRun,
+		lines, run, heldShipJob, reviewsRow, review, reviewRun, shipReport, originRefs, ghCalls, worktree, git,
 	};
 }

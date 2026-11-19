@@ -16,7 +16,10 @@ import { resolveCodexContainment } from "./codex-containment.ts";
 const WORKER_ENTRY = fileURLToPath(new URL("./codex-worker.ts", import.meta.url));
 const SYSTEM_PROMPT_FILE = "codex-system-prompt.md";
 export const SKILL_DIRS_ENV = "CP_CODEX_SKILL_DIRS";
+/** C7b (Q5): operator read roots for toolchains, a JSON array of absolute dirs read from the parent's env. */
+export const READ_ROOTS_ENV = "CP_CODEX_READ_ROOTS";
 const DELIVERIES: readonly Delivery[] = ["local", "answer"];
+const SHIP_DELIVERIES: readonly Delivery[] = ["pr", "local"];
 export const CODEX_MODEL = /^openai\/(gpt-[A-Za-z0-9][A-Za-z0-9._-]*)$/;
 /** Routed levels the Codex CLI serves as `effort`; `off` and `minimal` have none. */
 export const CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -41,9 +44,10 @@ export function assertCodexEffort(level: string | undefined): void {
 /** The Codex home picp passes as `CODEX_HOME` and never opens: `CP_CODEX_HOME`, else `<passwd home>/.codex`. */
 export const codexHomeOf = (env: NodeJS.ProcessEnv): string => env.CP_CODEX_HOME?.trim() || defaultCodexHome();
 
-/** Planner research and (C6) gate reviewers have a Codex class; `codex_ship` selects nothing yet. */
+/** Planner research, (C6) gate reviewers and (C7b) ship implementers have a Codex class. */
 export const codexClassOf = (kind: JobKind, role: Role): CodexClass | undefined =>
-	role === "gate-reviewer" ? "codex_review" : role === "planner" && kind === "research" ? "codex_research" : undefined;
+	role === "gate-reviewer" ? "codex_review" : role === "planner" && kind === "research" ? "codex_research"
+		: role === "implementer" && kind === "ship" ? "codex_ship" : undefined;
 
 /** `codex_max_concurrent`; an unreadable data/native.json keeps the safe 1. */
 export function codexMaxConcurrent(home: string): number {
@@ -78,12 +82,14 @@ export async function codexSelectionRefusal(input: NativeSelection): Promise<{ c
 	}
 	const ineligible = {
 		category: "ineligible" as const,
-		why: `only research (role planner, delivery local or answer) runs on the Codex CLI, beside gate reviewers; this is ${input.kind}/${input.role}/${input.delivery}`,
+		why: "only research (role planner, delivery local or answer), ship (role implementer, delivery pr or local) and gate reviews run on the Codex CLI; " +
+			`this is ${input.kind}/${input.role}/${input.delivery}`,
 	};
 	const codexClass = codexClassOf(input.kind, input.role);
 	if (codexClass === undefined) return ineligible;
 	if (!config[codexClass]) return { category: "switch", why: `the switch ${codexClass} is off (data/native.json ${codexClass})` };
 	if (codexClass === "codex_research" && !DELIVERIES.includes(input.delivery)) return ineligible;
+	if (codexClass === "codex_ship" && !SHIP_DELIVERIES.includes(input.delivery)) return ineligible;
 	// C5 Q3: the Codex shell has no network and no agent socket, so an ops job falls back rather than run without ssh.
 	if (input.profile === "ops") return { category: "ineligible", why: "profile ops runs no Codex CLI job: the Codex shell has no network and no ssh agent" };
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs, "codex"), input.jobId, config.codex_max_concurrent, "live", "codex");
@@ -123,9 +129,37 @@ export const CODEX_REVIEW_ADDENDUM = [
 	"report_verdict once.",
 ].join("\n");
 
+const SHIP_TOOLS = [
+	"Codex implementer: your tools are the Codex shell, git_commit, git_merge, git_fetch, gh_read (never gh in the shell)",
+	"and report_result; ignore any other tool names above. The shell reads and writes this worktree only (plus the",
+	"system paths and the read roots your brief names); .git and the excluded paths are read-only and there is no",
+	"network. Write files with the shell (a quoted heredoc, sed -i, a script); apply_patch is refused, and a file is",
+	"restored with `git show HEAD:<path> > <path>`. The shell never writes git: git_commit runs `git add -A` and commits",
+	"every change (an excluded path is refused), git_fetch then git_merge {ref: \"origin/<base>\"} brings the base in.",
+];
+/** C7b: what a Codex ship implementer (delivery pr) is told after the profile body. */
+export const CODEX_SHIP_ADDENDUM = [
+	...SHIP_TOOLS,
+	"Then git_push (HEAD to origin/<job>, never forced), pr_create once for the draft PR, and report_result once with",
+	"head_sha. Sub-agents and web search are refused.",
+].join("\n");
+/** C7b: delivery local has no push or PR: git_commit is the delivery. */
+export const CODEX_LOCAL_SHIP_ADDENDUM = [
+	...SHIP_TOOLS,
+	"This is a local delivery: there is no git_push and no PR. Commit, then call report_result once with head_sha (HEAD).",
+	"Sub-agents and web search are refused.",
+].join("\n");
+
+/** The addendum for the spawn's role and delivery. */
+function codexAddendum(env: NodeJS.ProcessEnv): string {
+	if (env.CP_ROLE === "gate-reviewer") return CODEX_REVIEW_ADDENDUM;
+	if (env.CP_ROLE === "implementer") return env.CP_DELIVERY === "local" ? CODEX_LOCAL_SHIP_ADDENDUM : CODEX_SHIP_ADDENDUM;
+	return CODEX_ADDENDUM;
+}
+
 /**
  * Overrides pi's argv with the Codex worker; the role contract goes to a 0600 file in the run dir, not the argv or env.
- * `skills` (C5): the per-job skill dirs, as `CP_CODEX_SKILL_DIRS` (a JSON array) for the sandbox's read roots.
+ * `skills` (C5): the per-job skill dirs, as `CP_CODEX_SKILL_DIRS`; the parent's `CP_CODEX_READ_ROOTS` passes as is.
  */
 export function codexSpawnOptions(
 	model: string, env: NodeJS.ProcessEnv, systemPrompt: string, options: { skills?: readonly string[] } = {},
@@ -134,24 +168,25 @@ export function codexSpawnOptions(
 	if (!runDir) throw new NativeDriverError("the Codex CLI worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
-	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${env.CP_ROLE === "gate-reviewer" ? CODEX_REVIEW_ADDENDUM : CODEX_ADDENDUM}\n`, { mode: 0o600 });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${codexAddendum(env)}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	const memory = process.env[WORKER_MEMORY_MAX_ENV];
-	const { [SKILL_DIRS_ENV]: _inherited, ...rest } = env;
+	const readRoots = process.env[READ_ROOTS_ENV];
+	const { [SKILL_DIRS_ENV]: _inherited, [READ_ROOTS_ENV]: _roots, ...rest } = env;
 	return {
 		piBin: process.execPath,
 		argv: [WORKER_ENTRY],
 		env: {
 			...rest, ...(options.skills?.length ? { [SKILL_DIRS_ENV]: JSON.stringify(options.skills) } : {}), CP_CODEX_MODEL: codexModelId(model), CP_CODEX_SYSTEM_PROMPT_FILE: file, CP_CODEX_HOME: codexHomeOf(process.env),
-			...(memory ? { CP_CODEX_MEMORY_MAX: memory } : {}),
+			...(memory ? { CP_CODEX_MEMORY_MAX: memory } : {}), ...(readRoots ? { [READ_ROOTS_ENV]: readRoots } : {}),
 		},
 		shutdownGraceMs: CODEX_SHUTDOWN_GRACE_MS,
 	};
 }
 
-/** Why a codex job takes no checkpoint (C2): nothing is sent or spawned. */
+/** Why a codex research or review job takes no checkpoint: nothing is sent or spawned. */
 export function codexDoorRefusal(jobId: string, door: string): string {
-	return `${jobId} runs on the Codex CLI driver: ${door} is refused (a research planner has nothing to checkpoint; the checkpoint lands with Codex ship jobs, C7). Nothing was sent or spawned.`;
+	return `${jobId} runs on the Codex CLI driver: ${door} is refused (only a ship implementer takes a checkpoint; a research planner or reviewer has nothing to commit). Nothing was sent or spawned.`;
 }
 
 /** What a codex `cp_send` did (C2): resumed the thread, queued until the turn ends, or steered the running turn. */

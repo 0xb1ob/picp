@@ -43,7 +43,8 @@ export function codexPatchRefusal(role: SpikeJob["role"]): string {
 	return "Refused: a native implementer never applies a patch (the CLI applies it outside the sandbox). Write files with the shell (a quoted heredoc, `sed -i`, a script); restore one with `git show HEAD:<path> > <path>`.";
 }
 
-const GIT_WRITES = new Set(["add", "commit", "merge", "stash", "reset", "restore", "checkout", "rm", "mv", "tag", "am", "apply", "cherry-pick", "revert", "rebase"]);
+// C7b: fetch, pull and push name the picp tools too, ahead of the Bash scope's pi wording.
+const GIT_WRITES = new Set(["add", "commit", "merge", "stash", "reset", "restore", "checkout", "rm", "mv", "tag", "am", "apply", "cherry-pick", "revert", "rebase", "fetch", "pull", "push"]);
 const GIT_VALUED = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--exec-path"]);
 const SHELLS = new Set(["sh", "bash", "dash", "zsh"]);
 const WRAPPERS = new Set(["env", "command", "exec", "nohup", "time", "builtin"]);
@@ -79,18 +80,20 @@ function gitWriteInScript(script: string, level = 0): string | undefined {
 }
 
 /**
- * C7a (U2): the implementer's sandbox keeps `.git` read-only, so a git write in its shell can only fail; this refuses it
- * at the hook with the picp tool that does it instead. Lexical and best effort: the kernel is the bound.
+ * C7a (U2): the implementer's sandbox keeps `.git` read-only and has no network, so a git write in its shell can only
+ * fail; this refuses it at the hook with the picp tool that does it instead. Lexical and best effort: the kernel binds.
  */
 export function codexGitGuard(role: SpikeJob["role"]): SpikeGuard {
 	return (call) => {
 		if (role !== "implementer" || call.name !== "bash" || typeof call.input.command !== "string") return undefined;
 		const sub = gitWriteInScript(call.input.command);
 		if (sub === undefined) return undefined;
-		const remedy = sub === "merge" || sub === "rebase" || sub === "cherry-pick" || sub === "revert" ? "git_fetch, then git_merge {ref: \"origin/<base>\"} (fix conflicts with the shell, then git_commit)"
+		const remedy = sub === "merge" || sub === "rebase" || sub === "cherry-pick" || sub === "revert" || sub === "fetch" || sub === "pull"
+			? "git_fetch, then git_merge {ref: \"origin/<base>\"} (fix conflicts with the shell, then git_commit)"
+			: sub === "push" ? "git_push (HEAD to this job's branch, never forced)"
 			: sub === "restore" || sub === "checkout" || sub === "reset" || sub === "stash" ? "restore a file with `git show HEAD:<path> > <path>`, then git_commit"
 			: "git_commit (it runs `git add -A` and commits every change)";
-		return `Refused: a native implementer's shell never writes git (\`git ${sub}\`): .git is read-only in its sandbox. Use ${remedy}.`;
+		return `Refused: a native implementer's shell never writes git or reaches a remote (\`git ${sub}\`): .git is read-only in its sandbox. Use ${remedy}.`;
 	};
 }
 

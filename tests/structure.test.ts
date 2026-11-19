@@ -258,6 +258,8 @@ test("SDK-free ratchet: no run-time import from the Codex run core reaches the A
 	const { modules, hits } = runtimeClosure(SDK_FREE_ROOTS);
 	assert.deepEqual(hits, [], "move the import behind an SDK-free module (src/drivers/native-guards.ts holds the guard chain)");
 	assert.ok(modules.has("src/drivers/native-guards.ts"), "the walk reached the guard chain");
+	// C7b: the forge writes and their exclude_paths matcher (mandate.ts) are in the closure the walk checked.
+	assert.ok(modules.has("src/drivers/native-forge.ts") && modules.has("src/mandate.ts"), "the walk reached native-forge.ts and mandate.ts");
 });
 
 // cp-txbb: cp-daemon is the one runtime; systemd is one of its backends, named in one module. cp-rrye: the

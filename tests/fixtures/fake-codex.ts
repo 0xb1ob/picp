@@ -3,11 +3,12 @@
  * the 0.170.0 wire. `FAKE_CODEX_SCRIPT` (JSON `{knobs, turns}`) plays the model; `FAKE_CODEX_STATE` holds threads and
  * logs (argv and env key names, never values). A failed hook fails open here, the worst case the CLI docs leave open;
  * under picp's `-c default_permissions` profile a lexical stand-in for the kernel refuses paths outside its roots and
- * (C7a) writes under no `write` entry, the longest entry winning, and every git write (C7 probe PC).
+ * (C7a) writes under no `write` entry, the longest entry winning, and every git write (C7 probe PC). A tool argument
+ * `"{{HEAD}}"` is the worktree's HEAD at the call (C7b).
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -202,9 +203,19 @@ function nextTurn(): Step[] {
 	return script.turns?.[cursor] ?? [];
 }
 
+const realOrSame = (path: string): string => {
+	try {
+		return realpathSync(path);
+	} catch {
+		return resolve(path);
+	}
+};
+
 function threadResponse(t: Thread, params: Record<string, unknown>) {
 	const mode = String(params.sandbox ?? "read-only");
-	const writable = [...profileRoots.filter((root) => root.mode === "write").map((root) => root.path), ...(knobs.profileReadback === "extraRoot" ? ["/"] : [])];
+	// C7 probe PA: the read-back never lists the cwd, even when the profile writes it (picp_implementer).
+	const cwd = realOrSame(t.cwd);
+	const writable = [...profileRoots.filter((root) => root.mode === "write" && root.path !== cwd).map((root) => root.path), ...(knobs.profileReadback === "extraRoot" ? ["/"] : [])];
 	return {
 		thread: { id: t.id }, approvalPolicy: t.policy, approvalsReviewer: "user", cwd: t.cwd, model: params.model ?? "gpt-picp-fake",
 		sandbox: profileId !== undefined
@@ -493,11 +504,20 @@ async function runStep(step: Exclude<Step, { kind: "rateLimits" | "fail" }>, tur
 		return;
 	}
 	const callId = `call_${++counter}`;
-	if ((await runHook(step.tool, step.arguments, callId, turnId, step.hook)) === "blocked") return;
-	const result = await ask("item/tool/call", { tool: step.tool, arguments: step.arguments, callId, threadId: thread?.id, turnId });
+	const args = withHead(step.arguments);
+	if ((await runHook(step.tool, args, callId, turnId, step.hook)) === "blocked") return;
+	const result = await ask("item/tool/call", { tool: step.tool, arguments: args, callId, threadId: thread?.id, turnId });
 	log("tool-results.jsonl", { tool: step.tool, result });
 	const { success, contentItems } = (result ?? {}) as { success?: boolean; contentItems?: unknown };
-	notify("item/completed", { threadId: thread?.id, turnId, item: { type: "dynamicToolCall", id: callId, tool: step.tool, arguments: step.arguments, status: "completed", success, contentItems } });
+	notify("item/completed", { threadId: thread?.id, turnId, item: { type: "dynamicToolCall", id: callId, tool: step.tool, arguments: args, status: "completed", success, contentItems } });
+}
+
+/** C7b: a `"{{HEAD}}"` value becomes the worktree's HEAD at the call, as a model reads it with `git rev-parse HEAD`. */
+function withHead(value: unknown): unknown {
+	const json = JSON.stringify(value ?? null);
+	if (!json.includes('"{{HEAD}}"')) return value;
+	const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: thread?.cwd, encoding: "utf8" }).stdout.trim();
+	return JSON.parse(json.split('"{{HEAD}}"').join(JSON.stringify(head)));
 }
 
 function addUsage(t: Thread, turnId: string, last: Totals): void {

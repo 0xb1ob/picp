@@ -123,17 +123,17 @@ test("CX-1b: the switch refuses an explicit codex job by name; a codex row prefe
 	// While codex is off the fallback names no codex value (CX-off-2 pins the persisted record).
 	assert.deepEqual([preview(fellBack)?.requested_driver, preview(fellBack)?.driver], [undefined, "pi"], text(fellBack));
 	assert.match(preview(fellBack)?.driver_reason ?? "", /^switch: /);
-	// Switch on: the row routes codex; an implementer row, delivery board and a denied model fall back to pi by name.
+	// Switch on: the row routes codex; delivery board, an implementer row with codex_ship off (C7b) and a denied model
+	// fall back to pi by name.
 	writeFileSync(h.nativeFile, JSON.stringify({ codex_research: true }));
 	routing([row(), row({ id: "codex-ship", role: "implementer" })]);
 	await h.b.closeParents();
 	const on = (await h.run([dry(rowOn.id), dry(board.id), dry(ship.id)])).filter((end) => end.toolName === "cp_dispatch");
 	assert.deepEqual([preview(on[0])?.driver, preview(on[0])?.requested_driver], ["codex", "codex"], text(on[0]));
 	assert.match(preview(on[0])?.driver_reason ?? "", /^rule: codex-research prefers codex; effort \w+/);
-	for (const end of [on[1], on[2]]) {
-		assert.deepEqual([preview(end)?.requested_driver, preview(end)?.driver], ["codex", "pi"], text(end));
-		assert.match(preview(end)?.driver_reason ?? "", /^ineligible: only research \(role planner, delivery local or answer\) runs on the Codex CLI/);
-	}
+	for (const end of [on[1], on[2]]) assert.deepEqual([preview(end)?.requested_driver, preview(end)?.driver], ["codex", "pi"], text(end));
+	assert.match(preview(on[1])?.driver_reason ?? "", /^ineligible: only research \(role planner, delivery local or answer\), ship \(role implementer, delivery pr or local\) and gate reviews run on the Codex CLI/);
+	assert.match(preview(on[2])?.driver_reason ?? "", /^switch: the switch codex_ship is off/);
 	routing([row()], { deny_by_role: { planner: [FAKE_CODEX_REF] } });
 	await h.b.closeParents();
 	const deny = (await h.run([dry(denied.id)])).find((end) => end.toolName === "cp_dispatch");

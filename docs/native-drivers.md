@@ -1043,8 +1043,8 @@ it) and an explicit `openai/gpt-…` model, runs `src/drivers/codex-worker.ts`, 
 Every other role, kind and delivery stays on pi. No `data/*.json` or `defaults/routing*.json` was edited.
 
 **Switches (`data/native.json`).** `codex_research`, `codex_ship`, `codex_review` (booleans, default off) and
-`codex_max_concurrent` (1-4, default 1, counted apart from Claude's `max_concurrent`). `codex_research` and (C6)
-`codex_review` select; `codex_ship` has no class behind it yet. Settings never sets or deletes them.
+`codex_max_concurrent` (1-4, default 1, counted apart from Claude's `max_concurrent`). `codex_research`, (C6)
+`codex_review` and (C7b) `codex_ship` select. Settings never sets or deletes them.
 
 **Selection** (`codexSelectionRefusal` in `src/drivers/codex.ts`), each a named refusal before any lease, in order:
 
@@ -1136,8 +1136,9 @@ stay as accepted for read-only research only; F5 and R1 are re-decided before C7
 
 **C7 carry-in list** (C5 added R3 on the main session's condition): R1, F5, Q2 (the freeze checkpoint's WIP commit
 for codex; `checkpoint` stays refused until then), Q3 (a fresh thread for a moved worktree; the resume stays refused by
-name until then) and R3 (MCP resource reads with a dead hook, C5 below). Each is re-decided before any write-capable
-codex job: R1, F5 and R3 in [C7a](#c7a-ship-job-groundwork-unwired); Q2 and Q3 are built in C7b.
+name until then) and R3 (MCP resource reads with a dead hook, C5 below). Each was re-decided before any write-capable
+codex job: R1, F5 and R3 in [C7a](#c7a-ship-job-groundwork-unwired); Q2 and Q3 are built in
+[C7b](#c7b-ship-jobs-wired-shipped-off) (for a ship implementer; research keeps both refusals).
 
 Kill-criteria verdicts (CI: `tests/e2e/codex-worker.test.ts` and `tests/e2e/codex-worker-spike.test.ts` on the fake;
 real CLI: `tests/e2e/codex-worker-live-smoke.test.ts` under `CP_LIVE_TESTS=1`):
@@ -1407,7 +1408,7 @@ verdicts above rest on the cp-6sq6 offline probes.
 C7a is steps 1-3 of the C7 plan (cp-95u6, approved es-3e598d): the pieces a Codex implementer needs, with **no
 selection reaching them**. `codex_ship` still selects nothing, `codexClassOf` and `codex-worker.ts` are unchanged, and no
 `data/*.json` or `defaults/routing*.json` was edited. C7b (steps 4-5: selection, spawn env, worker, checkpoint, moved
-thread, the ship cases CX-7e/7k, planned for C7b) follows only after C7a merges.
+thread) wires them, with CX-7a…7l in `tests/e2e/codex-ship.test.ts`; see [C7b](#c7b-ship-jobs-wired-shipped-off).
 
 **Profile `picp_implementer`** (`codexPermissionProfile` with `role: "implementer"`, `codexRunRoots`): `/` deny,
 `:minimal` read, the worktree **write**; `<worktree>/.git`, the git common dir, the codex release dir, skill dirs,
