@@ -109,10 +109,13 @@ test("CX-7a: a codex ship job commits, pushes only its branch, opens a draft PR,
 	assert.match(readFileSync(join(h.b.home, paths.runDir(job.id), "codex-system-prompt.md"), "utf8"), new RegExp(CODEX_SHIP_ADDENDUM.slice(0, 60)));
 	assert.equal(h.session(job.id).base, "main", "the dispatch base reached the worker");
 	await h.b.closeParents();
+	await workerGone(h, job.id);
+	await allScopesKilled(h);
 	const [down] = (await h.run([tool("cp_teardown", { job_id: job.id })])).filter((end) => end.toolName === "cp_teardown");
 	assert.notEqual(down?.isError, true, text(down));
 	assert.equal((ofType(h, job.id, "native_thread_deleted")[0]?.payload as { deleted?: boolean } | undefined)?.deleted, true);
-	await allScopesKilled(h);
+	// KC5 for teardown's own delete server: its pid is gone (the fake kernel's scope bookkeeping lags on a loaded CI runner).
+	await waitFor(() => appServers(h).map((each) => each.pid).filter(isPidAlive), (alive) => alive.length === 0, { timeoutMs: 60_000, what: "every app-server pid gone" });
 	assertClean(h);
 });
 
