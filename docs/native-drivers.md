@@ -1010,11 +1010,20 @@ Codex home, zero tokens):
 
 Negative controls run once and restored: without the `/` deny CX-1g fails on `executed.jsonl` and LS-4o-R on the
 sentinel reaching the model; with `codex-spike.ts` importing `claude-spike.ts` the ratchet names that edge.
-**C1 limit R1 (accepted for C1 only, main session es-781b5e).** With a dead hook, a command a user allow rule covers
-still starts with no approval. It stays inside the profile: it reads only the worktree, its git dir and system paths,
-writes only the artifact dir and scratch tmp, has no network, and the tripwire kills the run. That bound meets
-item 3(a) for read-only research only. **It must be re-decided before C7 (Codex coding):** the C7 plan must take the
-picp-served shell fallback (a picp `bash` dynamic tool with the CLI's shell tools off) or show an equal bound.
+**R1 (C1 accepted it for research, es-781b5e; re-decided for C7 by the main session, es-ee4de5).** With a dead hook, a
+command a user allow rule covers still starts with no approval. For a planner it stays inside `picp_planner`: it reads
+only the worktree, its git dir and system paths, writes only the artifact dir and scratch tmp, has no network, and the
+tripwire kills the run. For a write-capable job es-ee4de5 accepts the kernel-bound CLI shell under `picp_implementer`
+as an **equal bound on effect** to the picp-served shell: with a dead hook the one unasked command can only write
+non-excluded files of the job's own worktree; it cannot commit, push, touch `.git`, git config, hooks, an existing
+excluded path, anything outside the worktree, or the network, and the job is killed and fails by name (probes PA, PB,
+PC; LS-9o-P, LS-9o-R). That residual is RR1 ([C7a](#c7a-ship-job-groundwork-unwired)). Conditions: **C1** a
+`cp_revive` or continue of a codex implementer whose last stop was `lockdown`/`hook_failed` surfaces the uncommitted
+worktree changes by path before it relaunches, with a test (CX-7c, C7b); a `hook_failed` run's dirt is never
+committed silently. **C2** LS-9o-R and LS-7o-D are the proof: if either shows any effect beyond one in-worktree write
+(KC2), C7 stops and R1 flips to the picp-served shell (`--disable shell_tool` plus a picp `bash` dynamic tool run
+through `codex sandbox`), never a repair around it. **C3** worker-side git for a codex job passes
+`-c core.hooksPath=/dev/null -c core.fsmonitor=false` (`GIT_HOOKS_OFF`, `src/drivers/native-forge.ts`).
 
 **R2 (accepted on its LS-4o-V2 condition).** `gpt-6.2-sol` still offers `spawn_agent` (LS-4o-V); a healthy hook blocks
 it (E6) and the tripwire kills on its first `subAgentActivity` item. LS-4o-V2 shows the sub-agent's own commands run
@@ -1125,10 +1134,10 @@ otherwise.
 job's artifact or a tool under the home cannot be followed. Resume, revive and steer: see C2 below. A paused grant lets the running turn finish. R1 (a rule-approved command with a dead hook) and R2
 stay as accepted for read-only research only; F5 and R1 are re-decided before C7.
 
-**C7 carry-in list** (open; C5 added R3 on the main session's condition): R1, F5, Q2 (the freeze checkpoint's WIP commit
+**C7 carry-in list** (C5 added R3 on the main session's condition): R1, F5, Q2 (the freeze checkpoint's WIP commit
 for codex; `checkpoint` stays refused until then), Q3 (a fresh thread for a moved worktree; the resume stays refused by
 name until then) and R3 (MCP resource reads with a dead hook, C5 below). Each is re-decided before any write-capable
-codex job.
+codex job: R1, F5 and R3 in [C7a](#c7a-ship-job-groundwork-unwired); Q2 and Q3 are built in C7b.
 
 Kill-criteria verdicts (CI: `tests/e2e/codex-worker.test.ts` and `tests/e2e/codex-worker-spike.test.ts` on the fake;
 real CLI: `tests/e2e/codex-worker-live-smoke.test.ts` under `CP_LIVE_TESTS=1`):
@@ -1314,13 +1323,13 @@ route to pi; a live codex job still tears down), remove the server from `mcp.jso
 
 | KC | Criterion | CI (fake) | Real CLI |
 |---|---|---|---|
-| 1 | a forbidden action executes | held: CX-5a (Bash `gh`, `-R`), CX-5b (hidden tool) | not run in C5 (LS-7o-M not added) |
-| 2 | a dead hook lets a tool have an effect | held: CX-5a job B (`gh_read`), CX-5c (MCP tools declined, no server call); R3 is the named residual | M7, M8 (cp-wh89 probes) |
+| 1 | a forbidden action executes | held: CX-5a (Bash `gh`, `-R`), CX-5b (hidden tool) | held (LS-7o-M, added in C7a) |
+| 2 | a dead hook lets a tool have an effect | held: CX-5a job B (`gh_read`), CX-5c (MCP tools declined, no server call); R3 is the named residual | held (LS-7o-D, added in C7a: no tool call reached the server; the resource read ran, R3) |
 | 5 | a process survives teardown | held: CX-5b (every started scope killed or collected) | M2 (cp-wh89 probes: the server is gone after the exit) |
 | 6 | an extra loaded surface is not refused | held: CX-5f (a stray thread server), CX-0e unchanged | unchanged |
 
 Cases: `tests/e2e/codex-worker-tools.test.ts` (CX-5a…5i, CX-5i the `ops` fallback). The opt-in live cases LS-7o-M and
-LS-7o-D were not added in C5; the real-CLI verdicts above rest on the cp-wh89 offline probes.
+LS-7o-D were added and run in C7a (see there); before that the real-CLI verdicts rested on the cp-wh89 offline probes.
 
 ### C6 reviewer
 
@@ -1392,3 +1401,97 @@ fallback record omits `requested_driver`. C8 owns Settings.
 
 Cases: `tests/e2e/codex-reviewer.test.ts` (CX-6a…6g). The opt-in live case LS-8o-R was not added in C6; the real-CLI
 verdicts above rest on the cp-6sq6 offline probes.
+
+### C7a ship-job groundwork (unwired)
+
+C7a is steps 1-3 of the C7 plan (cp-95u6, approved es-3e598d): the pieces a Codex implementer needs, with **no
+selection reaching them**. `codex_ship` still selects nothing, `codexClassOf` and `codex-worker.ts` are unchanged, and no
+`data/*.json` or `defaults/routing*.json` was edited. C7b (steps 4-5: selection, spawn env, worker, checkpoint, moved
+thread, `tests/e2e/codex-ship.test.ts`) follows only after C7a merges.
+
+**Profile `picp_implementer`** (`codexPermissionProfile` with `role: "implementer"`, `codexRunRoots`): `/` deny,
+`:minimal` read, the worktree **write**; `<worktree>/.git`, the git common dir, the codex release dir, skill dirs,
+operator read roots and each excluded path that exists at the run's start read; the artifact dir and scratch tmp write;
+no network. Excluded paths (`codexExcludedRoots`): a plain needle joined to the worktree, a glob through `globSync`
+(at most 200 hits, `.git` and `node_modules` not walked), each kept only when its realpath stays inside; a missing path
+is never listed (the sandbox would create it, PA). A file entry holds (LS-9o-P: `.env.local`). Read roots
+(`CP_CODEX_READ_ROOTS`, wired in C7b) are vetted as skill dirs are: never a home, the Codex home, the agent dir or the
+CP home.
+
+**Lockdown.** `activePermissionProfile.id` must equal the id picp passed (one of the two). The thread read-back does
+not list the writable worktree (the cwd) as a writable root (PA), so an implementer run also reads its profile back
+from `config/read`: `permissions.picp_implementer.filesystem` must equal the passed map entry by entry (the CLI's
+`glob_scan_max_depth: null` ignored), `extends` must be unset, `default_permissions` must be the id, and every entry
+and the default must come from `sessionFlags`. Any miss refuses before any turn.
+
+**Git writes are picp tools (U2).** The Codex sandbox keeps `.git` read-only even under a write root (PC), so the shell
+reads git and cannot write it. The implementer's thread declares `report_result` (its description names `head_sha`),
+`gh_read`, `git_commit {message}`, `git_merge {ref}` (only `origin/<job>` or `origin/<base>`), `git_fetch` and, for
+delivery `pr`, `git_push`, `pr_create`, `pr_edit`. They run in the worker process after the hook's ticket and the guard
+chain, through `src/drivers/native-forge.ts` (SDK-free; the Claude forge tools now call the same bodies, texts and argv
+unchanged). Every git call of a codex job starts with `GIT_HOOKS_OFF`; commit and merge get only PATH, the locale and
+the commit identity (no credential, no HOME). `git_commit` runs `git add -A`, then the staged-path gate: a staged path
+that differs from `HEAD` (and from `MERGE_HEAD` during a merge) and matches an `exclude_paths` needle refuses the
+commit, unstages, and names up to five paths; it is the complete check for globs and for paths created later.
+`codexGitGuard` refuses a git write in the implementer's shell at the hook, naming `git_commit`, `git_merge` or
+`git show HEAD:<path> > <path>` (lexical; the kernel is the bound).
+
+**F5 and the C3 finding: no patch is ever accepted.** Every `fileChange` approval stays `decline` for every role, and
+the tripwire still kills on any end but `declined`. An implementer's `apply_patch` is refused at the hook naming the
+remedy: write files with the shell (a quoted heredoc, `sed -i`, a script).
+
+**R3: no MCP server for the implementer** (as for the reviewer), so R3 does not arise for a write-capable job. R3 stays
+accepted for read-only research only.
+
+**Probes** (cp-95u6, codex-cli 0.170.0, picp's `spawnCodexRpc` and profile, the mock model, throwaway homes, no login):
+
+| # | Setup | Observed |
+|---|---|---|
+| PA | worktree write; `.git`, an excluded dir, the common dir read; healthy hook, approvals accepted | worktree writes work; excluded writes and removals "Read-only file system"; outside absent; `git status`/`diff`/`log` work; `git add`/`commit` fail at `index.lock`; hooks, git config and `.git` read-only |
+| PA read-back | `thread/start`, `config/read` | `writableRoots` omits the worktree; `config/read` returns every entry and mode from `sessionFlags` |
+| PB | PA's profile, hook killed, approvals declined, allow rules for `touch` and `git` | `touch r1.txt` ran unasked (R1); an excluded `touch` absent; `git config` and `git commit` asked and were declined; `git status` exactly `?? r1.txt` |
+| PC | the common dir as a write root | `git add` still fails at `index.lock`: no commit from the shell (U2) |
+| PS | `codex sandbox` with the same flags | the same profile applies to a command picp starts itself |
+| PF | `codex features list` | no feature turns `apply_patch` off |
+
+**Live verdicts** (`tests/e2e/codex-worker-live-smoke.test.ts` under `CP_LIVE_TESTS=1`, all offline: the real CLI,
+the loopback mock model, a throwaway Codex home, zero tokens; run once on 2026-11-19, codex-cli 0.170.0):
+
+| Case | Result |
+|---|---|
+| LS-7o-M | through `runCodexSpike` with `probe` (hidden `delete_*`) and `probe-x`: lockdown `ok`, no bypass, `completed`; one `call probe read_thing`; the hidden call a hook denial; tickets 2 by id, 1 by payload (the elicitation). **U3:** the CLI spells `probe-x` as `mcp__probe_x__<tool>`; picp's route does not recognise it and refuses it at the hook (fails closed, never ungated) |
+| LS-7o-D | killed hook, elicitations declined: 3 failed hooks, 2 elicitations, both tool calls `failed`, **no `call` reached the server (KC2 held)**; **R3:** the `read_mcp_resource` call ran (`resources/read` reached the server), as cp-wh89 measured; accepted for research only, and no implementer gets an MCP server |
+| LS-9o-P | `picp_implementer`, healthy hook, all 13 approvals accepted: lockdown `ok` with the `config/read` read-back; worktree writes work; an excluded dir and an excluded file stay unchanged; outside absent; `git status` runs; `git add`/`commit` "Read-only file system"; HEAD, index, hooks, git config and `.git` unchanged |
+| LS-9o-R | R1 with a killed hook, allow rules for `touch` and `git`, approvals declined: `touch` ran with 0 approvals, `git config` and `git commit` asked and were declined; `git status` exactly `?? r1.txt`; no excluded file, no config key, HEAD unchanged. **C2 did not fire** |
+| LS-9o-W | `runCodexSpike` as an implementer: shell write, `git_commit`, report with `head_sha`: committed, lockdown `ok`, no bypass, tickets 3 by id; durations about 90 ms (shell), 50 ms (`git_commit`), 10 ms (`report_result`) |
+
+**Residual risks** (es-ee4de5 accepted RR1 under conditions C1-C3 above):
+
+- **RR1** (R1). With a dead hook and a user allow rule, one unasked command can write files of the job's own worktree
+  before the kill (PB, LS-9o-R). It is uncommitted and stays there; recovery: the failed job names `hook_failed`;
+  condition C1 makes a revive surface it by path first; or tear down.
+- **RR2.** Worker-side `git add`, `commit` and `merge` run a filter or merge driver the repository's own git config
+  names; a config pointing one at a worktree script would run model-written code outside the sandbox, in a
+  credential-free env. Hooks and fsmonitor are off (C3); the model cannot write git config (PA).
+- **RR3.** The project's commit hooks do not run for a codex job; CI is the check.
+- **RR4.** No network and a narrow read set: many repositories cannot install or test. `CP_CODEX_READ_ROOTS` widens
+  reads; whatever it names is readable by the model.
+- **RR5.** No `apply_patch`: more turns and tokens per edit; measured once by LS-9 (C7b), not soaked.
+- **RR6.** Permission profiles, `hooks.state` trust, dynamic tools and the `.git` protection are experimental or
+  undocumented; a CLI update can change them. The lockdown and LS-9o-P fail closed; recovery is the switch.
+- **RR7.** CI proves picp's wiring on a lexical fake (`tests/fixtures/fake-codex.ts` now answers a write under no
+  `write` entry and every git write "Read-only file system"); every kernel claim rests on the opt-in real-CLI cases.
+- **RR8.** The git common dir is readable (a remote URL with embedded credentials would be too), as for planners.
+
+**Known limits.** Commit and merge run with no HOME, so the operator's global git config (an `excludesFile`, signing)
+does not apply to them. Excluded globs are listed for the kernel up to 200 hits and not under `node_modules`; the
+`git_commit` gate covers the rest. A server name with `-` is unusable on Codex (U3 above).
+
+**Shipped off (C7a).** No persisted shape, contract schema or golden changed, and no selection reaches the implementer
+role, so with every switch off nothing writes a codex value (T-row and CX-off-2 unchanged). Recovery: revert the PR.
+
+| KC | Criterion | CI (fake) | Real CLI |
+|---|---|---|---|
+| 1 | a forbidden action executes | unchanged (CX-1c, CX-1m); C7b adds CX-7b, CX-7d | held (LS-9o-P, LS-7o-M) |
+| 2 | a dead hook lets a tool have an effect outside the implementer's write set, or a picp tool run | unchanged (CX-1g, CX-1h); C7b adds CX-7c | held (LS-9o-R: one worktree file; LS-7o-D: no MCP tool call; R3 recorded) |
+| 6 | a differing profile or an extra surface is not refused | unchanged (CX-1d); C7b adds CX-7k | held (LS-9o-P read-back) |
