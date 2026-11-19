@@ -13,7 +13,6 @@ import { FleetStore } from "../fleet.ts";
 import { projectDenial } from "../mandate-defaults.ts";
 import { rebuildStatus } from "../run-artifacts.ts";
 import type { NativeDriver } from "../worker-driver.ts";
-import { nativeAvailability } from "../native-availability.ts";
 import { NativeDriverError } from "./claude.ts";
 import { nativeDriverSpec } from "./registry.ts";
 
@@ -198,7 +197,7 @@ export async function assertNativeResume(input: { home: string; jobId: string; w
 	if (refusal) throw new NativeDriverError(`refused: ${input.jobId} cannot run on the ${spec.label} driver: ${refusal.why}`, refusal.category);
 	if (!spec.availability) return;
 	// S2: a rejected window refuses the resume; queued sends stay queued and never move to pi.
-	const window = (await nativeAvailability(input.home, record.worker.model, { windowsOnly: true, ...(input.env ? { env: input.env } : {}) })).blocked;
+	const window = (await spec.availability(input.home, record.worker.model, { windowsOnly: true, ...(input.env ? { env: input.env } : {}) })).blocked;
 	if (window) refuse(`the subscription window is spent (${window.why})`);
 }
 

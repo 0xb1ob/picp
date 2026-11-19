@@ -462,3 +462,32 @@ test("CX-2s: control.steer acks on the live turn, returns the CLI's -32600 refus
 	assert.equal(refusedControl.steer, undefined);
 	assertClean(fx, result);
 });
+
+test("CX-3f: the steer handle is gone after an aborted, a SIGTERMed and a hook-killed turn, and a captured one answers no live turn", { timeout: 180_000 }, async (t) => {
+	// Carry-in 2 (#854): the handle and the run's ready gate are cleared in a finally on every reachable turn end.
+	const ends: Array<[string, FakeCodexScript, (fx: CodexFixture, control: CodexRunControl, abort: AbortController) => Promise<void>, string, boolean]> = [
+		["abort", { turns: [[{ kind: "hold", marker: "held" }]] }, async (_fx, _c, abort) => abort.abort(), "interrupted", false],
+		["SIGTERM", { turns: [[{ kind: "hold", marker: "held" }]] }, async (fx) => {
+			process.kill(fakeSpawns(fx.stateDir).filter((each) => each.argv[0] === "app-server").at(-1)?.pid as number, "SIGTERM");
+		}, "stopped", false],
+		["hook kill", { turns: [[{ kind: "hold", marker: "held" }, { kind: "shell", command: "echo after-steer", hook: "kill" }]] }, async (_fx, control) => {
+			assert.equal((await control.steer!("Wake the hold.")).steered, true);
+		}, "stopped", true],
+	];
+	for (const [what, script, end, outcome, hookFailed] of ends) {
+		const fx = fixture(t, script);
+		const control: CodexRunControl = {};
+		const abort = new AbortController();
+		const running = fx.run({ control, signal: abort.signal });
+		await until(() => existsSync(join(fx.stateDir, "held")) && control.steer !== undefined, `${what}: the held turn`);
+		const captured = control.steer!;
+		await end(fx, control, abort);
+		const result = await running;
+		assert.deepEqual([result.outcome, result.hookFailed], [outcome, hookFailed], `${what}: ${result.error}`);
+		assert.equal(control.steer, undefined, `${what}: no steer outlives its turn`);
+		assert.deepEqual(await captured("Too late."), { steered: false, why: "no live turn" }, what);
+		assert.ok(!fakePrompts(fx.stateDir).some((each) => each.text === "Too late."), `${what}: the late steer never reached the CLI`);
+		assert.deepEqual(fakeExecuted(fx.stateDir), [], what);
+		assertClean(fx, result);
+	}
+});

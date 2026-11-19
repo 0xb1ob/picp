@@ -1,4 +1,4 @@
-/** The chat footer's separate Claude item (native routing S3): read-only, never merged into gateway quota. */
+/** The chat footer's separate Claude (S3) and Codex (C3) items: read-only, never merged into gateway quota. */
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { WorkspaceStatusResponse } from "./api-types.ts";
@@ -11,6 +11,7 @@ export const QUOTA_AUTH_CODES = ["authentication_failed", "oauth_org_not_allowed
 export const QUOTA_STATUSES = ["allowed", "allowed_warning", "rejected"] as const;
 
 type ClaudeItem = NonNullable<WorkspaceStatusResponse["claude"]>;
+type CodexItem = NonNullable<WorkspaceStatusResponse["codex"]>;
 type Entry = { observed_at: number; status?: string; resets_at?: number; code?: string };
 const iso = (ms: number): string => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 const readJson = (file: string): Json | undefined => {
@@ -22,10 +23,10 @@ const only = (value: Json, keys: readonly string[]) => Object.keys(value).every(
 const SWITCHES = ["claude_research", "claude_ship", "claude_review"] as const;
 const CODEX_SWITCHES = ["codex_research", "codex_ship", "codex_review"] as const;
 const count = (value: unknown) => value === undefined || (Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 4);
-const nativeSwitchOn = (config: Json): boolean => only(config, [...SWITCHES, "max_concurrent", ...CODEX_SWITCHES, "codex_max_concurrent"])
+const validSwitches = (config: Json): boolean => only(config, [...SWITCHES, "max_concurrent", ...CODEX_SWITCHES, "codex_max_concurrent"])
 	&& [...SWITCHES, ...CODEX_SWITCHES].every((key) => config[key] === undefined || typeof config[key] === "boolean")
-	&& count(config.max_concurrent) && count(config.codex_max_concurrent)
-	&& SWITCHES.some((key) => config[key] === true);
+	&& count(config.max_concurrent) && count(config.codex_max_concurrent);
+const nativeSwitchOn = (config: Json): boolean => validSwitches(config) && SWITCHES.some((key) => config[key] === true);
 const at = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined);
 const version = (value: unknown) => value === undefined || (typeof value === "string" && value.length >= 1 && value.length <= 40);
 /** S2's entry schemas (no extra keys): a window entry, or a sticky auth/lockdown entry when `codes` is set. */
@@ -84,4 +85,33 @@ export function nativeQuotaLine(stateDir: string, now: number): ClaudeItem | und
 	}
 	if (rejected.length) return { state: "unknown", label: "Claude unknown", detail: "a rejected window reset or was voided; unknown until the next native run" };
 	return { state: "ok", label: "Claude ok", detail: "no spent window, sign-in or lockdown block recorded by native runs" };
+}
+
+/** C3's Codex snapshot as `CodexSnapshotSchema` accepts it (`native-availability.ts`), or undefined (unknown). */
+function parseCodex(raw: Json | undefined): { limit?: { reached: string; observed_at: number; resets_at?: number } } | undefined {
+	if (!raw || raw.version !== 1 || !only(raw, ["version", "limit"])) return undefined;
+	if (raw.limit === undefined) return {};
+	const l = obj(raw.limit);
+	if (!l || !only(l, ["reached", "observed_at", "resets_at"]) || typeof l.reached !== "string" || l.reached.length < 1 || l.reached.length > 64) return undefined;
+	if (at(l.observed_at) === undefined || (l.resets_at !== undefined && at(l.resets_at) === undefined)) return undefined;
+	return { limit: { reached: l.reached, observed_at: at(l.observed_at)!, ...(l.resets_at === undefined ? {} : { resets_at: at(l.resets_at)! }) } };
+}
+
+/** The separate Codex item while `codex_research` is on: limited, unknown (no snapshot, a passed or voided limit), ok. */
+export function codexQuotaLine(stateDir: string, now: number): CodexItem | undefined {
+	const switchFile = join(dirname(stateDir), "data", "native.json");
+	const config = readJson(switchFile);
+	if (!config || !validSwitches(config) || config.codex_research !== true) return undefined;
+	const snapshot = parseCodex(readJson(join(stateDir, "native-availability-codex.json")));
+	if (!snapshot) return { state: "unknown", label: "Codex unknown", detail: "no readable native-availability-codex snapshot yet" };
+	const limit = snapshot.limit;
+	if (!limit) return { state: "ok", label: "Codex ok", detail: "no usage limit recorded by codex runs" };
+	if (limit.resets_at !== undefined) {
+		return now < limit.resets_at ? { state: "limited", label: `Codex limited until ${iso(limit.resets_at).slice(11, 16)}Z`, detail: `usage limit reached until ${iso(limit.resets_at)}` }
+			: { state: "unknown", label: "Codex unknown", detail: `usage limit unknown since its reset ${iso(limit.resets_at)}` };
+	}
+	let switched: number | undefined;
+	try { switched = statSync(switchFile).mtimeMs; } catch { switched = undefined; }
+	if (switched !== undefined && switched > limit.observed_at) return { state: "unknown", label: "Codex unknown", detail: "a usage limit was voided by the switch; unknown until the next codex run" };
+	return { state: "limited", label: "Codex limited (reset unknown)", detail: `usage limit reached, reset unknown (observed ${iso(limit.observed_at)})` };
 }

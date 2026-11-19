@@ -1,4 +1,5 @@
 /** One spec per native driver (C1b): the route, the spawn guard, the respawn check and the stop wording read it. */
+import { codexAvailability, type NativeAvailability, nativeAvailability } from "../native-availability.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
 import type { NativeDriver } from "../worker-driver.ts";
 import {
@@ -18,8 +19,8 @@ export interface NativeDriverSpec {
 	assertEffort(level: string | undefined): void;
 	selectionRefusal(input: NativeSelection): Promise<{ category: NativeRefusal; why: string } | undefined>;
 	maxConcurrent(home: string): number;
-	/** Whether S2's Claude subscription snapshot can block a candidate model. */
-	availability: boolean;
+	/** The driver's subscription snapshot (S2 Claude, C3 Codex), read before a candidate is selected or resumed. */
+	availability?: (home: string, model: string, options?: { now?: number; env?: NodeJS.ProcessEnv; windowsOnly?: boolean }) => Promise<NativeAvailability>;
 	/** Whether a busy worker takes a mid-turn steer (Codex `turn/steer`, C2b). */
 	steers: boolean;
 	/** What the CLI resumes: a Claude "session", a Codex "thread". */
@@ -30,13 +31,15 @@ export interface NativeDriverSpec {
 // Arrow wrappers: the specs are read lazily, so an import cycle through doctor.ts never sees an uninitialised binding.
 export const NATIVE_DRIVER_SPECS: Readonly<Record<NativeDriver, NativeDriverSpec>> = {
 	claude: {
-		label: "Claude CLI", noun: "native", availability: true, steers: false, session: "session",
+		label: "Claude CLI", noun: "native", steers: false, session: "session",
+		availability: (home, model, options) => nativeAvailability(home, model, options),
 		isModel: (model) => isNativeModel(model), modelId: (model) => nativeModelId(model), assertEffort: (level) => assertNativeEffort(level),
 		selectionRefusal: (input) => nativeSelectionRefusal(input), maxConcurrent: (home) => nativeMaxConcurrent(home),
 		spawnOptions: (model, env, systemPrompt, options) => nativeSpawnOptions(model, env, systemPrompt, options),
 	},
 	codex: {
-		label: "Codex CLI", noun: "codex", availability: false, steers: true, session: "thread",
+		label: "Codex CLI", noun: "codex", steers: true, session: "thread",
+		availability: (home, model, options) => codexAvailability(home, model, options),
 		isModel: (model) => isCodexModel(model), modelId: (model) => codexModelId(model), assertEffort: (level) => assertCodexEffort(level),
 		selectionRefusal: (input) => codexSelectionRefusal(input), maxConcurrent: (home) => codexMaxConcurrent(home),
 		spawnOptions: (model, env, systemPrompt) => codexSpawnOptions(model, env, systemPrompt),

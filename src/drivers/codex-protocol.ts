@@ -31,6 +31,7 @@ export const CODEX_METHODS = {
 	tokenUsageUpdated: "thread/tokenUsage/updated",
 	hookStarted: "hook/started",
 	hookCompleted: "hook/completed",
+	rateLimitsUpdated: "account/rateLimits/updated",
 	error: "error",
 } as const;
 
@@ -163,5 +164,14 @@ export interface ThreadStartedNotification { thread: { id: string } }
 export interface TurnCompletedNotification { threadId: string; turn: Turn }
 export interface ItemNotification { threadId: string; turnId: string; item: ThreadItem }
 export interface TokenUsageUpdatedNotification { threadId: string; turnId: string; tokenUsage: ThreadTokenUsage }
+/** `resetsAt` is epoch seconds. A sparse update: a null or omitted field never clears an earlier value. */
+export interface RateLimitWindow { usedPercent: number; resetsAt?: number | null; windowDurationMins?: number | null }
+export interface RateLimitSnapshot {
+	limitId?: string | null;
+	rateLimitReachedType?: string | null;
+	primary?: RateLimitWindow | null;
+	secondary?: RateLimitWindow | null;
+}
+export interface AccountRateLimitsUpdatedNotification { rateLimits: RateLimitSnapshot }
 export type HookRunStatus = "running" | "completed" | "failed" | "blocked" | "stopped";
 export interface HookCompletedNotification { threadId: string; turnId?: string | null; run: { id: string; status: HookRunStatus; eventName: HookEventName } }

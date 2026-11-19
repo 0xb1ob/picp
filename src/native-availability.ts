@@ -1,7 +1,7 @@
 /**
- * Native routing S2: the home-local snapshot of passive Claude subscription evidence, kept apart from gateway quota.
- * Evidence, never authorization: it turns NEW native selection (and a native resume) away. Missing or corrupt reads
- * as unknown, never spent and never free. Contract: docs/native-drivers.md "Availability snapshot (S2)".
+ * Native routing S2 (Claude) and C3 (Codex): home-local snapshots of passive subscription evidence, one file per driver,
+ * kept apart from gateway quota. Evidence, never authorization: they turn NEW native selection (and a resume) away.
+ * Missing or corrupt reads as unknown. Contract: docs/native-drivers.md "Availability snapshot (S2)" and C3.
  */
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -153,4 +153,59 @@ export async function nativeAvailability(home: string, model: string, options: {
 		return { blocked: { category: "lockdown", why: `the CLI surface lockdown refused a run at ${iso(snapshot.lockdown.observed_at)}; fix the CLI, then turn the switch off and on` } };
 	}
 	return note ? { note } : {};
+}
+
+const LimitSchema = Type.Object({ reached: Type.String({ minLength: 1, maxLength: 64 }), observed_at: at, resets_at: Type.Optional(at) }, { additionalProperties: false });
+const CodexSnapshotSchema = Type.Object({ version: Type.Literal(1), limit: Type.Optional(LimitSchema) }, { additionalProperties: false });
+const CodexEventSchema = Type.Intersect([
+	Type.Object({ type: Type.Literal(OBSERVATION_EVENT), observed_at: at }),
+	Type.Union([
+		Type.Object({ kind: Type.Literal("limit"), reached: Type.String({ minLength: 1, maxLength: 64 }), resets_at: Type.Optional(at) }),
+		Type.Object({ kind: Type.Literal("turn_ok") }),
+	]),
+]);
+interface CodexLimitEntry { reached: string; observed_at: number; resets_at?: number }
+export interface CodexAvailabilitySnapshot { version: 1; limit?: CodexLimitEntry }
+
+export const codexAvailabilityFile = (home: string): string => join(home, LAYOUT.state, "native-availability-codex.json");
+
+/** The Codex snapshot, or undefined when it is missing or corrupt (unknown). */
+export function readCodexAvailability(home: string): CodexAvailabilitySnapshot | undefined {
+	try {
+		const raw: unknown = JSON.parse(readFileSync(codexAvailabilityFile(home), "utf8"));
+		return Value.Check(CodexSnapshotSchema, raw) ? (raw as CodexAvailabilitySnapshot) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Applies one codex worker's `native_observation`; false when invalid or a limit older than the stored one. */
+export function recordCodexObservation(home: string, input: unknown): boolean {
+	if (!Value.Check(CodexEventSchema, input)) return false;
+	const event = input as { observed_at: number } & ({ kind: "limit"; reached: string; resets_at?: number } | { kind: "turn_ok" });
+	const snapshot: CodexAvailabilitySnapshot = readCodexAvailability(home) ?? { version: 1 };
+	if (event.kind === "limit") {
+		if ((snapshot.limit?.observed_at ?? -1) > event.observed_at) return false;
+		snapshot.limit = { reached: event.reached, observed_at: event.observed_at, ...(event.resets_at === undefined ? {} : { resets_at: event.resets_at }) };
+	} else {
+		// A completed turn clears a limit observed before it whose reset is unknown or has passed.
+		const limit = snapshot.limit;
+		if (limit && limit.observed_at <= event.observed_at && (limit.resets_at === undefined || limit.resets_at <= event.observed_at)) delete snapshot.limit;
+	}
+	atomicWriteJson(codexAvailabilityFile(home), snapshot);
+	return true;
+}
+
+/** What the Codex snapshot says about a new codex run at `now`; a no-reset limit holds until the switch file is rewritten. */
+export async function codexAvailability(home: string, _model: string, options: { now?: number } = {}): Promise<NativeAvailability> {
+	const limit = readCodexAvailability(home)?.limit;
+	if (!limit) return {};
+	const now = options.now ?? Date.now();
+	if (limit.resets_at !== undefined) {
+		return now < limit.resets_at ? { blocked: { category: "window", why: `usage limit reached until ${iso(limit.resets_at)}` } }
+			: { note: `usage limit unknown since its reset ${iso(limit.resets_at)}` };
+	}
+	const switched = mtime(nativeConfigFile(home));
+	if (switched !== undefined && switched > limit.observed_at) return {};
+	return { blocked: { category: "window", why: `usage limit reached, reset unknown (observed ${iso(limit.observed_at)}); clears on a completed codex turn or switch off then on` } };
 }

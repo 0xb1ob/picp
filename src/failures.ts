@@ -228,9 +228,16 @@ function scan(events: readonly RunEvent[]): Scan {
 /** A native run's named stop (N4e) as its failure: never a nudge, worktree and session kept for a revive. */
 function nativeStopClass(payload: Record<string, unknown>): Classification | undefined {
 	const kept = "the worktree and session are kept";
+	const at = typeof payload.resets_at === "number" ? new Date(payload.resets_at).toISOString() : undefined;
+	if (payload.driver === "codex" && payload.stop === "window") {
+		return {
+			class: "provider_limit",
+			message: `native run stopped: the Codex usage limit is reached (${at ? `resets ${at}` : "reset unknown"}); the worktree and thread are kept, and cp_revive after the reset resumes the same thread`,
+			evidence: ["native_run stop=window", "cp:process_exit"],
+		};
+	}
 	if (payload.stop === "window") {
 		const window = typeof payload.window === "string" ? payload.window : "unspecified";
-		const at = typeof payload.resets_at === "number" ? new Date(payload.resets_at).toISOString() : undefined;
 		return {
 			class: "provider_limit",
 			message: `native run stopped: the Claude subscription window ${window} is spent (${at ? `resets ${at}` : "reset unknown"}); ${kept}, and cp_revive after the reset resumes the same session`,
