@@ -669,3 +669,36 @@ test("LS-5 (live, one turn): the worker entry on the operator's login runs pwd a
 	assert.equal(second.deleted, false, "a second delete of the same thread is named, not silent");
 	assert.ok(second.error);
 });
+
+test("LS-6o-S (C2b, offline): turn/steer while a model request is in flight is acked on the live turn and reaches the model", { skip, timeout: 200_000 }, async (t) => {
+	// U1: when the real CLI hands a steer to the model. The mock holds its first answer 3 s; the steer lands inside it.
+	// Synthetic key, throwaway Codex home, mock model: zero tokens. The thread is deleted at the end.
+	const s = scratch(t);
+	const codexHome = join(s.root, "codex-home");
+	mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+	execFileSync(CODEX as string, ["login", "--with-api-key"], { input: "picp-synthetic-not-a-key\n", env: { PATH: process.env.PATH ?? "", HOME: join(s.root, "home"), CODEX_HOME: codexHome }, stdio: ["pipe", "ignore", "ignore"] });
+	const steerText = `ls6o-steer-${process.pid}`;
+	const provider = await startCodexMockProvider([
+		{ calls: [{ name: "exec_command", arguments: { cmd: "cat README.md" } }], delayMs: 3_000 },
+		{ message: "done" },
+	]);
+	try {
+		writeFileSync(join(codexHome, "config.toml"), `model_provider = "mock"\n[model_providers.mock]\nname = "mock"\nbase_url = ${JSON.stringify(provider.url)}\nwire_api = "responses"\nrequires_openai_auth = true\n`);
+		writeFileSync(join(s.worktree, "README.md"), "live smoke readme\n");
+		const control: CodexSpikeOptions["control"] = {};
+		const running = s.run("go", { codexHome, model: "gpt-picp-mock", deleteThread: true, control });
+		assert.ok(await until(() => provider.requests.length >= 1 && control.steer !== undefined, 60_000), "the first model request and a live turn");
+		const steered = await control.steer!(`Steer: ${steerText}`);
+		const result = await running;
+		t.diagnostic(`${summary(result)} steer ${JSON.stringify(steered)} requests ${provider.requests.length}`);
+		assert.equal(steered.steered, true, JSON.stringify(steered));
+		assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal);
+		assert.equal(result.bypass, undefined, `the run was killed as a bypass: ${result.error}`);
+		const later = provider.requests.slice(1).some((request) => JSON.stringify(request).includes(steerText));
+		t.diagnostic(`U1: the steer text ${later ? "reached" : "did not reach"} a later model request`);
+		assert.ok(later, `the CLI acked the steer but sent it to no later request: ${provider.requests.length} requests`);
+		assert.equal(control.steer, undefined);
+	} finally {
+		await provider.close();
+	}
+});

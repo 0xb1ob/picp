@@ -248,6 +248,8 @@ export async function runCodexSpike(options: CodexSpikeOptions): Promise<CodexSp
 		if (!relative(resolve(options.job.worktree), resolve(scratch)).startsWith("..")) throw new CodexSpikeError("scratch dir is inside the worktree");
 		const dirs = { home: join(scratch, "home"), tmp: join(scratch, "tmp") };
 		for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+		// A killed run leaves its socket in a kept scratch dir; the run that resumes it would not listen (EADDRINUSE).
+		rmSync(join(scratch, "hook.sock"), { force: true });
 		const codexHome = options.codexHome ?? defaultCodexHome();
 		const login = await codexLoginRefusal(codex.path, { codexHome, home: dirs.home, pathEnv: hostEnv.PATH ?? "" });
 		if (login !== undefined) throw Object.assign(new CodexSpikeError(login), { cli: "auth" as const });

@@ -1,7 +1,7 @@
 /**
- * The Codex CLI research worker process (C1b; follow-ups, revive and steer C2). It speaks the pi RPC lines dispatch
- * reads (`get_state`, `prompt`, `follow_up`, `steer`, then events). Each turn is one `runCodexSpike` with every C1a gate
- * on: the first starts the thread, every later one resumes it. A clean or reported turn settles idle; a stop exits 1.
+ * The Codex CLI research worker (C1b; follow-ups, revive and steer C2): the pi RPC lines dispatch reads (`get_state`,
+ * `prompt`, `follow_up`, `steer`). Each turn is one `runCodexSpike` with every C1a gate on: the first starts the
+ * thread, every later one resumes it. A clean or reported turn settles idle; a named stop or an unclean end exits 1.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";

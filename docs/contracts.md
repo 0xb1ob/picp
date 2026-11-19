@@ -9098,7 +9098,8 @@ before any lease, never a silent fallback), and
 the row's effort (`off` disables thinking, `low`…`max` is the SDK `effort`, `minimal` refuses, absent is the CLI
 default). `[model, ...fallbacks]` stays the pi lane, resolved by `resolveWithCapacity` unchanged when the job falls
 back. `cp:routing_resolved`, the routing decision and the fleet's `routing` record carry `requested_driver`, `driver`
-and a bounded `driver_reason` (`<code>: <why>`, ≤200 chars) only when claude was requested or chosen; absent is pi.
+and a bounded `driver_reason` (`<code>: <why>`, ≤200 chars) only when a native driver was requested or chosen; while
+`codex_research` is off a codex row's fallback omits `requested_driver`; absent is pi.
 Precedence, eligibility and the lock are in [`docs/native-drivers.md`](native-drivers.md#routing-level-driver-s1).
 
 **Fallback is capability-gated and confined to the picked source.** A rubric

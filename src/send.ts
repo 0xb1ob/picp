@@ -8,7 +8,7 @@
  *  | `prompt`    | the worker is idle        | `delivered` (pi started it, or a handler consumed it) |
  *  | `steer`     | mid-run, change course    | `queued` (or `delivered` if an input handler consumed it) |
  *  | `follow_up` | mid-run, queue for after  | `queued` (or `delivered` if an input handler consumed it) |
- *  | `steer` (Codex CLI) | mid-turn, report slot open | `delivered` with disposition `steered` on the CLI's ack, else `queued` |
+ *  | `steer` (Codex) | mid-turn, slot open | `delivered` (disposition `steered`) on the CLI's ack, else `queued` |
  *
  * Receipts come from pi's per-input `disposition`, never from the busy flag.
  *

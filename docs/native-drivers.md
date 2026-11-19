@@ -1051,7 +1051,7 @@ anything; the ship and review keys have no class behind them yet. Settings never
 | `codex login status` not 0 (HOME `/nonexistent`, only `CODEX_HOME` is read) | `auth` |
 
 An explicit `driver: "codex"` is strict and refuses by name; a row's `codex` is a preference that falls back to pi
-with `requested_driver: "codex"` and a `driver_reason`. A started job keeps its driver: `pi` or `claude` on a codex job
+with a `driver_reason`, and with `requested_driver: "codex"` only while `codex_research` is on (CX-off-2). A started job keeps its driver: `pi` or `claude` on a codex job
 refuses naming the lock. A codex row's model must match `openai/gpt-…` (checked in the resolver and in a Settings rubric
 write; programme D1: never a vendor check); its effort is `low`…`max` (`off` and `minimal` refuse). The home's `allow`
 and `deny_by_role` still apply. Per-driver specs live in `src/drivers/registry.ts`.
@@ -1061,10 +1061,10 @@ and `deny_by_role` still apply. Per-driver specs live in `src/drivers/registry.t
 | Step | What happens |
 |---|---|
 | spawn | `codexSpawnOptions`: the role contract plus the Codex addendum in `<run dir>/codex-system-prompt.md` (0600); env `CP_CODEX_MODEL`, `CP_CODEX_HOME`, `CP_CODEX_MEMORY_MAX` when the parent has `CP_WORKER_MEMORY_MAX` |
-| turn | one `runCodexSpike` turn, 24 h run timeout (the parent's bounds decide); `<run dir>/native-codex` (0600) records `scratch_dir`, `cwd`, `codex_home`, then `thread_id` at the first `turn/started` |
+| turn | one `runCodexSpike` run per turn, 24 h run timeout (the parent's bounds decide); `<run dir>/native-codex` (0600) records `scratch_dir`, `cwd`, `codex_home`, `totals` (C2), then `thread_id` at the first `turn/started`; every later turn resumes that thread (C2 below) |
 | events | `tool_execution_start`/`_end` per call (blocked calls included), `turn_end` per agent message, unlogged `message_update` per token update, one `message_end` at cost 0 with `cost_unknown`, one `native_run` (`driver: "codex"`) |
 | Log | `state/sessions/native/<job>.jsonl` (0600): prompt, agent messages, reasoning summaries, each tool call and result |
-| end | a reported turn settles and waits for stdin end; an unreported or stopped turn exits 1 and fails on its observed exit |
+| end | a reported turn, or a clean `completed` one (C2), settles idle for settle.ts's nudge; a named stop or an unclean end exits 1 and fails on its observed exit |
 | teardown | after the observed exit (or a gone pid): `native_thread_deleted` through one contained bare app-server (`codexBareArgs`, web search off, no hook; D5), then `native_scratch_removed`; a delete failure is named and never blocks the lease |
 
 Named stops: a lockdown refusal, a dead hook, a bypass or a containment, CLI or release-dir refusal is `native_run.stop:
@@ -1097,11 +1097,7 @@ never accepted, Q1). An `inProgress` item is an announcement and no longer kills
 **F5 and F4 are inputs to the C7 re-decision:** the kernel profile does not confine an accepted patch, so C7 must not
 accept one without its own bound.
 
-**Refused until C2.** `cp_send`, `cp_revive` (so bounded recovery and quota continuation) and a resume admission
-refuse a codex job first: "<job> runs on the Codex CLI driver: <door> is refused (follow-ups, steers, revives and
-checkpoints land with C2; tear it down with cp_teardown and dispatch again). Nothing was sent or spawned." The worker
-refuses a second prompt, `follow_up`, `steer` and `checkpoint` the same way, so a settle correction is refused and
-recorded.
+**Follow-ups, revive and steer.** Open since C2: see [C2 follow-ups, revive and steer](#c2-follow-ups-revive-and-steer).
 
 **Memory cap (B14).** A codex app-server's scope is a sibling of the worker's, so the worker's `MemoryMax` did not cover
 it (E9). The parent's `CP_WORKER_MEMORY_MAX` now reaches every app-server scope as `-p MemoryMax=… -p MemorySwapMax=0`;
@@ -1112,8 +1108,10 @@ writes no codex value anywhere: an explicit codex dispatch refuses before any le
 refused before it is written (`codexPersistRefusal`), and a Settings rubric write refuses a new or changed codex row.
 So `fleet.json`, the dispatch queue, the armed dispatches, `data/routing.json` and `data/native.json` stay readable by a
 build before C1b. The C1b T-row in `tests/e2e/codex-worker.test.ts` pins this with the switches off. A codex row the
-operator writes by hand is itself a value an older build cannot read, and a job it routes records `requested_driver:
-"codex"` in `fleet.json`.
+operator writes by hand is itself a value an older build cannot read; picp did not write it. A job it routes runs pi and
+records `driver: "pi"` and its `driver_reason` with no `requested_driver`, so `fleet.json` and the run log keep the old
+shape (T-row CX-off-2). A Settings write that leaves such a row unchanged is not refused, a legacy-role row included
+(SD-legacy in `tests/e2e/settings-drivers.test.ts`).
 
 **Recovery for a home that turned codex on.** The supported rollback is the switch: set `codex_research` to `false`
 (new jobs route to pi; a live codex job still tears down and deletes its thread). Before running a build older than
@@ -1123,8 +1121,7 @@ fleet records whose `worker.driver` is `codex` or whose `routing` names `codex`;
 otherwise.
 
 **Known limits.** No network; reads only the worktree, its git dir and system paths, so a brief pointing at another
-job's artifact or a tool under the home cannot be followed. No resume: a failed or drained codex job is torn down and
-dispatched again. A paused grant lets the running turn finish. R1 (a rule-approved command with a dead hook) and R2
+job's artifact or a tool under the home cannot be followed. Resume, revive and steer: see C2 below. A paused grant lets the running turn finish. R1 (a rule-approved command with a dead hook) and R2
 stay as accepted for read-only research only; F5 and R1 are re-decided before C7.
 
 Kill-criteria verdicts (CI: `tests/e2e/codex-worker.test.ts` and `tests/e2e/codex-worker-spike.test.ts` on the fake;
@@ -1138,9 +1135,63 @@ real CLI: `tests/e2e/codex-worker-live-smoke.test.ts` under `CP_LIVE_TESTS=1`):
 | 5 | a command process survives teardown | held (CX-1f: worker SIGKILLed mid-turn; CX-1n) | held (LS-5o-V: 0 processes naming the worker's scratch root; LS-3d…3d3 re-run held) |
 | 6 | an extra loaded surface is not refused | held (CX-1q: an enabled feature fails the dispatched job before any turn) | held (LS-5o-W: lockdown `ok` on the worker entry; LS-3e re-run refused the operator's surface) |
 
-KC4 has no C1b path: one turn per worker, resume refused (CX-1i).
+KC4 (usage counted once across a resume) is C2's: see the table below.
 Real CLI run once on 2026-11-19 (`CP_LIVE_TESTS=1 XDG_RUNTIME_DIR=/run/user/$UID npm run test:one --
 tests/e2e/codex-worker-live-smoke.test.ts`, codex-cli 0.170.0): all 19 cases passed, one pass each. LS-5o-V: the
 spawn is denied at picp's hook (`collaborationspawn_agent`), no `subAgentActivity`, report accepted. LS-5 (one live
 turn on the worker entry): 36,727 tokens at cost 0, the envelope filed; the first thread delete returned `deleted:
 true`, a second `deleted: false` naming the CLI's "no rollout found" error.
+
+### C2 follow-ups, revive and steer
+
+C2 opens the doors C1b refused, still for planner research only and still behind `codex_research`. Each turn is one
+`runCodexSpike`, so a resumed turn is one more trust probe and run through `spawnCodexRpc` (one contained scope each)
+and the lockdown reads the resumed thread back; no app-server lives between turns, and an idle worker holds none.
+
+| Door | What happens |
+|---|---|
+| `cp_send` idle (`auto` or `prompt`) | admission (`assertNativeResume`: drain and update hold, model, project, per-job budget, `codexSelectionRefusal`), then one new app-server with `thread/resume` on the recorded thread; `native` starts `resuming:` |
+| `cp_send` busy, `follow_up` (or `prompt`) | appended to `native-followups.jsonl`; at the turn end the queue is claimed, admitted again and delivered as the next resumed turn; `native_followup_delivered`, or `native_followup_refused` with the claim returned; a claim settles only after its turn returned |
+| `cp_send` busy, `steer` or `auto` (C2b) | `turn/steer` with the live turn id: the CLI's ack is receipt `delivered` with disposition `steered` and run event `native_steered`; `-32600` (no or another active turn) or no live turn queues as a follow-up (`queued`); once this busy period reported, a refused steer fails by name with nothing queued |
+| `cp_send` steer after the report | refused by name: a steer never reopens a filed slot. `auto` resolves to `follow_up` instead, which reopens it (`envelope_superseded`) and queues a turn |
+| settle nudge | a clean unreported turn (`completed`, lockdown ok, no error) settles; settle.ts's one nudge resumes the thread under the same admission (`ownPrompt`) |
+| `cp_revive` / bounded recovery | the plain native revive: `nativeReviveRefusal` needs the record's `thread_id`, then `assertNativeResume`; the respawned worker resumes the thread with picp's revive prompt ("resumed its Codex CLI thread"). Bounded recovery refuses the named stops as for Claude |
+| drain | a codex send while draining is refused as a Claude send is; there is no steer into a draining run |
+
+Still refused: `checkpoint` (a research planner has nothing to commit; the WIP commit lands with C7, Q2), a resume
+whose worktree moved ("its resume is refused: cp_teardown and dispatch again", Q3; research never re-leases), and a
+revive of a record with no thread id (a run stopped before its first `turn/started`).
+
+**Usage across resumes (KC4).** The session record's `totals` is the thread's cumulative total at the last counted run,
+written as zero at a fresh session. Each resumed run passes it as the run core's `resume.baseline`, so its usage is the
+growth over that total. The worker saves `totals` before it writes the turn's `message_end`; a crash between the two
+leaves that run uncounted until the next resume counts it, and never counts it twice. A run with no measured usage saves
+nothing, so the next run counts both. Live `message_update` is the same growth, skipped while the total has not grown.
+Cost stays 0 with `cost_unknown` (D3).
+
+**Shipped off (main-session condition 2, C2).** `totals` is a new-shape value: the worker writes it only while
+`codex_research` is on (`codexPersistRefusal`). With every codex switch off no codex job runs, so no session record
+holds it; CX-off-2 asserts no `native-codex` record, no `totals` and no codex driver value in the fleet, run log, queue,
+armed file or `native.json`. A session record without `totals` resumes on the CLI's replayed total.
+
+**Recovery for a home that ran codex under C2.** As for C1b: switch `codex_research` off (new jobs route to pi; a live
+codex job's resume, revive and queued follow-ups are refused by name, and it still tears down and deletes its thread),
+or revert the PR. Before going back to a C1b build, tear down every codex job: a C1b build cannot read a `native-codex`
+record holding `totals` (its schema has `additionalProperties: false`), and the record exists only in a home that
+turned codex on.
+
+| KC | Criterion | CI (fake) | Real CLI |
+|---|---|---|---|
+| 1, 2, 6 | forbidden action, dead hook, extra surface | held: CX-1c…1q unchanged; CX-2a asserts `lockdown: "ok"` on the resumed run | LS-3c runs the lockdown on a resumed thread (passed 2026-11-19) |
+| 4 | usage double-counted across a resume | held: CX-2a and CX-2b, the status total equals the fake thread's own total | LS-3c (the run core's usage code is unchanged in C2) |
+| 5 | a command process survives teardown | held: CX-1f (a pre-spent recovery attempt), CX-2c (parent close mid-turn: every pid gone, every scope killed or collected) | LS-6o-S ends through `scratch(t)`'s survivor count |
+
+LS-6o-S, run once on 2026-11-19 (`CP_LIVE_TESTS=1 XDG_RUNTIME_DIR=/run/user/$UID npm run test:one --
+--test-name-pattern='^LS-6o-S' tests/e2e/codex-worker-live-smoke.test.ts`, codex-cli 0.170.0, mock model, throwaway
+Codex home): passed. A steer sent while the first model request was held 3 s was acked (`steered: true`) on the live
+turn and its text reached the next model request (U1); lockdown `ok`, no bypass, outcome `completed`, no survivor. The
+first answer's `exec_command` asked picp nothing (ticket matches 0), so the CLI did not run it; `-32600` on the real
+CLI still rests on probe P4 and the fake (U2).
+
+Cases: `tests/e2e/codex-worker-followups.test.ts` (CX-2a…2h), CX-2s in `tests/e2e/codex-worker-spike.test.ts`,
+CX-off-2 in `tests/e2e/codex-worker.test.ts`, and the opt-in LS-6o-S in `tests/e2e/codex-worker-live-smoke.test.ts`.
