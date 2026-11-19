@@ -39,6 +39,7 @@ import {
 	type RoutingRule,
 } from "./contracts.ts";
 import { isNativeModel, NATIVE_EFFORTS } from "./drivers/claude.ts";
+import { CODEX_EFFORTS, isCodexModel } from "./drivers/codex.ts";
 import { PACKAGE_ROOT } from "./home.ts";
 import { atomicWriteText, durableAppend } from "./json-store.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
@@ -353,13 +354,17 @@ function setNativeSwitches(doc: Record<string, unknown>, driver: string): boolea
 	return changed;
 }
 
-/** No claude row on a model or effort the Claude CLI refuses, and no newly picked model routing refuses. */
+/** No claude or codex row on a model or effort its CLI refuses, and no newly picked model routing refuses. */
 function refuseRoutingRows(config: RoutingConfig, prior: Record<string, unknown>): void {
 	const was = new Map((Array.isArray(prior.rubric) ? prior.rubric : []).filter(isObject).map((row) => [row.id, row.model]));
 	const errors = config.rubric.flatMap((row: RoutingRule) => {
 		const out: string[] = [];
 		if (row.driver === "claude" && !isNativeModel(row.model)) out.push(`row ${row.id}: the Claude CLI runs only an anthropic/claude-… model, not ${row.model}; pick one for this row`);
 		if (row.driver === "claude" && row.thinking !== undefined && !CLAUDE_EFFORTS.includes(row.thinking)) out.push(`row ${row.id}: thinking ${row.thinking} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);
+		if (row.driver === "codex" && !isCodexModel(row.model)) out.push(`row ${row.id}: the Codex CLI runs only an openai/gpt-… model, not ${row.model}`);
+		if (row.driver === "codex" && row.thinking !== undefined && !(CODEX_EFFORTS as readonly string[]).includes(row.thinking)) {
+			out.push(`row ${row.id}: thinking ${row.thinking} has no Codex effort; use ${CODEX_EFFORTS.join(", ")}`);
+		}
 		if (was.get(row.id) === row.model) return out;
 		if (!isAllowed(config, row.model)) out.push(`row ${row.id}: models.allow does not permit ${row.model}, so routing would refuse it`);
 		const pattern = deniedFor(config, row.role, row.model);

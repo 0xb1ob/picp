@@ -29,7 +29,7 @@ export const QueuedDispatchRequestSchema = Type.Object(
 		/** R1 D2: a reference only, never renewable authority; re-verified and claimed at admission. */
 		operator_quote: Type.Optional(OperatorModelPickReferenceSchema),
 		/** N3b: replayed so the release re-runs driver selection; a pi pin replays as pi, never a native run. */
-		driver: Type.Optional(Type.Union([Type.Literal("pi"), Type.Literal("claude")])),
+		driver: Type.Optional(Type.Union([Type.Literal("pi"), Type.Literal("claude"), Type.Literal("codex")])),
 	},
 	{ additionalProperties: false },
 );

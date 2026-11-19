@@ -136,10 +136,11 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			),
 			profile: Type.Optional(Type.String({ description: "Worker profile; defaults to the job's kind" })),
 			driver: Type.Optional(
-				StringEnum(["pi", "claude"], {
+				StringEnum(["pi", "claude", "codex"], {
 					description:
 						"Omit to let routing decide. \"pi\" pins this job to pi, bypassing native routing. \"claude\" runs a research job (delivery local or answer) on the installed Claude CLI; " +
-						"refused before any spawn unless the Settings switch is on, no other native worker is live and claude is the pinned version.",
+						"refused before any spawn unless the Settings switch is on, no other native worker is live and claude is the pinned version. " +
+						"\"codex\" runs a research job (delivery local or answer) on the installed Codex CLI, refused unless codex_research is on.",
 				}),
 			),
 			base: Type.Optional(Type.String({ description: "Base branch; defaults to origin/HEAD" })),
@@ -229,7 +230,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					...(params.model ? { model: params.model } : {}),
 					...(params.thinking ? { thinking: params.thinking as ThinkingLevel } : {}),
 					...(params.profile ? { profile: params.profile } : {}),
-					...(params.driver ? { driver: params.driver as "pi" | "claude" } : {}),
+					...(params.driver ? { driver: params.driver as "pi" | "claude" | "codex" } : {}),
 					...(params.base ? { base: params.base } : {}),
 					...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
 					...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),

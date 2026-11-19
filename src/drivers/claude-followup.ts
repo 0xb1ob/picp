@@ -15,10 +15,14 @@ import { rebuildStatus } from "../run-artifacts.ts";
 import type { NativeDriver } from "../worker-driver.ts";
 import { nativeAvailability } from "../native-availability.ts";
 import { assertNativeSelection, NativeDriverError, nativeModelId } from "./claude.ts";
+import { codexDoorRefusal } from "./codex.ts";
 
 export const NATIVE_SESSION_FILE = "native-claude";
 export const NATIVE_FOLLOWUPS_FILE = "native-followups.jsonl";
 export const NATIVE_SCRATCH_PREFIX = "cp-claude-native-";
+/** C1b: the Codex worker's record and scratch dir, in the same schema (teardown and the viewer read both). */
+export const NATIVE_CODEX_SESSION_FILE = "native-codex";
+export const NATIVE_CODEX_SCRATCH_PREFIX = "cp-codex-native-";
 
 const REVIVED = "picp revived this job: your previous native run ended without an accepted report (a crash, a stop or a restart). ";
 
@@ -53,8 +57,12 @@ const LedgerSchema = Type.Record(Type.String(), Type.Object({
 /** `<runDir>/native-claude`, one JSON line. The session id grants nothing: it is only a resume key. */
 export const NativeSessionSchema = Type.Object(
 	{
-		driver: Type.Literal("claude"),
+		driver: Type.Union([Type.Literal("claude"), Type.Literal("codex")]),
 		scratch_dir: Type.String({ minLength: 1 }),
+		/** Codex: the thread to delete at teardown (D5), recorded at the first `turn/started`. */
+		thread_id: Type.Optional(Type.String({ minLength: 1 })),
+		/** Codex: the `CODEX_HOME` path the run passed, for teardown's thread delete; picp never opens it. */
+		codex_home: Type.Optional(Type.String({ minLength: 1 })),
 		session_id: Type.Optional(Type.String({ minLength: 1 })),
 		/** The worktree the session started in; the CLI keys sessions by cwd. Absent on a pre-N4f record. */
 		cwd: Type.Optional(Type.String({ minLength: 1 })),
@@ -77,7 +85,7 @@ export function readNativeSession(file: string): NativeSession {
 	}
 	if (!Value.Check(NativeSessionSchema, raw)) throw new NativeDriverError(`the native session record ${file} does not match its schema`);
 	const dir = raw.scratch_dir;
-	if (!isAbsolute(dir) || resolve(dir) !== dir || !/^cp-claude-native-[A-Za-z0-9]{6}$/.test(basename(dir))) {
+	if (!isAbsolute(dir) || resolve(dir) !== dir || !/^cp-(claude|codex)-native-[A-Za-z0-9]{6}$/.test(basename(dir))) {
 		throw new NativeDriverError(`the native session record ${file} names a scratch dir picp did not make`);
 	}
 	return raw;
@@ -162,6 +170,7 @@ export async function assertNativeResume(input: { home: string; jobId: string; w
 		throw new NativeDriverError(`refused: ${input.what} of native ${input.jobId}: ${why}`);
 	};
 	if (!record || isScriptFleetRecord(record) || !record.worker.driver) return refuse("no native fleet record");
+	if (record.worker.driver === "codex") throw new NativeDriverError(codexDoorRefusal(input.jobId, input.what));
 	// The update hold stops fresh work; a nudge finishes held work, so it passes the hold, never a drain.
 	(input.ownPrompt ? assertNotDraining : assertDispatchOpen)(input.home, `${input.what} of native ${input.jobId}`);
 	try {

@@ -14,7 +14,7 @@ import { NATIVE_SHUTDOWN_GRACE_MS } from "./claude-usage.ts";
 
 /** Why a job may not run native (S1): the resolver falls back to pi on these; an explicit request refuses.
  * `pipeline` is no longer returned (D2): it stays for recorded `driver_reason`s and their readers. */
-export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort" | "denied" | "window" | "auth" | "lockdown";
+export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort" | "denied" | "window" | "auth" | "lockdown" | "containment";
 
 export class NativeDriverError extends Error {
 	readonly category?: NativeRefusal;
@@ -76,7 +76,7 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 	if (nativeClass === undefined) return ineligible;
 	if (!config[nativeClass]) return { category: "switch", why: `the switch workers.native_${nativeClass} is off (${SWITCH_WHERE[nativeClass]})` };
 	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
-	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs), input.jobId, config.max_concurrent);
+	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs, "claude"), input.jobId, config.max_concurrent);
 	if (occupied) return occupied;
 	try {
 		await resolveClaudeAsync(input.env ?? process.env);
@@ -101,9 +101,9 @@ export async function installedClaudeVersion(env: NodeJS.ProcessEnv = process.en
 	}
 }
 
-/** Fleet jobs whose native worker has not been observed to exit. */
-export function liveNativeJobs(jobs: readonly FleetRecord[]): string[] {
-	return jobs.filter((job) => job.worker?.driver !== undefined && job.worker.exited_at === undefined && LIVE_PHASES.includes(job.phase)).map((job) => job.job_id);
+/** Fleet jobs whose `driver` worker has not been observed to exit: each driver counts its own slots (C1b). */
+export function liveNativeJobs(jobs: readonly FleetRecord[], driver: NativeDriver): string[] {
+	return jobs.filter((job) => job.worker?.driver === driver && job.worker.exited_at === undefined && LIVE_PHASES.includes(job.phase)).map((job) => job.job_id);
 }
 
 /** The home's native slot count (`max_concurrent`); an unreadable data/native.json keeps the safe 1. */
@@ -116,11 +116,11 @@ export function nativeMaxConcurrent(home: string): number {
 }
 
 /** `occupied` when holders other than the job itself fill all `max` native slots: a held job's repair keeps its own. */
-export function nativeSlotRefusal(holders: Iterable<string>, jobId: string, max: number, state = "live"): { category: NativeRefusal; why: string } | undefined {
+export function nativeSlotRefusal(holders: Iterable<string>, jobId: string, max: number, state = "live", noun = "native"): { category: NativeRefusal; why: string } | undefined {
 	const others = [...new Set(holders)].filter((id) => id !== jobId);
 	if (others.length < max) return undefined;
 	const one = others.length === 1;
-	return { category: "occupied", why: `native concurrency is ${max} and ${others.join(", ")} ${one ? "is" : "are"} ${state}; tear ${one ? "it" : "one"} down first` };
+	return { category: "occupied", why: `${noun} concurrency is ${max} and ${others.join(", ")} ${one ? "is" : "are"} ${state}; tear ${one ? "it" : "one"} down first` };
 }
 
 /** Whether `model` is an explicit `anthropic/claude-…` ref the native driver can run. */

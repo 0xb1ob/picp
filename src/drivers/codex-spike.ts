@@ -193,7 +193,8 @@ export interface CodexSpikeOptions {
 	onTool?: (event: CodexToolEvent) => void;
 }
 
-export interface CodexToolEvent { phase: "start" | "end"; id: string; name: string; args?: unknown; isError?: boolean }
+/** `output` on an end: a command's output, a dynamic tool's reply, or picp's refusal of a blocked or declined call. */
+export interface CodexToolEvent { phase: "start" | "end"; id: string; name: string; args?: unknown; isError?: boolean; output?: string; exitCode?: number | null }
 
 export type CodexDenial = { tool: string; reason: string; layer: "hook" | "approval" | "tool_call" };
 export interface CodexLeftover { processId: string; osPid?: number; terminated: boolean; gone: boolean }
@@ -268,6 +269,8 @@ class CodexRun {
 	private readonly acceptedItems = new Set<string>();
 	private readonly hookDenied = new Set<string>();
 	private readonly toolPhase = new Map<string, "start" | "end">();
+	/** picp's own answer per item: an approval refusal or a dynamic tool's reply, for the end event's `output`. */
+	private readonly answers = new Map<string, string>();
 	private ready = false;
 	private hookFailed = false;
 	private bypass?: string;
@@ -342,7 +345,14 @@ class CodexRun {
 		const call = codexToolCall(tool, hook.tool_input);
 		const reason = this.closed() ?? this.cwdRefusal(hook.cwd) ?? (call === undefined ? `Refused: ${tool} is not in the Codex spike's tool set.` : this.guard(call));
 		if (reason !== undefined) {
-			this.hookDenied.add(String(hook.tool_use_id ?? ""));
+			const id = String(hook.tool_use_id ?? "");
+			this.hookDenied.add(id);
+			// A blocked call gets no item from the CLI (F2): its pair is fired here, so bounds and the Log count it.
+			if (!this.toolPhase.has(id)) {
+				this.fire({ phase: "start", id, name: call?.name ?? tool, args: call?.input ?? hook.tool_input });
+				this.fire({ phase: "end", id, name: call?.name ?? tool, isError: true, output: reason });
+				this.toolPhase.set(id, "end");
+			}
 			return { decision: "deny", reason: this.deny(tool, reason, "hook") };
 		}
 		const payload = call?.name === "bash" ? call.input.command : call?.input;
@@ -399,6 +409,7 @@ class CodexRun {
 			this.acceptedItems.add(params.itemId);
 			return { decision: "accept" };
 		}
+		this.answers.set(params.itemId, why);
 		this.deny("Bash", why, "approval");
 		return { decision: "decline" };
 	}
@@ -408,8 +419,9 @@ class CodexRun {
 			?? (params.tool !== REPORT_TOOL ? `Refused: ${params.tool} is not a picp tool.` : undefined)
 			?? this.guard({ name: "report_result", input: (params.arguments ?? {}) as Record<string, unknown> })
 			?? (this.take(params.callId, ticketKey(params.tool, params.arguments)) ? undefined : "Refused: no hook verdict for this call; a call picp's hook did not allow does not run.");
-		if (why !== undefined) return text(this.deny(params.tool, why, "tool_call"), false);
-		return this.report(params.arguments);
+		const reply = why === undefined ? this.report(params.arguments) : text(this.deny(params.tool, why, "tool_call"), false);
+		this.answers.set(params.callId, reply.contentItems.map((item) => item.text).join("\n"));
+		return reply;
 	}
 
 	/** picp's `report_result`, as the Claude driver's: validated, written once, wrong-job and conflicting refused. */
@@ -497,9 +509,11 @@ class CodexRun {
 		const status = "status" in item ? item.status : undefined;
 		// 0.170.0 announces a command `inProgress` with no process before it asks; a process or an end means it ran.
 		const ran = item.type === "commandExecution" && (status !== "inProgress" || item.processId != null);
+		// 0.170.0 announces a patch `inProgress` after the hook and before it asks (F1); picp accepts none, so only an
+		// end other than `declined` (`completed`, or a `failed` apply it never accepted) is an unasked patch.
 		const unasked = item.type === "commandExecution"
 			? ran && status !== "declined" && !this.acceptedItems.has(item.id) && !this.hookDenied.has(item.id)
-			: item.type === "fileChange" ? status !== "declined" : UNGATED_ITEMS.includes(item.type);
+			: item.type === "fileChange" ? status !== "inProgress" && status !== "declined" : UNGATED_ITEMS.includes(item.type);
 		if (unasked) this.kill(item.type);
 	}
 
@@ -508,20 +522,30 @@ class CodexRun {
 		this.rpc?.kill();
 	}
 
+	private fire(event: CodexToolEvent): void {
+		try {
+			this.options.onTool?.(event);
+		} catch {
+			// An observer must never end the run.
+		}
+	}
+
 	private toolEvent(phase: "start" | "end", item: ItemNotification["item"] | undefined): void {
-		if (this.options.onTool === undefined || (item?.type !== "commandExecution" && item?.type !== "dynamicToolCall")) return;
+		if (this.options.onTool === undefined || (item?.type !== "commandExecution" && item?.type !== "dynamicToolCall" && item?.type !== "fileChange")) return;
 		const seen = this.toolPhase.get(item.id);
 		if (seen === "end" || seen === phase) return;
-		const [name, args] = item.type === "commandExecution" ? ["bash", { command: item.command }] : [item.tool, item.arguments];
-		const fire = (event: CodexToolEvent) => {
-			try {
-				this.options.onTool?.(event);
-			} catch {
-				// An observer must never end the run.
-			}
-		};
-		if (seen === undefined) fire({ phase: "start", id: item.id, name, args });
-		if (phase === "end") fire({ phase: "end", id: item.id, name, isError: item.status !== "completed" });
+		const [name, args] = item.type === "commandExecution" ? ["bash", { command: item.command }]
+			: item.type === "fileChange" ? ["apply_patch", { changes: item.changes }] : [item.tool, item.arguments];
+		if (seen === undefined) this.fire({ phase: "start", id: item.id, name, args });
+		if (phase === "end") {
+			const own = this.answers.get(item.id);
+			const output = item.type === "commandExecution" ? (item.status === "declined" ? own : item.aggregatedOutput ?? undefined) : own;
+			const isError = item.status !== "completed" || (item.type === "dynamicToolCall" && item.success === false);
+			this.fire({
+				phase: "end", id: item.id, name, isError, ...(output == null ? {} : { output }),
+				...(item.type === "commandExecution" && item.exitCode !== undefined ? { exitCode: item.exitCode } : {}),
+			});
+		}
 		this.toolPhase.set(item.id, phase);
 	}
 
@@ -582,8 +606,10 @@ class CodexRun {
 			this.rpc = rpc;
 			rpc.onNotification(({ method, params }) => this.onNotification(method, params));
 			rpc.onRequest(M.commandApproval, (params) => this.approveCommand(params as CommandApprovalParams));
-			rpc.onRequest(M.fileChangeApproval, () => {
-				this.deny("apply_patch", "Refused: a C0 planner changes no files.", "approval");
+			rpc.onRequest(M.fileChangeApproval, (params) => {
+				const why = "Refused: a native planner changes no files.";
+				this.answers.set(String((params as { itemId?: unknown } | undefined)?.itemId ?? ""), why);
+				this.deny("apply_patch", why, "approval");
 				return { decision: "decline" };
 			});
 			rpc.onRequest(M.toolCall, (params) => this.toolCall(params as DynamicToolCallParams));

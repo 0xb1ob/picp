@@ -9,7 +9,8 @@ import { loadProfile } from "./profiles.ts";
 import { requireRouted } from "./routed-models.ts";
 import { ALWAYS_AVAILABLE, loadRoutingConfig, type ModelProbe, resolveModel } from "./routing.ts";
 import { driverFields } from "./dispatch-driver.ts";
-import { nativeModelId } from "./drivers/claude.ts";
+import type { NativeDriver } from "./worker-driver.ts";
+import { nativeDriverSpec } from "./drivers/registry.ts";
 
 /** The pick fields a dispatch request carries; `pick`/`pickSpent` are set only by `withOperatorPick`. */
 export interface PickRequest { jobId: string; model?: string; operatorQuote?: OperatorModelPickReference; pick?: VerifiedPick; pickSpent?: string }
@@ -73,7 +74,7 @@ export function respawnRoute(options: {
 		...(kept.scope ? { scope: kept.scope } : {}), ...(kept.risk ? { risk: kept.risk } : {}),
 	}, config, options.probe ?? ALWAYS_AVAILABLE);
 	// D1: a fresh pick never moves a native job to pi; a model the recorded driver cannot run refuses the respawn.
-	if (record.worker.driver) nativeModelId(decision.model);
+	if (record.worker.driver) nativeDriverSpec(record.worker.driver as NativeDriver).modelId(decision.model);
 	const thinking = decision.thinking ? { thinking: decision.thinking } : {};
 	return { model: decision.model, ...thinking, routing: { ...kept, ...thinking }, priorPick: spent.attempt_id };
 }

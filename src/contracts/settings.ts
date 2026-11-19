@@ -14,7 +14,10 @@ import { IsoTimestampSchema, type ValidationResult, validate } from "./core.ts";
 import { DEFAULT_BUDGET_CONFIG, DEFAULT_JOB_TOOL_CALL_CAP, DEFAULT_JOB_WALL_CLOCK_SECONDS } from "./limits.ts";
 import { MANDATE_ACTIONS, MANDATE_ASK_ON } from "./mandates.ts";
 import { DEFAULT_QUALITY_THRESHOLD, DEFAULT_QUALITY_VOTERS, GATE_REVIEW_TIMEOUT_MAX_MS, GATE_REVIEW_TIMEOUT_MIN_MS } from "./reviews.ts";
-import { ReviewerModelSchema, ROUTING_DRIVERS, RoutingRuleSchema, ThinkingLevelSchema } from "./routing.ts";
+import { ReviewerModelSchema, RoutingRuleSchema, ThinkingLevelSchema } from "./routing.ts";
+
+/** The CLIs a Settings driver field offers: the Codex CLI is set in data/routing.json only (C1b). */
+const SETTING_DRIVERS = ["pi", "claude"] as const;
 
 export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer", "workers"] as const;
 export type SettingSection = (typeof SETTING_SECTIONS)[number];
@@ -206,10 +209,10 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		operator_thinking: { file_key: "thinking", type: "thinking_level", default: null, label: "Operator thinking", help: "Switches the running operator session when its current turn ends, and wins again at every session start (resumes and Restart clean included), over --thinking. A shift+tab change lasts until the next start. No env pin. pi clamps a level the model cannot serve. Empty unsets it." },
 	}),
 	...group("models", "parent", { applies: "next_parent_start", on_invalid: "refuse" }, {
-		parent_driver: { file_key: "driver", type: "driver", enum: [...ROUTING_DRIVERS], default: "pi", label: "Parent CLI", help: "pi, or the Claude CLI (claude), for the CP parent. Applies at the next parent start: restart the parent to switch. The Claude CLI runs only an Anthropic Claude model (provider anthropic, id claude-…) and the Claude effort levels; a write pairing claude with any other model is refused." },
+		parent_driver: { file_key: "driver", type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Parent CLI", help: "pi, or the Claude CLI (claude), for the CP parent. Applies at the next parent start: restart the parent to switch. The Claude CLI runs only an Anthropic Claude model (provider anthropic, id claude-…) and the Claude effort levels; a write pairing claude with any other model is refused." },
 	}),
 	...group("models", "operator", { applies: "next_operator_launch", on_invalid: "refuse" }, {
-		operator_driver: { file_key: "driver", type: "driver", enum: [...ROUTING_DRIVERS], default: "pi", label: "Operator CLI", help: "pi, or the Claude CLI (claude), for the operator session. Applies at the next operator start: use Restart session. The Claude CLI runs only an Anthropic Claude model and the Claude effort levels." },
+		operator_driver: { file_key: "driver", type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Operator CLI", help: "pi, or the Claude CLI (claude), for the operator session. Applies at the next operator start: use Restart session. The Claude CLI runs only an Anthropic Claude model and the Claude effort levels." },
 	}),
 	...group("review", "gate", { applies: "next_review_attempt", on_invalid: "refuse" }, {
 		timeout_ms: { file_key: "review_timeout_ms", type: "integer", minimum: GATE_REVIEW_TIMEOUT_MIN_MS, maximum: GATE_REVIEW_TIMEOUT_MAX_MS, default: 300_000, label: "Review timeout (ms)", help: "How long one review attempt may take before it counts as operational." },
@@ -237,7 +240,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		native_claude_research: { file_key: "claude_research", type: "boolean", default: false, label: "Claude CLI research workers", help: "A job runs on the installed Claude CLI only when a routing rule (or the dispatch) says driver \"claude\" and this switch is on. Off stops new native jobs and refuses resumes and revives of native ones; they never move to pi. Turning it off then on clears a remembered sign-in, lockdown or no-reset limit block." },
 	}),
 	...group("workers", "routing", { applies: "next_dispatch", on_invalid: "refuse" }, {
-		driver: { type: "driver", enum: [...ROUTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets each data/routing.json rubric row's driver, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi." },
+		driver: { type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets each data/routing.json rubric row's driver, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi." },
 	}),
 ]);
 

@@ -11,16 +11,21 @@ export const CODEX_CONTAIN = fileURLToPath(new URL("./codex-contain.mjs", import
 /** Env keys only a boundary fake of systemd may set; never accepted from a caller's env. */
 export const CONTAIN_ENV_KEY = /^PICP_CONTAIN_/;
 
-export interface CodexContainment { systemdRun: string; runtimeDir: string }
+/** `memoryMax`: the worker's memory cap, which the app-server's sibling scope would otherwise escape (E9). */
+export interface CodexContainment { systemdRun: string; runtimeDir: string; memoryMax?: string }
 
 export const containmentRefusal = (why: string): string =>
 	`Refused: picp could not contain codex app-server in a systemd user scope (${why}); it never runs Codex uncontained.`;
 
-/** The host's `systemd-run` and user runtime dir; throws (cli `containment`) when there is none. */
+const refused = (why: string) => Object.assign(new CodexSpikeError(containmentRefusal(why)), { cli: "containment" as const });
+
+/** The host's `systemd-run`, user runtime dir and `CP_CODEX_MEMORY_MAX`; throws (cli `containment`) when unusable. */
 export function resolveCodexContainment(hostEnv: NodeJS.ProcessEnv = process.env): CodexContainment {
 	const systemdRun = whichAll("systemd-run", hostEnv)[0];
-	if (systemdRun === undefined) throw Object.assign(new CodexSpikeError(containmentRefusal("systemd-run is not on PATH")), { cli: "containment" as const });
-	return { systemdRun, runtimeDir: hostEnv.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}` };
+	if (systemdRun === undefined) throw refused("systemd-run is not on PATH");
+	const memoryMax = hostEnv.CP_CODEX_MEMORY_MAX;
+	if (memoryMax !== undefined && !/^\d+[KMGT]?$/.test(memoryMax)) throw refused(`CP_CODEX_MEMORY_MAX ${JSON.stringify(memoryMax)} is not a byte size like 6G`);
+	return { systemdRun, runtimeDir: hostEnv.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`, ...(memoryMax === undefined ? {} : { memoryMax }) };
 }
 
 /** argv and env that start `command` as the leader's child inside a fresh scope named `unit`. */
@@ -31,7 +36,11 @@ export function containedCommand(containment: CodexContainment, command: string,
 	return {
 		unit,
 		command: containment.systemdRun,
-		args: ["--user", "--scope", "--quiet", "--collect", `--unit=${unit}`, "--", process.execPath, CODEX_CONTAIN, unit, "--", command, ...args],
+		args: [
+			"--user", "--scope", "--quiet", "--collect", `--unit=${unit}`,
+			...(containment.memoryMax === undefined ? [] : ["-p", `MemoryMax=${containment.memoryMax}`, "-p", "MemorySwapMax=0"]),
+			"--", process.execPath, CODEX_CONTAIN, unit, "--", command, ...args,
+		],
 		env: { ...clean, XDG_RUNTIME_DIR: clean.XDG_RUNTIME_DIR ?? containment.runtimeDir, ...(unset.length > 0 ? { PICP_CONTAIN_UNSET: unset.join(",") } : {}) },
 	};
 }

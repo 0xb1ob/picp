@@ -364,9 +364,53 @@ test("CX-1d: an enabled feature, a differing profile read-back or web search on 
 		assert.ok(server.argv.includes('default_permissions="picp_planner"'), "the profile on every app-server");
 		for (const feature of ["view_image", "goals", "sleep_tool", "unified_exec_tty"]) assert.ok(server.argv.join(" ").includes(`--disable ${feature}`), feature);
 	}
+	// C1b B13: the hook-denied `workdir` call gets its pair from picp, since the CLI emits no item for it.
 	assert.deepEqual(tools.map((each) => `${each.phase} ${each.name}${each.isError === undefined ? "" : ` ${each.isError}`}`),
-		["start bash", "end bash false", "start report_result", "end report_result false"]);
+		["start bash", "end bash false", "start bash", "end bash true", "start report_result", "end report_result false"]);
+	assert.match(tools[3]?.output ?? "", /runs in its worktree only/);
 	assertClean(fx, result);
+});
+
+test("CX-1m: a patch the CLI only announced does not kill the run; a declined patch is absent; an unasked apply kills", { timeout: 180_000 }, async (t) => {
+	// Carry-in 1 (F1): 0.170.0 sends `fileChange inProgress` before it asks. The C1a tripwire killed on it, so (a) failed
+	// on `bypass`; the C1b rule kills only on an end other than `declined` (c). (d): a dead hook names the hook.
+	const patched = (fx: CodexFixture) => existsSync(join(fx.worktree, "patched.txt"));
+	const a = fixture(t, { turns: [] });
+	a.setScript({ turns: [[{ kind: "patch", path: "patched.txt", hook: "skip" }, { kind: "shell", command: "cat README.md" }, reportStep(a)]] });
+	const tools: CodexToolEvent[] = [];
+	const ran = await a.run({ onTool: (event) => tools.push(event) });
+	assert.equal(ran.outcome, "completed", ran.error);
+	assert.equal(ran.bypass, undefined);
+	assert.deepEqual(ran.denials.map((d) => `${d.layer} ${d.tool}`), ["approval apply_patch"]);
+	assert.equal(patched(a), false);
+	assert.deepEqual(fakeExecuted(a.stateDir), ["cat README.md"]);
+	assert.equal(ran.report?.job_id, JOB);
+	assert.deepEqual(tools.slice(0, 2).map((each) => `${each.phase} ${each.name} ${each.isError ?? ""}`.trim()), ["start apply_patch", "end apply_patch true"]);
+	assertClean(a, ran);
+
+	const b = fixture(t, { turns: [[{ kind: "patch", path: "patched.txt" }, { kind: "message", text: "done" }]] });
+	const seen: string[] = [];
+	const blocked = await b.run({ onMessage: (method, params) => seen.push(`${method} ${JSON.stringify(params)}`) });
+	assert.equal(blocked.outcome, "completed", blocked.error);
+	assert.deepEqual(blocked.denials.map((d) => `${d.layer} ${d.tool}`), ["hook apply_patch"]);
+	assert.ok(!seen.some((each) => each.includes('"fileChange"')), "no fileChange item for a hook-blocked patch");
+	assert.equal(patched(b), false);
+
+	const c = fixture(t, { knobs: { patchApply: "unasked", modelMs: 1_000 }, turns: [[{ kind: "patch", path: "patched.txt", hook: "skip" }, { kind: "shell", command: "cat README.md" }]] });
+	const unasked = await c.run();
+	assert.equal(unasked.bypass, "fileChange");
+	assert.equal(unasked.outcome, "stopped");
+	assert.deepEqual(fakeExecuted(c.stateDir), [], "no later step ran");
+	await allScopesKilled(c);
+
+	const d = fixture(t, { knobs: { modelMs: 1_000 }, turns: [[{ kind: "patch", path: "patched.txt", hook: "kill" }, { kind: "shell", command: "cat README.md" }]] });
+	const dead = await d.run();
+	assert.equal(dead.hookFailed, true);
+	assert.equal(dead.outcome, "stopped");
+	assert.match(dead.error ?? "", /picp's hook failed/);
+	assert.doesNotMatch(dead.error ?? "", /fileChange/);
+	assert.equal(patched(d), false);
+	assertClean(d, dead);
 });
 
 test("CX-1k: a codex release dir that is or holds the home or the Codex home refuses the run before any app-server", { timeout: 120_000 }, async (t) => {

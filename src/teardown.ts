@@ -62,6 +62,7 @@ import {
 	validate,
 } from "./contracts.ts";
 import { removeNativeScratch } from "./drivers/claude-followup.ts";
+import { deleteCodexThread } from "./drivers/codex-teardown.ts";
 import { deleteCheckpoint } from "./checkpoint-ref.ts";
 import { resolveDefaultBase } from "./default-base.ts";
 import { isPidAlive, type FleetStore } from "./fleet.ts";
@@ -301,6 +302,8 @@ export class Teardown {
 		}
 		// N3c: the kept Claude scratch dir goes only after the native worker's observed exit (or its pid is gone).
 		if (!isScriptFleetRecord(record) && record.worker.driver && (exitCode !== undefined || !isPidAlive(record.worker.pid))) {
+			// D5: the Codex thread goes first, while the scratch HOME and TMPDIR its delete runs in still exist.
+			if (record.worker.driver === "codex") runs.open(jobId).cp("native_thread_deleted", { ...(await deleteCodexThread({ sessionFile: record.worker.session_file })) });
 			runs.open(jobId).cp("native_scratch_removed", removeNativeScratch(record.worker.session_file));
 		}
 

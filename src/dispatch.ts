@@ -803,7 +803,7 @@ export class Dispatcher {
 					role: profile.frontmatter.role,
 					model: routing.model,
 					started_at: isoTimestamp(now()),
-					...(routing.driver === "claude" ? { driver: "claude" as const } : {}),
+					...(routing.driver && routing.driver !== "pi" ? { driver: routing.driver } : {}),
 				},
 				worktree: lease.path,
 				...(lease.lease_id ? { lease_id: lease.lease_id } : {}),

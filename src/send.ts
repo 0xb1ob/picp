@@ -37,6 +37,7 @@ import { existsSync } from "node:fs";
 import { assertNoAuthorityHold } from "./authority-hold.ts";
 import { isScriptFleetRecord, type Risk, type SendReceipt } from "./contracts.ts";
 import { assertNativeResume, NATIVE_ACK, nativeDoorRefusal } from "./drivers/claude-followup.ts";
+import { codexDoorRefusal } from "./drivers/codex.ts";
 import { readTask, type ResolvedTask } from "./dispatch.ts";
 import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
@@ -209,6 +210,7 @@ export class Sender {
 			throw new SendError(`no fleet record for ${request.jobId} — dispatch it first (cp_dispatch)`);
 		}
 		if (isScriptFleetRecord(record)) throw new SendError(`${request.jobId} is a script job; cp_send cannot promote or replay it`);
+		if (record.worker?.driver === "codex") throw new SendError(codexDoorRefusal(request.jobId, "cp_send"));
 		const native = record.worker?.driver !== undefined;
 		if (native && request.mode === "steer") throw new SendError(nativeDoorRefusal(request.jobId, "steer"));
 		// A native worker's tool set, policy and env are fixed at spawn: a research worker never takes a ship brief.
