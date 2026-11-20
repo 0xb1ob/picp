@@ -64,6 +64,8 @@ test("CX-6a: cp_review on a codex reviews row files pi's verdict.json through re
 	await h.run([h.review(a)]);
 	const native = await h.reviewRun(a);
 	assert.match(String(native.routed?.line), new RegExp(`model=${FAKE_CODEX_REF} .*driver=codex`), JSON.stringify(native.routed));
+	assert.deepEqual([native.routed?.requested_driver, native.routed?.driver], ["codex", "codex"], JSON.stringify(native.routed));
+	assert.match(String(native.routed?.driver_reason), /^rule: reviews prefers codex/);
 	assert.deepEqual(native.verdict, verdict(a), "the verdict file is pi's shape");
 	assert.equal(native.result.verdict, "pass", JSON.stringify(native.result));
 	const read = toolResults(h).find((entry) => entry.tool === "read");
@@ -223,6 +225,8 @@ test("CX-6d: switches off, a codex reviews row runs pi and no persisted file nam
 	const pi = await h.reviewRun(id);
 	assert.equal(pi.routed?.model, piModel, JSON.stringify(pi.routed));
 	assert.match(String(pi.routed?.line), /driver=pi/);
+	assert.deepEqual([pi.routed?.driver, "requested_driver" in (pi.routed ?? {})], ["pi", false], JSON.stringify(pi.routed));
+	assert.match(String(pi.routed?.driver_reason), /^switch: the switch codex_review is off/);
 	assert.equal(nativeRun(pi.events), undefined);
 	assert.deepEqual(pi.verdict, verdict(id));
 	assert.equal(existsSync(join(pi.run, "native-codex-session.json")), false);
@@ -322,5 +326,25 @@ test("CX-6g: cp_gate on a codex reviews row runs the gate reviewer on codex", { 
 	const run = nativeRun(events);
 	assert.deepEqual([run?.driver, run?.lockdown, run?.report], ["codex", "ok", true], JSON.stringify(run));
 	assert.match(resultText(toolResults(h).find((entry) => entry.tool === "read")!), /# codex findings/);
+	assertClean(h);
+});
+
+// Scenario: a reviewer's routing event carries the driver fields (C8 i), and its guard follows codex_review (C8 h)
+//   Given only codex_review on, a signed-out codex and the reviews row on codex with pi fallback, When cp_review runs,
+//   Then the review decides on pi and routing_resolved has driver pi, requested_driver codex and the auth reason.
+//   Before C8 the event had no driver field, and the codex_research-keyed guard dropped requested_driver.
+test("CX-8i: a reviewer's routing_resolved names requested_driver, driver and driver_reason; the guard follows codex_review", { skip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t, { native: { codex_review: true } });
+	const id = "cp-cx8i";
+	await h.heldShipJob(id);
+	h.reviewsRow(h.b.provider.addScript("cx8i-pi", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: verdict(id) }] }]));
+	h.setScript({ knobs: { loginStatus: 1 }, turns: [] });
+	await h.run([h.review(id)]);
+	const pi = await h.reviewRun(id);
+	assert.deepEqual([pi.routed?.driver, pi.routed?.requested_driver], ["pi", "codex"], JSON.stringify(pi.routed));
+	assert.match(String(pi.routed?.driver_reason), /^auth: codex is not signed in/);
+	assert.deepEqual(pi.verdict, verdict(id));
+	assert.equal(nativeRun(pi.events), undefined);
+	assert.deepEqual(fakeSpawns(h.state).filter((each) => each.argv[0] === "app-server"), [], "no app-server started");
 	assertClean(h);
 });

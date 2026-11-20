@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -547,6 +547,108 @@ test("CX-7n: a freeze after a C1 revive leaves the named dirt out of the WIP com
 	assert.equal(h.originRefs()[`refs/heads/${job.id}`], undefined, "a local job's checkpoint pushes nothing");
 	writeFileSync(gate, "open\n");
 	await running;
+	assertClean(h);
+});
+
+/** A local codex ship job killed by a dead hook after an unasked `touch r1.txt` (CX-7c's job A), its worker gone. */
+async function lockdownKilled(h: H) {
+	const job = await h.job("local", "ship");
+	reset(h, { knobs: { autoApprove: ["touch"], modelMs: 1_000 }, turns: [[{ kind: "shell", command: "touch r1.txt", hook: "kill" }, { kind: "shell", command: "touch later.txt" }]] });
+	await h.run([job.dispatch({ task: "Ship." })]);
+	await failed(h, job.id);
+	await h.b.closeParents();
+	await workerGone(h, job.id);
+	return job;
+}
+
+/** Revives `job` into a turn that writes wip.txt and holds, then runs `/cp-drain freeze`; returns the DRAIN line. */
+async function reviveAndFreeze(h: H, id: string, revive: Record<string, unknown>, whileHeld: () => void = () => {}) {
+	reset(h, { turns: [[{ kind: "shell", command: "printf 'half done\\n' > wip.txt" }, { kind: "hold", marker: "held" }]] });
+	rmSync(join(h.state, "held"), { force: true });
+	const gate = join(h.root, `parent-gate-${id}`);
+	const running = h.run([tool("cp_revive", { job_id: id, confirm: true, ...revive }), tool("bash", { command: `for i in $(seq 1500); do [ -f "${gate}" ] && break; sleep 0.2; done` })]);
+	await waitFor(() => existsSync(join(h.state, "held")), Boolean, { timeoutMs: 120_000, what: "the revived turn is mid-turn" });
+	whileHeld();
+	const parent = h.b.parents.at(-1)!;
+	const records = parent.records().length;
+	await parent.prompt("/cp-drain 120 freeze");
+	const ui = await parent.waitFor((r) => parent.records().indexOf(r) >= records && r.type === "extension_ui_request" && String(r.message).startsWith("DRAIN:"), 60_000);
+	await waitFor(() => ofType(h, id, "agent_settled"), (found) => found.length > 0, { timeoutMs: 60_000, what: "the frozen worker settles idle" });
+	writeFileSync(gate, "open\n");
+	const ends = await running;
+	return { drain: String((ui as Record<string, unknown>).message), revived: ends.find((end) => end.toolName === "cp_revive") };
+}
+
+const UNREVIEWED_FILE = (h: H, id: string) => join(h.b.home, paths.runDir(id), "native-unreviewed.json");
+
+// Scenario: an unreadable worktree refuses the revive of a lockdown-killed codex implementer (C8 a)
+//   Given CX-7c's killed job A with `?? r1.txt` and then a junk git index, so `git status` fails
+//   When cp_revive confirm runs, Then it is refused as worktree_unreadable: no worker_revived, no app-server, no
+//   prompt, nothing committed, and the job stays failed. (Before C8 the failure text became an "unreviewed path".)
+test("CX-8a: a git status failure refuses the revive of a lockdown-killed codex implementer; nothing is spawned or committed", { skip, timeout: 420_000 }, async (t) => {
+	const h = await shipHome(t);
+	const main = h.originRefs()["refs/heads/main"];
+	const job = await lockdownKilled(h);
+	writeFileSync(join(h.git(job.id, "rev-parse", "--absolute-git-dir"), "index"), "junk index\n");
+	reset(h, { turns: [[{ kind: "message", text: "never" }]] });
+	const [servers, prompts] = [appServers(h).length, fakePrompts(h.state).length];
+	const ends = await h.run([tool("cp_revive", { job_id: job.id, confirm: true }), h.pause(2)]);
+	const revived = ends.find((end) => end.toolName === "cp_revive");
+	assert.match(text(revived), /revive refused \(worktree_unreadable\)[^]*git status failed[^]*Nothing was spawned or committed/);
+	assert.equal(ofType(h, job.id, "worker_revived").length, 0, "no relaunch");
+	assert.deepEqual([appServers(h).length, fakePrompts(h.state).length], [servers, prompts], "no app-server and no prompt");
+	assert.equal(existsSync(UNREVIEWED_FILE(h, job.id)), false);
+	assert.equal(h.record(job.id)?.phase, "failed");
+	assert.equal(h.git(job.id, "rev-parse", "HEAD"), main, "nothing committed");
+	assertClean(h);
+});
+
+// Scenario: a continue_failed revive names thousands of dirty paths by file, and its freeze commits none (C8 c, g)
+//   Given CX-7c's killed job A plus 3,000 untracked 120-character paths (about 400 KB, past one env string's limit)
+//   When cp_revive continue_failed:true confirm runs and /cp-drain freeze checkpoints the revived turn,
+//   Then the revive names r1.txt "and 2981 more", the list sits in native-unreviewed.json (0600), and the WIP commit
+//   holds wip.txt only. Before C8 the list rode in the spawn env, which fails with E2BIG at this size.
+test("CX-8b: cp_revive continue_failed names 3,001 unreviewed paths by file; the freeze commits wip.txt only", { skip, timeout: 420_000 }, async (t) => {
+	const h = await shipHome(t);
+	const main = h.originRefs()["refs/heads/main"];
+	const job = await lockdownKilled(h);
+	const dirt = join(h.worktree(job.id), "zz-dirt");
+	mkdirSync(dirt);
+	for (let i = 0; i < 3_000; i++) writeFileSync(join(dirt, `${String(i).padStart(4, "0")}${"x".repeat(116)}`), "");
+	const { drain, revived } = await reviveAndFreeze(h, job.id, { continue_failed: true });
+	assert.notEqual(revived?.isError, true, text(revived));
+	assert.match(text(revived), /left uncommitted paths nobody reviewed: r1\.txt, zz-dirt\/[^]*, and 2981 more/);
+	const event = ofType(h, job.id, "worker_revived")[0]?.payload as { unreviewed_changes?: string[]; continue_failed_as_revive?: boolean } | undefined;
+	assert.deepEqual([event?.continue_failed_as_revive, event?.unreviewed_changes?.length, event?.unreviewed_changes?.[0]], [true, 20, "r1.txt"]);
+	const file = UNREVIEWED_FILE(h, job.id);
+	assert.equal((JSON.parse(readFileSync(file, "utf8")) as string[]).length, 3_001);
+	assert.equal(statSync(file).mode & 0o777, 0o600);
+	const head = h.git(job.id, "rev-parse", "HEAD");
+	assert.ok(drain.includes(`freeze: ${job.id} checkpointed (native codex at ${head})`), drain);
+	assert.deepEqual(h.git(job.id, "show", "--name-only", "--format=", "HEAD").split("\n"), ["wip.txt"], "the WIP commit holds wip.txt only");
+	assert.equal(h.git(job.id, "rev-parse", "HEAD~1"), main);
+	assert.equal(h.git(job.id, "status", "--porcelain", "--untracked-files=all").split("\n").length, 3_001, "every named path stays untracked");
+	const checkpoint = ofType(h, job.id, "native_checkpoint")[0]?.payload as { unreviewed?: string[]; error?: string } | undefined;
+	assert.deepEqual([checkpoint?.unreviewed?.length, checkpoint?.unreviewed?.[0], checkpoint?.error], [5, "r1.txt", undefined], JSON.stringify(checkpoint));
+	assert.equal(h.originRefs()[`refs/heads/${job.id}`], undefined, "a local job pushes nothing");
+	assertClean(h);
+});
+
+// Scenario: an unreadable unreviewed list answers the checkpoint with an error and the worker settles (C8 b)
+//   Given CX-7n's revived codex implementer mid-turn, When its native-unreviewed.json is overwritten with junk and
+//   /cp-drain freeze runs, Then the drain names "not checkpointed … nothing was checkpointed", nothing is committed,
+//   agent_settled follows and the job is not failed. Before C8 the throw failed the job with native_resume_failed.
+test("CX-8c: a malformed unreviewed list answers the freeze checkpoint with an error; nothing committed, the worker settles", { skip, timeout: 420_000 }, async (t) => {
+	const h = await shipHome(t);
+	const main = h.originRefs()["refs/heads/main"];
+	const job = await lockdownKilled(h);
+	const { drain } = await reviveAndFreeze(h, job.id, {}, () => writeFileSync(UNREVIEWED_FILE(h, job.id), "{not json"));
+	assert.match(drain, new RegExp(`freeze: ${job.id} not checkpointed: [^\\n]*nothing was checkpointed`), drain);
+	const checkpoint = ofType(h, job.id, "native_checkpoint")[0]?.payload as { head?: string; error?: string } | undefined;
+	assert.deepEqual([checkpoint?.head, /nothing was checkpointed/.test(checkpoint?.error ?? "")], [undefined, true], JSON.stringify(checkpoint));
+	assert.equal(h.git(job.id, "rev-parse", "HEAD"), main, "nothing committed");
+	assert.equal(ofType(h, job.id, "native_resume_failed").length, 0);
+	assert.notEqual(h.record(job.id)?.phase, "failed");
 	assertClean(h);
 });
 

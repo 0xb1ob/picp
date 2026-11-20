@@ -950,6 +950,10 @@ export function reviewerRoutingEvent(
 		...(decision.attempted ? { attempted: decision.attempted } : {}),
 		...(decision.capacity ? { capacity: decision.capacity } : {}),
 		...(decision.quota ? { quota: decision.quota } : {}),
+		// C8 (i): dispatch's `driverFields`, inline (dispatch-driver.ts imports this module).
+		...(decision.requested_driver ? { requested_driver: decision.requested_driver } : {}),
+		...(decision.driver ? { driver: decision.driver } : {}),
+		...(decision.driver_reason ? { driver_reason: decision.driver_reason } : {}),
 		// The axes routing was actually given: absent means unknown, which is what
 		// `provenance` says. A default is never recorded as a measurement.
 		...(inputs.scope ? { scope: inputs.scope } : {}),

@@ -10,16 +10,15 @@ import { createInterface } from "node:readline";
 import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
 import { agentDirOf, claudeMcpSection, type CodexMcpServers, codexMcpConfig, readUserMcpServers } from "../worker-mcp.ts";
 import {
-	assertNativeResume, claimFollowUps, enqueueFollowUp, NATIVE_CODEX_SCRATCH_PREFIX, NATIVE_CODEX_SESSION_FILE, NATIVE_UNREVIEWED_ENV, type NativeSession,
+	assertNativeResume, claimFollowUps, enqueueFollowUp, NATIVE_CODEX_SCRATCH_PREFIX, NATIVE_CODEX_SESSION_FILE, NATIVE_UNREVIEWED_FILE_ENV, type NativeSession,
 	nativeSessionMoved,
-	readNativeSession, removeNativeScratch, returnClaim, settleClaim, writeNativeSession,
+	readNativeSession, readNativeUnreviewed, removeNativeScratch, returnClaim, settleClaim, writeNativeSession,
 } from "./claude-followup.ts";
 import { startIdlePrompt } from "./claude-lifecycle.ts";
 import { implementerArtifactPath, implementerExclusions, nativeWorkerChildEnv } from "./claude-roles.ts";
 import { nativeTranscriptFile } from "./claude-transcript.ts";
 import { nativeDenials } from "./claude-usage.ts";
 import { OBSERVATION_EVENT } from "./claude-observation.ts";
-import { loadNativeConfig, nativeConfigFile } from "../worker-driver.ts";
 import { codexDoorRefusal, codexPersistRefusal, READ_ROOTS_ENV, SKILL_DIRS_ENV } from "./codex.ts";
 import { codexCheckpointCommit } from "./native-forge.ts";
 import { codexErrorCode, codexLimit, USAGE_LIMIT } from "./codex-observation.ts";
@@ -55,15 +54,11 @@ const checkpointReplies: Array<(body: Record<string, unknown>) => void> = [];
 // Set while an idle prompt's resume admission is pending: busy, but no turn exists to checkpoint.
 let admitting = false;
 
-/** Condition 2: `totals` is first written only while the job's class switch is on (codex_ship for a ship job); a
- * record holding it is updated by every counted run. */
+/** Condition 2: `totals` is first written only while the job's class switch is on; a record holding it is updated by
+ * every counted run. */
 function persistTotals(): boolean {
-	if (!ship) return codexPersistRefusal(env.CP_HOME ?? "", "the Codex session record") === undefined;
-	try {
-		return loadNativeConfig(nativeConfigFile(env.CP_HOME ?? "")).codex_ship;
-	} catch {
-		return false;
-	}
+	const codexClass = ship ? "codex_ship" : reviewer ? "codex_review" : "codex_research";
+	return codexPersistRefusal(env.CP_HOME ?? "", "the Codex session record", codexClass) === undefined;
 }
 
 /** A new record and scratch dir; a previous record's picp-made scratch dir is removed first, never orphaned. */
@@ -213,7 +208,8 @@ async function turn(prompt: string): Promise<Turn> {
 	const contract = readSystemPrompt();
 	const systemPrompt = !user || user.section === "" ? contract : `${contract.trimEnd()}${user.section}\n`;
 	const skills = reviewer ? [] : absoluteDirs(SKILL_DIRS_ENV);
-	const readRoots = reviewer ? [] : absoluteDirs(READ_ROOTS_ENV);
+	// C8 (e): read roots are a ship toolchain aid; a planner never reads the variable.
+	const readRoots = ship ? absoluteDirs(READ_ROOTS_ENV) : [];
 	const excludePaths = ship ? implementerExclusions(env.CP_HOME ?? "") : undefined;
 	const fresh = resuming ? await movedSession(worktree) : undefined;
 	if (fresh !== undefined) {
@@ -320,25 +316,19 @@ async function endReviewerSession(): Promise<void> {
 }
 
 /** C1: the paths the revive named; unreadable means none could be named, so the checkpoint commits nothing at all. */
-function unreviewedPaths(): string[] {
-	const raw = env[NATIVE_UNREVIEWED_ENV];
-	if (!raw) return [];
-	try {
-		const paths = JSON.parse(raw) as unknown;
-		if (Array.isArray(paths) && paths.every((path) => typeof path === "string")) return paths as string[];
-	} catch {
-		// Falls through to the refusal below.
-	}
-	throw new Error(`${NATIVE_UNREVIEWED_ENV} is not a JSON array of paths; nothing was checkpointed`);
+function unreviewedPaths(): string[] | { error: string } {
+	const file = env[NATIVE_UNREVIEWED_FILE_ENV];
+	return file ? readNativeUnreviewed(file) : [];
 }
 
 /** After a frozen turn: the WIP commit (hooks off, staged-path gate) and its replies; a named stop wins and is kept. */
 async function checkpointed(last: Turn | undefined): Promise<number> {
 	freezing = false;
 	const named = last?.stopped ? `the turn ended on a named stop (${last.stop}); nothing was checkpointed` : undefined;
-	const outcome = named !== undefined ? { error: named } : await codexCheckpointCommit(
+	const unreviewed = named === undefined ? unreviewedPaths() : [];
+	const outcome = named !== undefined ? { error: named } : !Array.isArray(unreviewed) ? unreviewed : await codexCheckpointCommit(
 		{ job_id: jobId, worktree: env.CP_WORKTREE ?? "", runDir },
-		{ excluded: implementerExclusions(env.CP_HOME ?? ""), env, unreviewed: unreviewedPaths(), push: env.CP_DELIVERY !== "local" },
+		{ excluded: implementerExclusions(env.CP_HOME ?? ""), env, unreviewed, push: env.CP_DELIVERY !== "local" },
 	);
 	if (named === undefined) write({ type: "native_checkpoint", ...outcome });
 	for (const answer of checkpointReplies.splice(0)) answer("head" in outcome ? { success: true, data: outcome } : { success: false, ...outcome });

@@ -6,7 +6,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Delivery, JobKind, Role } from "../contracts.ts";
-import { type CodexClass, loadNativeConfig, nativeConfigFile } from "../worker-driver.ts";
+import { CODEX_CLASSES, type CodexClass, loadNativeConfig, nativeConfigFile } from "../worker-driver.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
 import { WORKER_MEMORY_MAX_ENV } from "../worker-scope.ts";
 import { liveNativeJobs, NativeDriverError, type NativeRefusal, type NativeSelection, nativeSlotRefusal } from "./claude.ts";
@@ -58,18 +58,27 @@ export function codexMaxConcurrent(home: string): number {
 	}
 }
 
+/** A rubric row's Codex class by its role; a role with no Codex class is undefined. */
+export const codexRowClass = (role: Role): CodexClass | undefined =>
+	role === "planner" ? "codex_research" : role === "implementer" ? "codex_ship" : role === "gate-reviewer" ? "codex_review" : undefined;
+
 /**
  * Why picp may not persist a `codex` value (a queued or armed request, a rubric row) in this home: while every codex
- * switch is off, the fleet, queue, routing and native.json files stay readable by a build before C1b.
+ * switch is off, the fleet, queue, routing and native.json files stay readable by a build before C1b. C8 (h): a value
+ * of a known class needs that class's switch; with no class (queue, armed) any codex switch passes.
  */
-export function codexPersistRefusal(home: string, what: string): string | undefined {
-	let on: boolean;
+export function codexPersistRefusal(home: string, what: string, codexClass?: CodexClass): string | undefined {
+	let config: ReturnType<typeof loadNativeConfig>;
 	try {
-		on = loadNativeConfig(nativeConfigFile(home)).codex_research;
+		config = loadNativeConfig(nativeConfigFile(home));
 	} catch (error) {
 		return `${what} names the codex driver and data/native.json is unreadable (${(error as Error).message}); nothing was written`;
 	}
-	return on ? undefined : `${what} names the codex driver while codex_research is off (data/native.json); turn it on first. Nothing was written`;
+	if (codexClass !== undefined) {
+		return config[codexClass] ? undefined : `${what} names the codex driver while ${codexClass} is off (data/native.json); turn it on first. Nothing was written`;
+	}
+	return CODEX_CLASSES.some((each) => config[each]) ? undefined
+		: `${what} names the codex driver while every codex switch is off (data/native.json); turn one on first. Nothing was written`;
 }
 
 /** The first selection refusal, in order: switch file, class, switch, delivery, profile, slot, scope, CLI, login. */
@@ -159,7 +168,8 @@ function codexAddendum(env: NodeJS.ProcessEnv): string {
 
 /**
  * Overrides pi's argv with the Codex worker; the role contract goes to a 0600 file in the run dir, not the argv or env.
- * `skills` (C5): the per-job skill dirs, as `CP_CODEX_SKILL_DIRS`; the parent's `CP_CODEX_READ_ROOTS` passes as is.
+ * `skills` (C5): the per-job skill dirs, as `CP_CODEX_SKILL_DIRS`; the parent's `CP_CODEX_READ_ROOTS` reaches an
+ * implementer only (C8 e).
  */
 export function codexSpawnOptions(
 	model: string, env: NodeJS.ProcessEnv, systemPrompt: string, options: { skills?: readonly string[] } = {},
@@ -171,7 +181,7 @@ export function codexSpawnOptions(
 	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${codexAddendum(env)}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	const memory = process.env[WORKER_MEMORY_MAX_ENV];
-	const readRoots = process.env[READ_ROOTS_ENV];
+	const readRoots = env.CP_ROLE === "implementer" ? process.env[READ_ROOTS_ENV] : undefined;
 	const { [SKILL_DIRS_ENV]: _inherited, [READ_ROOTS_ENV]: _roots, ...rest } = env;
 	return {
 		piBin: process.execPath,

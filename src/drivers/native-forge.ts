@@ -226,6 +226,8 @@ export function checkpointCommit(worktree: string, branch: string, env: NodeJS.P
 	}
 }
 
+const UNSTAGE_BATCH = 500;
+
 export interface CodexCheckpointOptions extends Omit<CommitOptions, "hooksOff"> {
 	/** C1: paths a lockdown-killed run left that the revive named; never WIP-committed, named in `unreviewed`. */
 	unreviewed?: readonly string[];
@@ -252,9 +254,13 @@ export async function codexCheckpointCommit(job: ForgeJob, options: CodexCheckpo
 	if (typeof hits === "string") return { error: bounded(hits) };
 	const staged = await git(["diff", "--cached", "--name-only", "--no-renames", "-z"]);
 	if (!staged.ok) return { error: bounded(staged.out) };
-	const held = staged.out.split("\0").filter((path) => (options.unreviewed ?? []).includes(path) && !hits.includes(path));
-	if (hits.length + held.length > 0) {
-		const unstaged = await git(["reset", "-q", "--", ...hits, ...held]);
+	const named = new Set(options.unreviewed ?? []);
+	const gated = new Set(hits);
+	const held = staged.out.split("\0").filter((path) => named.has(path) && !gated.has(path));
+	// C8 (c): batched, so thousands of named paths never overflow one argv.
+	const unstage = [...hits, ...held];
+	for (let at = 0; at < unstage.length; at += UNSTAGE_BATCH) {
+		const unstaged = await git(["reset", "-q", "--", ...unstage.slice(at, at + UNSTAGE_BATCH)]);
 		if (!unstaged.ok) return { error: bounded(`unstaging the excluded or unreviewed paths failed: ${unstaged.out}`) };
 	}
 	const merging = (await git(["rev-parse", "-q", "--verify", "MERGE_HEAD"])).ok;

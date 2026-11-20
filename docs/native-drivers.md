@@ -1187,7 +1187,7 @@ nothing, so the next run counts both. Live `message_update` is the same growth, 
 Cost stays 0 with `cost_unknown` (D3).
 
 **Shipped off (main-session condition 2, C2).** `totals` is a new-shape value: the worker writes it only while
-`codex_research` is on (`codexPersistRefusal`). With every codex switch off no codex job runs, so no session record
+job's class switch is on (`codexPersistRefusal`; `codex_research` for a planner, C8). With every codex switch off no codex job runs, so no session record
 holds it; CX-off-2 asserts no `native-codex` record, no `totals` and no codex driver value in the fleet, run log, queue,
 armed file or `native.json`. A session record without `totals` resumes on the CLI's replayed total.
 
@@ -1385,12 +1385,13 @@ the PR. No data migration. The flip, by hand: add the row, then turn on `codex_r
 **Known limits.** No MCP server and no `ls`; a full codex slot runs pi; a reviewer's limit observation is not recorded
 (as a Claude reviewer's is not); the footer and the Settings rubric write still key on `codex_research`; a SIGKILLed
 reviewer worker leaves its thread and scratch dir; a thread refused between `thread/start` and its first turn is not
-deleted, as for the planner. A reviewer's route reason (`driver_reason`, `requested_driver`) is not in its
-`routing_resolved` event, only `driver=` in its line.
+deleted, as for the planner. (Until C8 a reviewer's `routing_resolved` event had no `driver`, `driver_reason` or
+`requested_driver` field, only `driver=` in its line; C8 (i) adds them.)
 
-**C8 carry-in list** (opened in C6): Q3, `codexPersistRefusal` keys on `codex_research` alone, so with only
-`codex_review` on a Settings rubric write that adds a codex row is refused naming `codex_research`, and a reviewer's pi
-fallback record omits `requested_driver`. C8 owns Settings.
+**C8 carry-in list** (opened in C6, closed in C8): Q3, `codexPersistRefusal` keyed on `codex_research` alone, so with
+only `codex_review` on a Settings rubric write that adds a codex row was refused naming `codex_research`, and a
+reviewer's pi fallback record omitted `requested_driver`. Both closed by C8 (h) and (i): see
+[C8 carry-ins](#c8-carry-ins).
 
 | KC | Criterion | CI (fake) | Real CLI |
 |---|---|---|---|
@@ -1408,7 +1409,7 @@ verdicts above rest on the cp-6sq6 offline probes.
 C7a is steps 1-3 of the C7 plan (cp-95u6, approved es-3e598d): the pieces a Codex implementer needs, with **no
 selection reaching them**. `codex_ship` still selects nothing, `codexClassOf` and `codex-worker.ts` are unchanged, and no
 `data/*.json` or `defaults/routing*.json` was edited. C7b (steps 4-5: selection, spawn env, worker, checkpoint, moved
-thread) wires them, with CX-7a…7l in `tests/e2e/codex-ship.test.ts`; see [C7b](#c7b-ship-jobs-wired-shipped-off).
+thread) wires them, with CX-7a…7n in `tests/e2e/codex-ship.test.ts`; see [C7b](#c7b-ship-jobs-wired-shipped-off).
 
 **Profile `picp_implementer`** (`codexPermissionProfile` with `role: "implementer"`, `codexRunRoots`): `/` deny,
 `:minimal` read, the worktree **write**; `<worktree>/.git`, the git common dir, the codex release dir, skill dirs,
@@ -1416,8 +1417,8 @@ operator read roots and each excluded path that exists at the run's start read; 
 no network. Excluded paths (`codexExcludedRoots`): a plain needle joined to the worktree, a glob through `globSync`
 (at most 200 hits, `.git` and `node_modules` not walked), each kept only when its realpath stays inside; a missing path
 is never listed (the sandbox would create it, PA). A file entry holds (LS-9o-P: `.env.local`). Read roots
-(`CP_CODEX_READ_ROOTS`, wired in C7b) are vetted as skill dirs are: never a home, the Codex home, the agent dir or the
-CP home.
+(`CP_CODEX_READ_ROOTS`, wired in C7b, a ship implementer's only since C8) are vetted as skill dirs are: never a home,
+the Codex home, the agent dir or the CP home.
 
 **Lockdown.** `activePermissionProfile.id` must equal the id picp passed (one of the two). The thread read-back does
 not list the writable worktree (the cwd) as a writable root (PA), so an implementer run also reads its profile back
@@ -1476,7 +1477,7 @@ the loopback mock model, a throwaway Codex home, zero tokens; run once on 2026-1
   credential-free env. Hooks and fsmonitor are off (C3); the model cannot write git config (PA).
 - **RR3.** The project's commit hooks do not run for a codex job; CI is the check.
 - **RR4.** No network and a narrow read set: many repositories cannot install or test. `CP_CODEX_READ_ROOTS` widens
-  reads; whatever it names is readable by the model.
+  a ship implementer's reads (never a planner's or reviewer's, C8); whatever it names is readable by that model.
 - **RR5.** No `apply_patch`: more turns and tokens per edit; measured once by LS-9 (C7b), not soaked.
 - **RR6.** Permission profiles, `hooks.state` trust, dynamic tools and the `.git` protection are experimental or
   undocumented; a CLI update can change them. The lockdown and LS-9o-P fail closed; recovery is the switch.
@@ -1507,28 +1508,30 @@ with `driver: "codex"` (or matched by a rubric row naming it) and an explicit `o
 | Piece | What happens |
 |---|---|
 | Selection | `codexClassOf` returns `codex_ship` for implementer ship; delivery other than `pr` or `local` is `ineligible`; switch off is `switch: the switch codex_ship is off` (an explicit dispatch refuses before any lease, a row falls back to pi) |
-| Spawn | `nativeSpawn` passes `CP_BASE_BRANCH` to codex as to Claude; the addendum is `CODEX_SHIP_ADDENDUM` (pr) or `CODEX_LOCAL_SHIP_ADDENDUM` (local): shell writes, no `apply_patch`, no git writes in the shell, `git_commit`, `git_merge`, `git_push`, `pr_create`, `head_sha`; the parent's `CP_CODEX_READ_ROOTS` passes to the worker |
+| Spawn | `nativeSpawn` passes `CP_BASE_BRANCH` to codex as to Claude; the addendum is `CODEX_SHIP_ADDENDUM` (pr) or `CODEX_LOCAL_SHIP_ADDENDUM` (local): shell writes, no `apply_patch`, no git writes in the shell, `git_commit`, `git_merge`, `git_push`, `pr_create`, `head_sha`; the parent's `CP_CODEX_READ_ROOTS` passes to an implementer only (C8) |
 | Worker | the implementer's artifact path and `exclude_paths` as on Claude; no `mcp.json` read and no MCP server (R3, also refused in the run core); read roots vetted by `codexSkillRoots` (a home, the Codex home, the agent dir or the CP home refuses the run before any app-server); the session record keeps `base` |
 | Profile | the worktree entry is its realpath, so a symlinked worktree still holds its read-only `.git` and excluded entries (`codexExcludedRoots` returns realpaths) |
 | Git refusals | `codexGitGuard` runs first in the chain and also refuses `git fetch`, `pull` and `push` in the shell, naming `git_fetch` then `git_merge`, or `git_push`; `git_push`'s non-fast-forward refusal names `git_merge` for codex |
 | Checkpoint (Q2) | the freeze drain's `checkpoint` aborts the turn (the run's own stop sequence), then `codexCheckpointCommit`: hooks and fsmonitor off, a credential-free commit, the staged-path gate (a gated path stays uncommitted and is named in `native_checkpoint.excluded`), C1's unreviewed paths left uncommitted and named in `native_checkpoint.unreviewed` and the answer (CX-7n), then the best-effort push, none for delivery `local`; then `agent_settled`. Idle, admission-pending and named-stop cases answer as the Claude worker does; research and reviewers stay refused by name |
 | Moved worktree (Q4) | a resume whose record names another `cwd` emits `native_session_moved`, deletes the old thread (`native_thread_deleted`), starts a fresh record and thread, and leads the prompt with the brief; research keeps the by-name refusal |
-| C1 (RR1) | `cp_revive` (a native continue is the same revive) of a codex implementer whose last `native_run` stopped `lockdown` names its uncommitted paths before the relaunch: in the plan and result text, in `worker_revived.unreviewed_changes`, and after picp's revive prompt, which tells the worker to inspect each before any `git_commit`. The revived worker gets them as `CP_NATIVE_UNREVIEWED`, so its freeze checkpoint never commits them (CX-7n). A `continue_failed` is this same revive (`src/revive.ts` `plan()`, J7). Nothing is committed by picp |
-| Persisted | `totals` in the session record is written for a ship job while `codex_ship` is on. `codexPersistRefusal` (queue, armed, rubric write, a row fallback's `requested_driver`) still keys on `codex_research` (C8) |
+| C1 (RR1) | `cp_revive` (a native continue is the same revive) of a codex implementer whose last `native_run` stopped `lockdown` names its uncommitted paths before the relaunch: in the plan and result text, in `worker_revived.unreviewed_changes`, and after picp's revive prompt, which tells the worker to inspect each before any `git_commit`. The revived worker reads them from `<run dir>/native-unreviewed.json` (`CP_NATIVE_UNREVIEWED_FILE`, C8), so its freeze checkpoint never commits them (CX-7n, CX-8b). A `continue_failed` is this same revive (`src/revive.ts` `plan()`, J7). Nothing is committed by picp |
+| Persisted | `totals` in the session record is written for a ship job while `codex_ship` is on. `codexPersistRefusal` follows the value's class switch since C8 (see [C8 carry-ins](#c8-carry-ins)) |
 
 **Shipped off (C7b).** With every switch off an explicit codex ship dispatch refuses before any lease naming
 `codex_ship`, and a codex `small-ship` row runs pi with `switch:` and no `requested_driver`; no `native-codex` record and
 no codex driver value is written to fleet, queue, armed, run log or `native.json`, so a build before C7b reads every
 file (CX-7i). Contract schemas and the golden are unchanged; `worker_revived` may carry `unreviewed_changes` and
 `native_checkpoint` may carry `excluded` and `unreviewed`, only in a home that ran a codex ship job. The flip, by hand: add the row (or
-dispatch explicitly), then turn on `codex_ship` (and `codex_research` for a queued or armed codex dispatch, C8).
+dispatch explicitly), then turn on `codex_ship` (since C8 it also admits a queued or armed codex dispatch).
 Recovery: `codex_ship` off (new jobs route pi; a live codex job still tears down and deletes its thread), or revert the
 PR; no data migration. Before a build older than C7b, tear down every codex ship job.
 
 **Live (LS-9, run once on 2026-11-19, codex-cli 0.170.0, operator's login, one turn).** The worker entry as a local
 ship implementer appended a line with the shell, committed through `git_commit` and reported `head_sha`: lockdown `ok`,
 51,082 tokens at cost 0, 0 `apply_patch` denials (RR5: none needed for this edit), the thread deleted. Its survivor
-assertion (no command, app-server or `picp-codex-*` scope left) was added after that run and has not run live yet.
+assertion (no command, app-server or `picp-codex-*` scope left) was added after that run. **C8 (j):** run once more on
+2026-11-20, codex-cli 0.170.0, on the C8 PR 1 tree: exit 0, lockdown `ok`, 51,105 tokens, report accepted, 0
+`apply_patch` denials, 0 denials; survivors: commands 0, app-servers 0 (before 0), scopes 0 (before 0). KC5 held.
 
 **Negative controls** (run once each and restored): N1 no excluded carve-outs: CX-7c fails on job B's file; N2 the
 `fileChange` approval answered `accept`: CX-7d fails on the dead-hook patch's file; N3 no staged-path gate: CX-7e fails
@@ -1537,8 +1540,8 @@ already killed before the CLI asks for the tool, so job C alone cannot reach the
 fails on the revive text; the unreviewed exclusion dropped: CX-7n fails on r1.txt in the WIP commit; a local checkpoint
 pushing: CX-7n fails on `pushed: true`.
 
-**Known limits.** The C7a limits stand (RR1-RR8). A ship job's queued or armed codex dispatch and a codex rubric write
-still need `codex_research` on (C8 owns the persist guard). A checkpoint during a merge commits the merge as the WIP.
+**Known limits.** The C7a limits stand (RR1-RR8). A checkpoint during a merge commits the merge as the WIP. (The
+C7b limit that a queued, armed or rubric codex value needed `codex_research` is closed by C8 (h).)
 
 | KC | Criterion | CI (fake) | Real CLI |
 |---|---|---|---|
@@ -1546,8 +1549,39 @@ still need `codex_research` on (C8 owns the persist guard). A checkpoint during 
 | 2 | a dead hook lets a tool have an effect outside the implementer's write set, or a picp tool run | held: CX-7c (jobs A-C), CX-7c job D (no ticket) | held (LS-9o-R, LS-7o-D) |
 | 3 | `report_result` accepts another job | unchanged (CX-1a, same tool) | none |
 | 4 | usage counted twice across a checkpoint, resume or moved thread | held: CX-7f | unchanged (LS-3c) |
-| 5 | a process survives a stop, a checkpoint or teardown | held: CX-7a, CX-7c, CX-7f (every scope killed or collected) | LS-9's survivor assertion not yet run live |
+| 5 | a process survives a stop, a checkpoint or teardown | held: CX-7a, CX-7c, CX-7f (every scope killed or collected) | held (LS-9 survivors 0/0/0, run 2026-11-20, C8 j) |
 | 6 | a differing profile or an extra surface is not refused | held: CX-7k | held (LS-9o-P, LS-9) |
 
-Cases: `tests/e2e/codex-ship.test.ts` (CX-7a…7l, CX-7n, plus CX-7m, a unit check: no entry point leases a symlinked
-worktree) and the opt-in LS-9 in `tests/e2e/codex-worker-live-smoke.test.ts`.
+Cases: `tests/e2e/codex-ship.test.ts` (CX-7a…7n; CX-7m is a unit check: no entry point leases a symlinked worktree)
+and the opt-in LS-9 in `tests/e2e/codex-worker-live-smoke.test.ts`.
+
+### C8 carry-ins
+
+C8's first PR (cp-tmbb plan, PR 1) closes the carry-ins the main session decided on code that is already merged and off.
+Every switch still ships **off**; no `data/*.json` or `defaults/routing*.json` was edited.
+
+| Item | Before | Now | Case |
+|---|---|---|---|
+| a | a `git status` failure in `lockdownChanges` became an "unreviewed path" (`(git status failed: …)`) that matched nothing, so a later freeze committed the dirt | `cp_revive` refuses with the new code `worktree_unreadable`: nothing spawned or committed; fix the checkout and retry, or `cp_teardown` | CX-8a |
+| b | a malformed list made `checkpointed()` throw: `native_resume_failed`, the job failed | `readNativeUnreviewed` returns `{ error }`; the checkpoint answers `success: false` ("nothing was checkpointed"), `native_checkpoint.error`, then `agent_settled` | CX-8c |
+| c | the whole list rode in one env string (`CP_NATIVE_UNREVIEWED`), past the kernel's 128 KiB per-string limit (E2BIG) for a large dirty tree | `<run dir>/native-unreviewed.json` (0600, tmp + rename) passed as `CP_NATIVE_UNREVIEWED_FILE`; a revive with nothing to name removes a stale one. `codexCheckpointCommit` matches by `Set` and unstages in batches of 500 | CX-8b |
+| e | every non-reviewer role got `CP_CODEX_READ_ROOTS` | the spawn passes it to an implementer only and the worker reads it for a ship job only | CX-8e, CX-7l |
+| g | no e2e drove `cp_revive continue_failed:true` on a codex implementer | the J7 continue reaches the same `lockdownChanges` naming (`continue_failed_as_revive: true`) | CX-8b |
+| h | `codexPersistRefusal` keyed on `codex_research` alone | with a class (a rubric row by role, a row fallback's `requested_driver`, the session record's `totals`) it reads that class's switch; with none (queued and armed dispatches) any codex switch passes, else `… while every codex switch is off …`. All three off refuses everything, as before | SD-codex-class, CX-8i, T-row |
+| i | a reviewer's `routing_resolved` had no driver field | `requested_driver`, `driver`, `driver_reason`, each when the decision has it (with codex off: `driver: "pi"` and the switch reason, no `requested_driver`) | CX-8i, CX-6a, CX-6d |
+
+**Persisted shapes.** `<run dir>/native-unreviewed.json` is new and written only by a revive of a lockdown-killed codex
+implementer; an older build ignores it. A reviewer's `routing_resolved` gains three open-payload fields, `pi` and a
+reason text while codex is off. Nothing else changes shape, and with every codex switch off no file takes a codex
+value (T-row, CX-off-2, CX-6d, CX-7i). Recovery: revert the PR; no data migration. A stale `native-unreviewed.json` is
+harmless and replaced at the next revive.
+
+| KC | For C8 | Held by |
+|---|---|---|
+| 1 | picp commits a lockdown-killed run's unreviewed dirt (checkpoint or revive) | CX-8a, CX-8b, CX-8c; CX-7n unchanged |
+| 5 | a command, app-server or `picp-codex-*` scope outlives LS-9 | held: LS-9 run once live on 2026-11-20 (survivors 0, 0, 0; see C7b above) |
+| 6 | an extra surface reaches a role: read roots in a planner profile | CX-8e |
+| C2 | a codex value is persisted while every codex switch is off | T-row, CX-off-2, CX-6d, CX-7i |
+
+Cases: CX-8a…8c in `tests/e2e/codex-ship.test.ts`, CX-8e in `tests/e2e/codex-worker-tools.test.ts`, CX-8i in
+`tests/e2e/codex-reviewer.test.ts`, SD-codex-class in `tests/e2e/settings-drivers.test.ts`.

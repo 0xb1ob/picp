@@ -271,6 +271,29 @@ test("CX-5h: a resumed codex thread keeps its MCP servers", { skip, timeout: 300
 	assertClean(h);
 });
 
+// Scenario: operator read roots reach a ship implementer only, never a planner (C8 e)
+//   Given the parent's CP_CODEX_READ_ROOTS naming a tool dir, When a codex planner cats a file there and reports,
+//   Then its profile never lists the dir and the file is not read; with the variable set to `not json` a second planner
+//   still reports. Before C8 the planner's profile read the dir and the junk value stopped its turn.
+test("CX-8e: CP_CODEX_READ_ROOTS never reaches a codex planner: no profile entry, no read, junk ignored", { skip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_max_concurrent: 2 } });
+	const tools = join(h.root, "tools");
+	mkdirSync(tools);
+	writeFileSync(join(tools, "tool"), "PLANNER-READ-ROOT-SENTINEL\n");
+	const [a, b] = [await h.job(), await h.job()];
+	h.setScript({ turns: [h.reporting(a.id, [{ kind: "shell", command: `cat ${join(tools, "tool")}` }]), h.reporting(b.id)] });
+	await h.run([a.dispatch(), h.awaitEnvelope(a.id), h.pause(2)], { CP_CODEX_READ_ROOTS: JSON.stringify([tools]) });
+	assert.equal(ofType(h, a.id, "envelope_received").length, 1);
+	const profiles = appServers(h).flatMap((each) => each.argv).filter((arg) => arg.startsWith("permissions.picp_planner="));
+	assert.ok(profiles.length > 0, "the planner profile was passed");
+	for (const flag of profiles) assert.ok(!flag.includes(tools) && !flag.includes(realpathSync(tools)), flag);
+	assert.doesNotMatch(readFileSync(readRunStatus(h.b.home, a.id).transcript_file as string, "utf8"), /PLANNER-READ-ROOT-SENTINEL/);
+	await h.b.closeParents();
+	await h.run([b.dispatch(), h.awaitEnvelope(b.id), h.pause(2)], { CP_CODEX_READ_ROOTS: "not json" });
+	assert.equal(ofType(h, b.id, "envelope_received").length, 1, "a planner ignores the variable");
+	assertClean(h);
+});
+
 // Scenario (main-session condition 3, Q3): Given an `ops:pull` job, When it is dispatched on codex explicitly or
 //   matched by a codex row, Then the explicit request refuses by name before any lease and the row falls back to pi as
 //   ineligible, since the Codex shell has no network and no ssh agent. Catches an ops job silently run without ssh.

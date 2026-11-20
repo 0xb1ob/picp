@@ -131,7 +131,9 @@ test("CX-1b: the switch refuses an explicit codex job by name; a codex row prefe
 	const on = (await h.run([dry(rowOn.id), dry(board.id), dry(ship.id)])).filter((end) => end.toolName === "cp_dispatch");
 	assert.deepEqual([preview(on[0])?.driver, preview(on[0])?.requested_driver], ["codex", "codex"], text(on[0]));
 	assert.match(preview(on[0])?.driver_reason ?? "", /^rule: codex-research prefers codex; effort \w+/);
-	for (const end of [on[1], on[2]]) assert.deepEqual([preview(end)?.requested_driver, preview(end)?.driver], ["codex", "pi"], text(end));
+	assert.deepEqual([preview(on[1])?.requested_driver, preview(on[1])?.driver], ["codex", "pi"], text(on[1]));
+	// C8 (h): the ship fallback's class switch codex_ship is off, so no codex value is recorded.
+	assert.deepEqual([preview(on[2])?.requested_driver, preview(on[2])?.driver], [undefined, "pi"], text(on[2]));
 	assert.match(preview(on[1])?.driver_reason ?? "", /^ineligible: only research \(role planner, delivery local or answer\), ship \(role implementer, delivery pr or local\) and gate reviews run on the Codex CLI/);
 	assert.match(preview(on[2])?.driver_reason ?? "", /^switch: the switch codex_ship is off/);
 	routing([row()], { deny_by_role: { planner: [FAKE_CODEX_REF] } });
@@ -361,7 +363,7 @@ test("C1b T-row: with every codex switch off nothing persisted takes a codex val
 		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: plain.id, task: "Report.", model: piModel, driver: "pi", queue: false, when_ready: false } }] },
 	])).filter((end) => end.toolName === "cp_dispatch");
 	assert.match(text(ends[0]), /the switch codex_research is off/);
-	assert.match(text(ends[1]), /not armed: the armed dispatch of \S+ names the codex driver while codex_research is off/);
+	assert.match(text(ends[1]), /not armed: the armed dispatch of \S+ names the codex driver while every codex switch is off/);
 	assert.notEqual(ends[2]?.isError, true, text(ends[2]));
 	await waitFor(() => h.record(plain.id), Boolean, { timeoutMs: 30_000, what: "the pi job's fleet record" });
 	const persisted = [LAYOUT.fleetFile, LAYOUT.dispatchQueueFile, LAYOUT.routingFile, join(LAYOUT.data, "native.json"), join(LAYOUT.data, "armed-dispatches.json")]
