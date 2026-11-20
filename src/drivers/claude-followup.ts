@@ -22,7 +22,7 @@ export const NATIVE_SCRATCH_PREFIX = "cp-claude-native-";
 /** C1b: the Codex worker's record and scratch dir, in the same schema (teardown and the viewer read both). */
 export const NATIVE_CODEX_SESSION_FILE = "native-codex";
 export const NATIVE_CODEX_SCRATCH_PREFIX = "cp-codex-native-";
-/** C7b (C1), C8 (c): the file holding the revive's unreviewed paths; the revived worker's checkpoint never commits them. */
+/** C7b (C1), C8 (c): the file of the revive's unreviewed paths; the revived worker's checkpoint never commits them. */
 export const NATIVE_UNREVIEWED_FILE_ENV = "CP_NATIVE_UNREVIEWED_FILE";
 export const NATIVE_UNREVIEWED_FILE = "native-unreviewed.json";
 

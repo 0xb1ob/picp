@@ -1529,7 +1529,9 @@ PR; no data migration. Before a build older than C7b, tear down every codex ship
 **Live (LS-9, run once on 2026-11-19, codex-cli 0.170.0, operator's login, one turn).** The worker entry as a local
 ship implementer appended a line with the shell, committed through `git_commit` and reported `head_sha`: lockdown `ok`,
 51,082 tokens at cost 0, 0 `apply_patch` denials (RR5: none needed for this edit), the thread deleted. Its survivor
-assertion (no command, app-server or `picp-codex-*` scope left) was added after that run and has not run live yet.
+assertion (no command, app-server or `picp-codex-*` scope left) was added after that run. **C8 (j):** run once more on
+2026-11-20, codex-cli 0.170.0, on the C8 PR 1 tree: exit 0, lockdown `ok`, 51,105 tokens, report accepted, 0
+`apply_patch` denials, 0 denials; survivors: commands 0, app-servers 0 (before 0), scopes 0 (before 0). KC5 held.
 
 **Negative controls** (run once each and restored): N1 no excluded carve-outs: CX-7c fails on job B's file; N2 the
 `fileChange` approval answered `accept`: CX-7d fails on the dead-hook patch's file; N3 no staged-path gate: CX-7e fails
@@ -1547,7 +1549,7 @@ C7b limit that a queued, armed or rubric codex value needed `codex_research` is 
 | 2 | a dead hook lets a tool have an effect outside the implementer's write set, or a picp tool run | held: CX-7c (jobs A-C), CX-7c job D (no ticket) | held (LS-9o-R, LS-7o-D) |
 | 3 | `report_result` accepts another job | unchanged (CX-1a, same tool) | none |
 | 4 | usage counted twice across a checkpoint, resume or moved thread | held: CX-7f | unchanged (LS-3c) |
-| 5 | a process survives a stop, a checkpoint or teardown | held: CX-7a, CX-7c, CX-7f (every scope killed or collected) | LS-9's survivor assertion not yet run live |
+| 5 | a process survives a stop, a checkpoint or teardown | held: CX-7a, CX-7c, CX-7f (every scope killed or collected) | held (LS-9 survivors 0/0/0, run 2026-11-20, C8 j) |
 | 6 | a differing profile or an extra surface is not refused | held: CX-7k | held (LS-9o-P, LS-9) |
 
 Cases: `tests/e2e/codex-ship.test.ts` (CX-7a…7n; CX-7m is a unit check: no entry point leases a symlinked worktree)
@@ -1577,7 +1579,7 @@ harmless and replaced at the next revive.
 | KC | For C8 | Held by |
 |---|---|---|
 | 1 | picp commits a lockdown-killed run's unreviewed dirt (checkpoint or revive) | CX-8a, CX-8b, CX-8c; CX-7n unchanged |
-| 5 | a command, app-server or `picp-codex-*` scope outlives LS-9 | LS-9, see below |
+| 5 | a command, app-server or `picp-codex-*` scope outlives LS-9 | held: LS-9 run once live on 2026-11-20 (survivors 0, 0, 0; see C7b above) |
 | 6 | an extra surface reaches a role: read roots in a planner profile | CX-8e |
 | C2 | a codex value is persisted while every codex switch is off | T-row, CX-off-2, CX-6d, CX-7i |
 
