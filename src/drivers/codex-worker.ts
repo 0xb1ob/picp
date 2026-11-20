@@ -1,6 +1,6 @@
 /**
- * The Codex CLI research worker (C1b, C2) and (C6) one-shot reviewer on pi's RPC lines (`get_state`, `prompt`,
- * `follow_up`, `steer`): one `runCodexSpike` per turn, the first starting the thread and later ones resuming it.
+ * The Codex CLI research worker (C1b, C2), (C6) one-shot reviewer and (C7b) ship implementer on pi's RPC lines
+ * (`get_state`, `prompt`, `follow_up`, `steer`, `checkpoint`): one `runCodexSpike` per turn, later ones resuming.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -10,15 +10,18 @@ import { createInterface } from "node:readline";
 import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
 import { agentDirOf, claudeMcpSection, type CodexMcpServers, codexMcpConfig, readUserMcpServers } from "../worker-mcp.ts";
 import {
-	assertNativeResume, claimFollowUps, enqueueFollowUp, NATIVE_CODEX_SCRATCH_PREFIX, NATIVE_CODEX_SESSION_FILE, type NativeSession, nativeSessionMoved,
+	assertNativeResume, claimFollowUps, enqueueFollowUp, NATIVE_CODEX_SCRATCH_PREFIX, NATIVE_CODEX_SESSION_FILE, NATIVE_UNREVIEWED_ENV, type NativeSession,
+	nativeSessionMoved,
 	readNativeSession, removeNativeScratch, returnClaim, settleClaim, writeNativeSession,
 } from "./claude-followup.ts";
 import { startIdlePrompt } from "./claude-lifecycle.ts";
-import { nativeWorkerChildEnv } from "./claude-roles.ts";
+import { implementerArtifactPath, implementerExclusions, nativeWorkerChildEnv } from "./claude-roles.ts";
 import { nativeTranscriptFile } from "./claude-transcript.ts";
 import { nativeDenials } from "./claude-usage.ts";
 import { OBSERVATION_EVENT } from "./claude-observation.ts";
-import { codexDoorRefusal, codexPersistRefusal, SKILL_DIRS_ENV } from "./codex.ts";
+import { loadNativeConfig, nativeConfigFile } from "../worker-driver.ts";
+import { codexDoorRefusal, codexPersistRefusal, READ_ROOTS_ENV, SKILL_DIRS_ENV } from "./codex.ts";
+import { codexCheckpointCommit } from "./native-forge.ts";
 import { codexErrorCode, codexLimit, USAGE_LIMIT } from "./codex-observation.ts";
 import type { ItemNotification, TokenUsageUpdatedNotification } from "./codex-protocol.ts";
 import { type CodexRunControl, type CodexRunUsage, type CodexSpikeResult, type CodexTokenTotals, type CodexToolEvent, runCodexSpike, ZERO_TOTALS } from "./codex-spike.ts";
@@ -34,6 +37,7 @@ const jobId = env.CP_JOB_ID ?? "this job";
 const runDir = env.CP_RUN_DIR ?? "";
 const sessionFile = join(runDir, NATIVE_CODEX_SESSION_FILE);
 const reviewer = env.CP_ROLE === "gate-reviewer";
+const ship = env.CP_KIND === "ship" && env.CP_ROLE === "implementer";
 let abort = new AbortController();
 let run: Promise<number> | undefined;
 let busy = false;
@@ -45,23 +49,36 @@ let resuming = env.CP_NATIVE_RESUME === "1";
 let reportedNow = false;
 const control: CodexRunControl = {};
 let transcript: CodexTranscript | undefined;
+// C7b (Q2), as the Claude worker: a checkpoint aborts the turn, commits its WIP and settles idle.
+let freezing = false;
+const checkpointReplies: Array<(body: Record<string, unknown>) => void> = [];
+// Set while an idle prompt's resume admission is pending: busy, but no turn exists to checkpoint.
+let admitting = false;
 
-/** Condition 2 (C2): `totals` is first written only while codex_research is on; a record holding it is updated by
- * every counted run. */
-const persistTotals = (): boolean => codexPersistRefusal(env.CP_HOME ?? "", "the Codex session record") === undefined;
+/** Condition 2: `totals` is first written only while the job's class switch is on (codex_ship for a ship job); a
+ * record holding it is updated by every counted run. */
+function persistTotals(): boolean {
+	if (!ship) return codexPersistRefusal(env.CP_HOME ?? "", "the Codex session record") === undefined;
+	try {
+		return loadNativeConfig(nativeConfigFile(env.CP_HOME ?? "")).codex_ship;
+	} catch {
+		return false;
+	}
+}
 
 /** A new record and scratch dir; a previous record's picp-made scratch dir is removed first, never orphaned. */
 function freshSession(cwd: string): NativeSession {
 	if (existsSync(sessionFile)) removeNativeScratch(sessionFile);
+	const base = ship ? env.CP_BASE_BRANCH?.trim() : undefined;
 	const session: NativeSession = {
-		driver: "codex", scratch_dir: mkdtempSync(join(tmpdir(), NATIVE_CODEX_SCRATCH_PREFIX)), cwd,
+		driver: "codex", scratch_dir: mkdtempSync(join(tmpdir(), NATIVE_CODEX_SCRATCH_PREFIX)), cwd, ...(base ? { base } : {}),
 		...(env.CP_CODEX_HOME ? { codex_home: env.CP_CODEX_HOME } : {}), ...(persistTotals() ? { totals: { ...ZERO_TOTALS } } : {}),
 	};
 	writeNativeSession(sessionFile, session);
 	return session;
 }
 
-/** The recorded thread to resume; a record with no thread or from another worktree is refused by name (Q3). */
+/** The recorded thread to resume; a record with no thread, or (research) from another worktree, is refused by name. */
 function resumedSession(worktree: string): NativeSession & { thread_id: string } {
 	const session = readNativeSession(sessionFile);
 	if (session.thread_id === undefined) throw new Error(`${sessionFile} holds no thread id; there is nothing to resume`);
@@ -69,6 +86,27 @@ function resumedSession(worktree: string): NativeSession & { thread_id: string }
 		throw new Error(`the Codex thread started in ${session.cwd} and the worktree is now ${worktree}; its resume is refused: cp_teardown and dispatch again`);
 	}
 	return session as NativeSession & { thread_id: string };
+}
+
+/**
+ * C7b (Q4): a ship job re-leased elsewhere (an awaiting_merge resume) starts a fresh thread led by the brief, as the
+ * Claude worker does (N4f); the old thread is deleted first (D5). Undefined when the record did not move.
+ */
+async function movedSession(worktree: string): Promise<NativeSession | undefined> {
+	if (!ship) return undefined;
+	const recorded = readNativeSession(sessionFile);
+	const moved = nativeSessionMoved(recorded, worktree);
+	if (moved === undefined) return undefined;
+	write({ type: "native_session_moved", from: recorded.cwd, to: worktree, reason: moved });
+	say(moved);
+	write({ type: "native_thread_deleted", ...(await deleteCodexThread({ sessionFile, hostEnv: env })) });
+	return freshSession(worktree);
+}
+
+/** A fresh thread after a moved worktree has no history: the job's brief leads its first prompt. */
+function briefFor(id: string): string {
+	const file = join(env.CP_HOME ?? "", paths.briefFile(id));
+	return existsSync(file) ? `${readFileSync(file, "utf8").trimEnd()}\n\n` : "";
 }
 
 /** The role contract the dispatch wrote; a missing or empty file stops the run, never a run without it. */
@@ -98,9 +136,9 @@ function loadUserMcp(): { mcp: CodexMcpServers; section: string } {
 	return (userMcp = { mcp, section: claudeMcpSection(user, { path: mcp.path, servers }, "tools mcp__<server>__<tool>") });
 }
 
-/** The per-job skill dirs the dispatch named (C5); anything but a JSON array of absolute paths stops the turn. */
-function skillDirs(): string[] {
-	const raw = env[SKILL_DIRS_ENV];
+/** Per-job skill dirs (C5) or operator read roots (C7b); anything but a JSON array of absolute paths stops the turn. */
+function absoluteDirs(name: typeof SKILL_DIRS_ENV | typeof READ_ROOTS_ENV): string[] {
+	const raw = env[name];
 	if (!raw) return [];
 	let dirs: unknown;
 	try {
@@ -108,7 +146,7 @@ function skillDirs(): string[] {
 	} catch {
 		dirs = undefined;
 	}
-	if (!Array.isArray(dirs) || dirs.some((dir) => typeof dir !== "string" || !dir.startsWith("/"))) throw new Error(`${SKILL_DIRS_ENV} is not a JSON array of absolute paths`);
+	if (!Array.isArray(dirs) || dirs.some((dir) => typeof dir !== "string" || !dir.startsWith("/"))) throw new Error(`${name} is not a JSON array of absolute paths`);
 	return dirs as string[];
 }
 
@@ -158,42 +196,52 @@ function stopOf(result: CodexSpikeResult | undefined, cli: string | undefined): 
 	return result.lockdown?.verdict !== "ok" || result.hookFailed || result.bypass !== undefined ? "lockdown" : undefined;
 }
 
-interface Turn { reported: boolean; settles: boolean; stopped: boolean; code: number; runId: string; pending?: Usage }
+interface Turn { reported: boolean; settles: boolean; stopped: boolean; stop?: string; code: number; runId: string; pending?: Usage }
 
 /** One app-server run: fresh on a dispatch, else a resume of the recorded thread over its recorded totals. */
 async function turn(prompt: string): Promise<Turn> {
-	const [worktree, artifactPath] = [env.CP_WORKTREE, env.CP_ARTIFACT_PATH];
-	if (env.CP_KIND !== "research" || (env.CP_ROLE !== "planner" && !reviewer)) {
-		throw new Error(`the Codex CLI runs research/planner and research/gate-reviewer jobs only, not ${env.CP_KIND}/${env.CP_ROLE}`);
+	const worktree = env.CP_WORKTREE;
+	if (!ship && (env.CP_KIND !== "research" || (env.CP_ROLE !== "planner" && !reviewer))) {
+		throw new Error(`the Codex CLI runs research/planner, research/gate-reviewer and ship/implementer jobs only, not ${env.CP_KIND}/${env.CP_ROLE}`);
 	}
+	// Dispatch predeclares no ship artifact; the implementer's own is named from the home and job id, as on Claude.
+	const artifactPath = ship ? implementerArtifactPath(env.CP_HOME ?? "", jobId) : env.CP_ARTIFACT_PATH;
 	if (!env.CP_JOB_ID || !runDir || !worktree || (!reviewer && !artifactPath)) throw new Error("Codex CLI worker started without its job identity");
 	const model = env.CP_CODEX_MODEL ?? "codex";
-	// C6 (Q2): a reviewer gets no MCP server and no skill dir, so it reads no mcp.json.
-	const user = reviewer ? undefined : loadUserMcp();
+	// C6 (Q2), C7b (Q3, R3): a reviewer or implementer gets no MCP server, so it reads no mcp.json.
+	const user = reviewer || ship ? undefined : loadUserMcp();
 	const contract = readSystemPrompt();
 	const systemPrompt = !user || user.section === "" ? contract : `${contract.trimEnd()}${user.section}\n`;
-	const skills = reviewer ? [] : skillDirs();
+	const skills = reviewer ? [] : absoluteDirs(SKILL_DIRS_ENV);
+	const readRoots = reviewer ? [] : absoluteDirs(READ_ROOTS_ENV);
+	const excludePaths = ship ? implementerExclusions(env.CP_HOME ?? "") : undefined;
+	const fresh = resuming ? await movedSession(worktree) : undefined;
+	if (fresh !== undefined) {
+		resuming = false;
+		prompt = `${briefFor(jobId)}${prompt}`;
+	}
 	const resumed = resuming;
-	const session = resumed ? resumedSession(worktree) : freshSession(worktree);
+	const session = fresh ?? (resumed ? resumedSession(worktree) : freshSession(worktree));
 	const base = resumed ? session.totals : ZERO_TOTALS;
 	if (!transcript) {
 		transcript = codexTranscript(reviewer ? join(runDir, "native-transcript.jsonl") : nativeTranscriptFile(runDir, jobId), { id: jobId, cwd: worktree }, model);
 		write({ type: "native_transcript", transcript_file: transcript.file });
 	}
 	transcript.prompt(prompt, resumed);
-	// Per turn, so a finished turn's abort never reaches the next; a stop under way keeps its aborted controller.
-	if (!stopping) abort = new AbortController();
+	// Per turn, so a finished turn's abort never reaches the next; a stop or freeze keeps its aborted controller.
+	if (!stopping && !freezing) abort = new AbortController();
 	let result: CodexSpikeResult | undefined;
 	let cli: string | undefined;
 	let error: string | undefined;
 	try {
 		result = await runCodexSpike({
 			job: {
-				job_id: jobId, kind: "research", role: reviewer ? "gate-reviewer" : "planner", delivery: env.CP_DELIVERY as Delivery, runDir, worktree,
-				...(artifactPath ? { artifactPath } : {}),
+				job_id: jobId, kind: ship ? "ship" : "research", role: ship ? "implementer" : reviewer ? "gate-reviewer" : "planner", delivery: env.CP_DELIVERY as Delivery, runDir, worktree,
+				...(artifactPath ? { artifactPath } : {}), ...(excludePaths ? { excludePaths } : {}),
 			},
 			prompt, ...(env.CP_CODEX_MODEL ? { model: env.CP_CODEX_MODEL } : {}), systemPrompt, hostEnv: env, timeoutMs: RUN_TIMEOUT_MS, signal: abort.signal,
 			scratchDir: session.scratch_dir, control, childEnv: workerChildEnv(), ...(user?.mcp.names.length ? { mcp: user.mcp } : {}), ...(skills.length > 0 ? { skillDirs: skills } : {}),
+			...(readRoots.length > 0 ? { readRoots } : {}),
 			...(resumed ? { resume: { threadId: session.thread_id as string, ...(session.totals ? { baseline: session.totals } : {}) } } : {}),
 			...(env.CP_CODEX_HOME ? { codexHome: env.CP_CODEX_HOME } : {}), ...(env.CP_NATIVE_THINKING ? { effort: env.CP_NATIVE_THINKING } : {}),
 			onMessage: (method, params) => onMessage(session, base, method, params),
@@ -237,7 +285,7 @@ async function turn(prompt: string): Promise<Turn> {
 	} else if (clean) write({ type: OBSERVATION_EVENT, kind: "turn_ok", observed_at: Date.now() });
 	say(`outcome ${result?.outcome ?? "refused"}; lockdown ${result?.lockdown?.verdict ?? "unchecked"}; report ${reported ? "accepted" : "none"}${error ? `; ${error}` : ""}`);
 	return {
-		reported, stopped: stop !== undefined, code: 1, runId,
+		reported, stopped: stop !== undefined, ...(stop ? { stop } : {}), code: 1, runId,
 		settles: reported || clean,
 		...(usage.status === "complete" ? { pending: { input: usage.input, output: usage.output, cache_read: usage.cache_read, cache_write: usage.cache_write, total_tokens: usage.total, cost_usd: 0 } } : {}),
 	};
@@ -271,6 +319,34 @@ async function endReviewerSession(): Promise<void> {
 	}
 }
 
+/** C1: the paths the revive named; unreadable means none could be named, so the checkpoint commits nothing at all. */
+function unreviewedPaths(): string[] {
+	const raw = env[NATIVE_UNREVIEWED_ENV];
+	if (!raw) return [];
+	try {
+		const paths = JSON.parse(raw) as unknown;
+		if (Array.isArray(paths) && paths.every((path) => typeof path === "string")) return paths as string[];
+	} catch {
+		// Falls through to the refusal below.
+	}
+	throw new Error(`${NATIVE_UNREVIEWED_ENV} is not a JSON array of paths; nothing was checkpointed`);
+}
+
+/** After a frozen turn: the WIP commit (hooks off, staged-path gate) and its replies; a named stop wins and is kept. */
+async function checkpointed(last: Turn | undefined): Promise<number> {
+	freezing = false;
+	const named = last?.stopped ? `the turn ended on a named stop (${last.stop}); nothing was checkpointed` : undefined;
+	const outcome = named !== undefined ? { error: named } : await codexCheckpointCommit(
+		{ job_id: jobId, worktree: env.CP_WORKTREE ?? "", runDir },
+		{ excluded: implementerExclusions(env.CP_HOME ?? ""), env, unreviewed: unreviewedPaths(), push: env.CP_DELIVERY !== "local" },
+	);
+	if (named === undefined) write({ type: "native_checkpoint", ...outcome });
+	for (const answer of checkpointReplies.splice(0)) answer("head" in outcome ? { success: true, data: outcome } : { success: false, ...outcome });
+	if (named !== undefined) return last?.code ?? 1;
+	write({ type: "agent_settled" });
+	return 0;
+}
+
 /** Turns until no admitted follow-up is queued; settles when any turn reported or the last ended clean, else fails. */
 async function serve(first: string): Promise<number> {
 	busy = true;
@@ -291,13 +367,16 @@ async function serve(first: string): Promise<number> {
 			reported ||= ran.reported;
 			last = ran;
 			// A named stop takes no queued follow-up: another turn would be the nudge the stop forbids.
-			claimed = ran.stopped ? [] : await dueFollowUps(ran);
+			claimed = ran.stopped || freezing ? [] : await dueFollowUps(ran);
+			// A checkpoint during the admission await: the claim goes back and the freeze ends the loop.
+			if (freezing && claimed.length > 0) claimed = (returnClaim(runDir), []);
 			prompt = claimed.length > 0 ? claimed.join("\n\n") : undefined;
 		}
 	} finally {
 		if (reviewer) await endReviewerSession();
 		busy = false;
 	}
+	if (freezing) return checkpointed(last);
 	if (!reported && !last?.settles) return last?.code ?? 1;
 	write({ type: "agent_settled" });
 	return 0;
@@ -337,7 +416,17 @@ function command(line: string): void {
 	}
 	const reply = (body: Record<string, unknown>) => write({ type: "response", id: request.id, command: request.type, ...body });
 	if (request.type === "get_state") return reply({ success: true, data: { sessionId: jobId, sessionFile } });
-	if (request.type === "checkpoint") return reply({ success: false, error: codexDoorRefusal(jobId, "checkpoint") });
+	if (request.type === "checkpoint") {
+		if (!ship) return reply({ success: false, error: codexDoorRefusal(jobId, "checkpoint") });
+		if (!busy) return reply({ success: false, error: `${jobId}: the native worker is idle; there is no turn to checkpoint` });
+		// No turn runs yet: a freeze set now would outlive a refused admission and abort the next turn.
+		if (admitting) return reply({ success: false, error: `${jobId}: a resume admission is pending; no turn to checkpoint yet` });
+		// serve() awaits the run's own stop sequence, commits the WIP, answers with the head and settles idle.
+		freezing = true;
+		checkpointReplies.push(reply);
+		abort.abort();
+		return;
+	}
 	const message = typeof request.message === "string" ? request.message : undefined;
 	if (message !== undefined && busy && request.type === "steer") return steer(message, reply);
 	if (message !== undefined && busy && (request.type === "prompt" || request.type === "follow_up")) {
@@ -351,11 +440,15 @@ function command(line: string): void {
 	if (message !== undefined && request.type === "prompt") {
 		// Admission holds the door: a prompt arriving meanwhile queues; a refusal is the reply and no turn starts.
 		busy = true;
+		admitting = true;
 		reportedNow = false;
 		const start = () => {
+			admitting = false;
 			reply({ success: true, data: { disposition: resuming ? "resuming" : "started" } });
 			run = serve(message).catch((error: unknown) => {
 				if (resuming) write({ type: "native_resume_failed", reason: (error as Error).message });
+				freezing = false;
+				for (const answer of checkpointReplies.splice(0)) answer({ success: false, error: `the turn failed before a checkpoint: ${(error as Error).message}` });
 				say(`refused: ${(error as Error).message}`);
 				return 1;
 			});
@@ -363,6 +456,7 @@ function command(line: string): void {
 		};
 		void startIdlePrompt({ home: env.CP_HOME ?? "", jobId, resumed: resuming }, start).then((refused) => {
 			if (refused === undefined) return;
+			admitting = false;
 			busy = false;
 			say(refused);
 			reply({ success: false, error: refused });

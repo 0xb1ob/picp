@@ -1,0 +1,1 @@
+- C7b: Codex ship jobs are wired behind `codex_ship` (ships off): selection, the spawn base, the implementer worker, the freeze checkpoint, a fresh thread for a moved worktree, `CP_CODEX_READ_ROOTS`, and a revive that names a lockdown-killed run's uncommitted paths first; CX-7a…7m in `tests/e2e/codex-ship.test.ts`.

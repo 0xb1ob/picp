@@ -163,7 +163,7 @@ export function driverFields(decision: RoutingDecision): Pick<RoutingDecision, "
 /** Spawn fields for the decided driver: the native worker gets its routed effort and the job's base branch (its
  * forge tools' PR base and refused push target); pi gets nothing extra. */
 export function nativeSpawn(decision: RoutingDecision, base?: string): { driver?: NativeDriver; extraEnv?: Record<string, string> } {
-	if (decision.driver === "codex") return { driver: "codex", extraEnv: nativeThinkingEnv(decision.thinking) };
+	if (decision.driver === "codex") return { driver: "codex", extraEnv: { ...nativeThinkingEnv(decision.thinking), ...nativeBaseEnv(base) } };
 	return decision.driver === "claude" ? { driver: "claude", extraEnv: { ...nativeThinkingEnv(decision.thinking), ...nativeBaseEnv(base) } } : {};
 }
 

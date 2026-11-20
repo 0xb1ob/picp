@@ -22,6 +22,8 @@ export const NATIVE_SCRATCH_PREFIX = "cp-claude-native-";
 /** C1b: the Codex worker's record and scratch dir, in the same schema (teardown and the viewer read both). */
 export const NATIVE_CODEX_SESSION_FILE = "native-codex";
 export const NATIVE_CODEX_SCRATCH_PREFIX = "cp-codex-native-";
+/** C7b (C1): the revive's unreviewed paths (a JSON array) for the revived worker; its checkpoint never commits them. */
+export const NATIVE_UNREVIEWED_ENV = "CP_NATIVE_UNREVIEWED";
 
 const REVIVED = "picp revived this job: your previous native run ended without an accepted report (a crash, a stop or a restart). ";
 
@@ -214,13 +216,14 @@ export async function nativeReviveRefusal(home: string, jobId: string, sessionFi
 	}
 }
 
-/** After a native revive's spawn, picp's revive prompt starts the resumed run; returns why it was refused, or none. */
+/** After a native revive's spawn, picp's revive prompt (plus `note`) starts the run; returns why it was refused. */
 export async function sendNativeRevive(
 	worker: { send(message: string, mode: "prompt"): Promise<{ receipt: string; disposition?: string; error?: string }> },
 	record: (payload: Record<string, unknown>) => void,
 	kind: JobKind,
+	note?: string,
 ): Promise<string | undefined> {
-	const sent = await worker.send(nativeRevivePrompt(kind), "prompt");
+	const sent = await worker.send(note ? `${nativeRevivePrompt(kind)}\n\n${note}` : nativeRevivePrompt(kind), "prompt");
 	record({ receipt: sent.receipt, ...(sent.disposition ? { disposition: sent.disposition } : {}), native_revive: true, ...(sent.error ? { error: sent.error } : {}) });
 	return sent.receipt === "failed" ? `the native worker refused the revive prompt (${sent.error ?? "no error text"})` : undefined;
 }

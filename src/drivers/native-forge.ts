@@ -1,7 +1,7 @@
 /**
  * The native forge writes, SDK-free (C7a): `git_push`, `git_fetch`, `pr_create`, `pr_edit` (moved from
- * claude-forge-tools.ts), Codex's `git_commit` and `git_merge`, and the freeze checkpoint's WIP commit. Each runs in the
- * worker process; `env` is the worker's own, and commit and merge get a credential-free one (`gitEnv`).
+ * claude-forge-tools.ts), Codex's `git_commit` and `git_merge`, and the freeze checkpoint's WIP commit. Each runs in
+ * the worker process; `env` is the worker's own, and commit and merge get a credential-free one (`gitEnv`).
  */
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
@@ -71,7 +71,8 @@ export function forgeWrites(job: ForgeJob, env: NodeJS.ProcessEnv = process.env,
 			if (target !== branch) return refuse(`git_push pushes only to origin/${branch}, this job's branch, not ${target}.`);
 			const pushed = await git(["push", "origin", `HEAD:refs/heads/${branch}`]);
 			if (!pushed.ok && /non-fast-forward|fetch first|\[rejected\]/.test(pushed.out)) {
-				return refuse(`git_push: HEAD is not a fast-forward of origin/${branch}, and it never forces. git_fetch, \`git merge origin/${branch}\`, then push again.\n${pushed.out}`);
+				const merge = options.hooksOff ? `git_merge {ref: "origin/${branch}"}` : `\`git merge origin/${branch}\``;
+				return refuse(`git_push: HEAD is not a fast-forward of origin/${branch}, and it never forces. git_fetch, ${merge}, then push again.\n${pushed.out}`);
 			}
 			return reply(pushed.ok ? `Pushed HEAD to origin/${branch}.\n${pushed.out}` : `git_push failed:\n${pushed.out}`, !pushed.ok);
 		},
@@ -223,6 +224,54 @@ export function checkpointCommit(worktree: string, branch: string, env: NodeJS.P
 	} catch (error) {
 		return { head, pushed: false, error: bounded(error) };
 	}
+}
+
+export interface CodexCheckpointOptions extends Omit<CommitOptions, "hooksOff"> {
+	/** C1: paths a lockdown-killed run left that the revive named; never WIP-committed, named in `unreviewed`. */
+	unreviewed?: readonly string[];
+	/** False for delivery local: the WIP commit stays local, as every other local-delivery write does. */
+	push: boolean;
+}
+
+/**
+ * C7b (Q2): a Codex implementer's freeze checkpoint: hooks off, a credential-free commit, the staged-path gate (a gated
+ * path stays uncommitted, named in `excluded`) and C1's unreviewed paths left out. Then the best-effort push.
+ */
+export async function codexCheckpointCommit(job: ForgeJob, options: CodexCheckpointOptions): Promise<Checkpoint & { excluded?: string[]; unreviewed?: string[] }> {
+	const bounded = (text: string) => text.slice(0, 500);
+	let identity: Record<string, string>;
+	try {
+		identity = commitIdentityEnv(job.worktree, options.env);
+	} catch (error) {
+		return { error: bounded((error as Error).message) };
+	}
+	const git = (more: string[]) => exec("git", [...GIT_HOOKS_OFF, ...more], job.worktree, gitEnv(options.env, identity));
+	const added = await git(["add", "-A"]);
+	if (!added.ok) return { error: bounded(added.out) };
+	const hits = await gatedPaths(git, options.excluded);
+	if (typeof hits === "string") return { error: bounded(hits) };
+	const staged = await git(["diff", "--cached", "--name-only", "--no-renames", "-z"]);
+	if (!staged.ok) return { error: bounded(staged.out) };
+	const held = staged.out.split("\0").filter((path) => (options.unreviewed ?? []).includes(path) && !hits.includes(path));
+	if (hits.length + held.length > 0) {
+		const unstaged = await git(["reset", "-q", "--", ...hits, ...held]);
+		if (!unstaged.ok) return { error: bounded(`unstaging the excluded or unreviewed paths failed: ${unstaged.out}`) };
+	}
+	const merging = (await git(["rev-parse", "-q", "--verify", "MERGE_HEAD"])).ok;
+	if (merging || !(await git(["diff", "--cached", "--quiet"])).ok) {
+		const committed = await git(["commit", "-q", "-m", "WIP: freeze checkpoint"]);
+		if (!committed.ok) return { error: bounded(committed.out) };
+	}
+	const head = await git(["rev-parse", "HEAD"]);
+	if (!head.ok) return { error: bounded(head.out) };
+	const excluded = {
+		...(hits.length > 0 ? { excluded: hits.slice(0, GATE_NAMES_MAX) } : {}), ...(held.length > 0 ? { unreviewed: held.slice(0, GATE_NAMES_MAX) } : {}),
+	};
+	if (!options.push) return { head: head.out, pushed: false, ...excluded };
+	const branch = job.job_id;
+	if (!branch || ["main", options.env.CP_BASE_BRANCH?.trim()].includes(branch)) return { head: head.out, pushed: false, error: `no job branch to push (${branch || "unset"})`, ...excluded };
+	const pushed = await exec("git", [...GIT_HOOKS_OFF, "push", "-q", "origin", `HEAD:refs/heads/${branch}`], job.worktree, options.env);
+	return pushed.ok ? { head: head.out, pushed: true, ...excluded } : { head: head.out, pushed: false, error: bounded(pushed.out), ...excluded };
 }
 
 /** The JSON input schemas of the six Codex forge tools, the Claude `zod` shapes' limits. */

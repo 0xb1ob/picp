@@ -302,7 +302,8 @@ class CodexRun {
 		const secrets = [...secretPaths(null, [userInfo().homedir]), resolve(codexHome)];
 		this.reviewer = options.job.role === "gate-reviewer";
 		const role = options.job.role;
-		this.guards = [...spikeGuards(job, secrets, role, false), codexSecretGuard(resolve(codexHome), role), codexGitGuard(role), ...(options.extraGuards ?? [])];
+		// The git guard only refuses; first, so an implementer's git refusal names the picp tool, not pi's git.
+		this.guards = [codexGitGuard(role), ...spikeGuards(job, secrets, role, false), codexSecretGuard(resolve(codexHome), role), ...(options.extraGuards ?? [])];
 		this.tools = codexRoleTools(options.job, hostEnv, this.reported);
 	}
 

@@ -55,6 +55,13 @@ export function buildCodexChildEnv(
 }
 
 const toml = (value: string): string => JSON.stringify(value);
+const realOrResolved = (path: string): string => {
+	try {
+		return realpathSync(path);
+	} catch {
+		return resolve(path);
+	}
+};
 
 /** The hook command the CLI runs per tool call; a path holding a single quote throws. */
 export function codexHookCommand(socket: string, clientTimeoutMs = 10_000): string {
@@ -93,10 +100,12 @@ export function codexPermissionProfile(roots: CodexProfileRoots): CodexProfile {
 	const implementer = roots.role === "implementer";
 	const id = implementer ? CODEX_IMPLEMENTER_PROFILE : CODEX_PROFILE;
 	const access = new Map<string, CodexAccess>([["/", "deny"], [":minimal", "read"]]);
-	const worktree = resolve(roots.worktree);
+	// Realpaths, as codexExcludedRoots returns: a symlinked worktree then still holds its read-only entries.
+	const worktree = realOrResolved(roots.worktree);
 	access.set(worktree, implementer ? "write" : "read");
-	const reads = [roots.gitDir, roots.codexDir, ...(roots.skills ?? []), ...(roots.readRoots ?? []), ...(implementer ? roots.readOnly ?? [] : [])];
+	const reads = [roots.gitDir, roots.codexDir, ...(roots.skills ?? []), ...(roots.readRoots ?? [])];
 	for (const path of reads) if (path !== undefined) access.set(resolve(path), "read");
+	if (implementer) for (const path of roots.readOnly ?? []) access.set(realOrResolved(path), "read");
 	for (const path of [roots.artifactDir, roots.tmp]) if (path !== undefined) access.set(resolve(path), "write");
 	const filesystem = [...access].map(([path, mode]) => `${toml(path)}=${toml(mode)}`).join(",");
 	return {
@@ -147,13 +156,6 @@ export function codexGitDir(worktree: string): string | undefined {
 	}
 }
 
-const realOrResolved = (path: string): string => {
-	try {
-		return realpathSync(path);
-	} catch {
-		return resolve(path);
-	}
-};
 /** Whether `dir` is `path` or one of its ancestors. */
 const holds = (dir: string, path: string): boolean => realOrResolved(path) === dir || realOrResolved(path).startsWith(`${dir === sep ? "" : dir}${sep}`);
 

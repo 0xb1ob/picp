@@ -33,7 +33,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
-import { nativeDoorRefusal, nativeReviveBase, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
+import { NATIVE_UNREVIEWED_ENV, nativeDoorRefusal, nativeReviveBase, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
 import { observeNative } from "./native-availability-observer.ts";
 import { nativeBaseEnv, nativeThinkingEnv } from "./drivers/claude.ts";
 import { nativeDriverSpec } from "./drivers/registry.ts";
@@ -44,6 +44,7 @@ import { loadProfile } from "./profiles.ts";
 import { type ModelProbe, RoutingError } from "./routing.ts";
 import { respawnRoute, type RespawnRoute } from "./reroute.ts";
 import { snapshotPickedAttempt } from "./operator-model-pick.ts";
+import { readEventLog } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
 import { type CarriedBounds, resolveJobHardBounds } from "./bounds.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
@@ -131,6 +132,8 @@ export interface RevivePlan {
 	/** R1 D2: the fresh routing that replaces a picked attempt's, and that attempt's id. */
 	routing?: JobRouting;
 	priorPick?: string;
+	/** C7b (C1, RR1): uncommitted paths a Codex implementer's run left when picp killed it (stop lockdown). */
+	unreviewedChanges?: string[];
 }
 
 export type RevivePlanResult = RevivePlan | ReviveRefusal;
@@ -169,6 +172,7 @@ export interface ReviveResult {
 	/** N3c: a native worker is not idle; it resumed its Claude session (Codex thread) with picp's revive prompt. */
 	nativeResumed?: true;
 	nativeDriver?: NativeDriver;
+	unreviewedChanges?: string[];
 }
 
 export type GitRunner = (
@@ -264,6 +268,38 @@ export async function inspectWorktree(worktree: string, git: GitRunner = default
 	}
 
 	return { dirty, detachedHead, inProgressOp, clean: !dirty && !detachedHead && !inProgressOp };
+}
+
+const UNREVIEWED_NAMED_MAX = 20;
+
+/**
+ * C7b (C1, RR1): with a dead hook one rule-approved command can write the worktree before picp kills the run. When a
+ * Codex implementer's last run stopped on `lockdown`, its uncommitted paths are named before any relaunch.
+ */
+async function lockdownChanges(home: string, record: FleetRecord, git: GitRunner): Promise<string[] | undefined> {
+	if (isScriptFleetRecord(record) || record.worker.driver !== "codex" || record.worker.role !== "implementer") return undefined;
+	let stop: unknown = "lockdown";
+	try {
+		stop = (readEventLog(home, record.job_id).filter((event) => event.type === "native_run").at(-1)?.payload as { stop?: unknown } | undefined)?.stop;
+	} catch {
+		// An unreadable log cannot clear the run: the paths are named.
+	}
+	if (stop !== "lockdown") return undefined;
+	const status = await git(record.worktree, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"]);
+	if (status.status !== 0) return [`(git status failed: ${status.stderr.trim().slice(0, 200)})`];
+	const paths = status.stdout.split("\0").filter((entry) => entry.length > 3).map((entry) => entry.slice(3));
+	return paths.length > 0 ? paths : undefined;
+}
+
+const namedPaths = (paths: readonly string[]): string =>
+	paths.slice(0, UNREVIEWED_NAMED_MAX).join(", ") + (paths.length > UNREVIEWED_NAMED_MAX ? `, and ${paths.length - UNREVIEWED_NAMED_MAX} more` : "");
+
+/** What the revived Codex implementer is told after the revive prompt: the paths, and that none is committed unread. */
+export function unreviewedChangesNote(paths: readonly string[]): string {
+	return `picp killed your previous run (a lockdown stop: a dead hook or a tool it was never asked about), and these uncommitted ` +
+		`paths in the worktree were never reviewed: ${namedPaths(paths)}. Before anything else, inspect each one (git status, git diff, ` +
+		"cat); delete or restore (`git show HEAD:<path> > <path>`) every change you did not make on purpose. git_commit commits " +
+		"every change, so never call it before these are reviewed.";
 }
 
 interface SessionEntry {
@@ -527,6 +563,7 @@ export class Reviver {
 		const interruptedTool = readInterruptedTool(record.worker.session_file, fileExists);
 		// t3code adoption 7: shown, never restored. A missing ref does not refuse.
 		const checkpointSha = record.checkpoint_ref ? await readCheckpoint(git, record.worktree, record.checkpoint_ref) : undefined;
+		const unreviewed = await lockdownChanges(this.#options.home, record, git);
 		return {
 			ok: true,
 			job_id: jobId,
@@ -543,6 +580,7 @@ export class Reviver {
 			...(closesWorker ? { closesWorker: true as const } : {}),
 			...(record.checkpoint_ref ? { checkpoint: { ref: record.checkpoint_ref, ...(checkpointSha ? { sha: checkpointSha } : {}) } } : {}),
 			...(skills.skills.length ? { skills: skills.skills } : {}),
+			...(unreviewed ? { unreviewedChanges: unreviewed } : {}),
 		};
 	}
 
@@ -589,7 +627,7 @@ export class Reviver {
 				...(plan.skills?.length ? { skills: plan.skills.map((s) => s.dir) } : {}),
 				sessionFile: plan.session_file,
 				// N3c: a native job respawns its native worker, which resumes the recorded Claude session.
-				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1", ...nativeThinkingEnv(plan.thinking), ...nativeBaseEnv(nativeReviveBase(record.bound_pr?.base, record.worker.session_file, () => projectBaseBranch(this.#options.home, record.project))) } } : {}),
+				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1", ...(plan.unreviewedChanges ? { [NATIVE_UNREVIEWED_ENV]: JSON.stringify(plan.unreviewedChanges) } : {}), ...nativeThinkingEnv(plan.thinking), ...nativeBaseEnv(nativeReviveBase(record.bound_pr?.base, record.worker.session_file, () => projectBaseBranch(this.#options.home, record.project))) } } : {}),
 				// No `brief`: a revived pi worker resumes idle. `report_result` stays
 				// write-once (worker-reporter), so nothing here can double-report.
 			}));
@@ -610,6 +648,7 @@ export class Reviver {
 				model: plan.model,
 				...(plan.interruptedTool ? { interrupted_tool: plan.interruptedTool } : {}),
 				...(plan.priorPick ? { rerouted_after_pick: plan.priorPick } : {}),
+				...(plan.unreviewedChanges ? { unreviewed_changes: plan.unreviewedChanges.slice(0, UNREVIEWED_NAMED_MAX) } : {}),
 				...(record.worker.driver && options?.continueFailed ? { continue_failed_as_revive: true } : {}),
 				...(continuing
 					? { continuation: options?.recovering || options?.nativeRecovery ? "bounded_recovery" : "operator", ...(record.failure ? { prior_failure: record.failure } : {}) }
@@ -653,7 +692,8 @@ export class Reviver {
 			await safely(() => this.#options.manager.shutdown(jobId));
 			throw new ReviveError(`revive ${jobId}: spawned but failed to record it (${(error as Error).message}); worker shut down`);
 		}
-		const refusedPrompt = record.worker.driver ? await sendNativeRevive(managed.worker, (payload) => this.#options.runs.open(jobId).cp("prompt_sent", payload), record.kind) : undefined;
+		const note = plan.unreviewedChanges ? unreviewedChangesNote(plan.unreviewedChanges) : undefined;
+		const refusedPrompt = record.worker.driver ? await sendNativeRevive(managed.worker, (payload) => this.#options.runs.open(jobId).cp("prompt_sent", payload), record.kind, note) : undefined;
 		if (refusedPrompt) throw new ReviveError(`revive ${jobId}: ${refusedPrompt}`);
 
 		return {
@@ -665,6 +705,7 @@ export class Reviver {
 			...(plan.interruptedTool ? { interruptedTool: plan.interruptedTool } : {}),
 			...(plan.continuesFailure ? { continuedFailure: plan.continuesFailure } : {}),
 			...(record.worker.driver ? { nativeResumed: true as const, nativeDriver: record.worker.driver as NativeDriver } : {}),
+			...(plan.unreviewedChanges ? { unreviewedChanges: plan.unreviewedChanges } : {}),
 		};
 	}
 }
@@ -686,8 +727,14 @@ export function formatRevivePlan(result: RevivePlanResult): string {
 	const checkpoint = result.checkpoint
 		? ` \u2014 checkpoint ${result.checkpoint.ref} ${result.checkpoint.sha ? `at ${result.checkpoint.sha}` : "missing"} (dispatch-time HEAD; shown, never restored)`
 		: "";
-	return `${result.job_id}: revivable (${result.model}, session ${result.session_file})${failed}${tool}${dirty}${checkpoint}`;
+	return `${result.job_id}: revivable (${result.model}, session ${result.session_file})${failed}${tool}${dirty}${unreviewedLine(result.unreviewedChanges)}${checkpoint}`;
 }
+
+/** C1: the operator sees the paths a killed Codex run left before (plan) and after (result) the relaunch. */
+const unreviewedLine = (paths: readonly string[] | undefined): string => paths
+	? ` — the last Codex run was killed (stop lockdown) and left uncommitted paths nobody reviewed: ${namedPaths(paths)}; ` +
+		"the revive prompt names them and tells the worker to inspect them before any git_commit (inspect `git status` yourself, or cp_teardown)"
+	: "";
 
 export function formatReviveResult(result: ReviveResult): string {
 	const tool = result.interruptedTool ? ` (interrupted: ${result.interruptedTool.name})` : "";
@@ -695,5 +742,5 @@ export function formatReviveResult(result: ReviveResult): string {
 	const failed = result.continuedFailure ? ` (continued from failed: ${result.continuedFailure.class})` : "";
 	const spec = result.nativeDriver ? nativeDriverSpec(result.nativeDriver) : undefined;
 	const next = result.nativeResumed ? `resumed its ${spec?.label ?? "Claude CLI"} ${spec?.session ?? "session"} with picp's revive prompt` : "idle; send it a message to continue";
-	return `${result.job_id} revived${failed}: pid ${result.pid}, session ${result.session_file}${tool}${dirty} \u2014 ${next}`;
+	return `${result.job_id} revived${failed}: pid ${result.pid}, session ${result.session_file}${tool}${dirty} \u2014 ${next}${unreviewedLine(result.unreviewedChanges)}`;
 }

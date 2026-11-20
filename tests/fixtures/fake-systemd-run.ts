@@ -76,7 +76,8 @@ writeFileSync(join(ROOT, unit, "cgroup.kill"), "");
 writeFileSync(join(ROOT, `${unit}.self`), `0::/${unit}\n`);
 const env = { ...process.env };
 delete env.FAKE_SCOPE;
-spawn(process.execPath, [fileURLToPath(import.meta.url), "--fake-kernel", unit], { detached: true, stdio: "ignore", env }).unref();
+// Outside every worktree, as the real kernel is: `treehouse return` terminates processes left in the returned one.
+spawn(process.execPath, [fileURLToPath(import.meta.url), "--fake-kernel", unit], { detached: true, stdio: "ignore", env, cwd: "/" }).unref();
 const props = argv.slice(0, argv.indexOf("--")).flatMap((arg, i, all) => (all[i - 1] === "-p" ? [arg] : []));
 log({ unit, started: true, props });
 const leader = spawn(command[0] as string, command.slice(1), {

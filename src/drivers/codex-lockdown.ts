@@ -28,7 +28,8 @@ export interface CodexSurface {
 	/** Every page of `experimentalFeature/list`. */
 	features: ExperimentalFeature[];
 	config: ConfigReadResponse;
-	/** What picp passed: the profile id, the roots it made writable and (C7a, implementer) the map `config/read` returns. */
+	/** What picp passed: the profile id, the roots it made writable and (C7a, implementer) the map `config/read`
+	 * returns. */
 	profile: { id: string; writableRoots: readonly string[]; filesystem?: Readonly<Record<string, CodexAccess>> };
 	/** Role features that must also read back off (C6: a reviewer's `shell_tool`). */
 	offFeatures?: readonly string[];
