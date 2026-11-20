@@ -1,4 +1,4 @@
-DOCTOR BROKEN · 3 error · 6 warn · 33 ok (at 2026-08-27T12:00:00Z)
+DOCTOR BROKEN · 3 error · 6 warn · 36 ok (at 2026-08-27T12:00:00Z)
 home: <HOME>
 package: <PKG>
 
@@ -36,6 +36,12 @@ package: <PKG>
     operator session: builtin:mcp, codemode, tool-search; servers from <HOME>/pi-agent/mcp.json
 ✓ [mcp.workers] workers: no MCP servers configured
     every worker profile (gate-reviewer, implementer, ops, planner, qa; implementer/ship workers and the gate, diff and quality reviewers included) via mcp_call, all exposed tools, no annotation filter (servers read in place from <HOME>/pi-agent/mcp.json); the CP parent: unchanged
+✓ [codex.containment] Refused: picp could not contain codex app-server in a systemd user scope (systemd-run is not on PATH); it never runs Codex uncontained.
+    fix: install systemd (systemd-run) with a user manager (lingering enabled for this user), or fix CP_WORKER_MEMORY_MAX; codex never runs uncontained
+✓ [codex.cli] codex is not on PATH: install the Codex CLI, then run `codex update`
+    fix: install the Codex CLI, then run `codex update`
+✓ [codex.workers] Codex workers: every codex switch off (shipped default)
+    codex_research off, codex_ship off, codex_review off; codex_max_concurrent 1; no rubric row names codex
 ✓ [session.tools] parent session tools not recorded (not a live parent)
 ✓ [package.worker_reporter] worker-reporter extension present
 ✓ [package.profiles] 5 profile(s) load and validate

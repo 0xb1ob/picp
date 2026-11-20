@@ -308,7 +308,7 @@ test("P20-settings-relay: the session's outcomes pass through with no viewer lin
 	const status = await view.get("/api/settings");
 	assert.equal(status.status, 200);
 	assert.deepEqual([status.body.enabled, status.body.running, status.body.supported, status.body.writable], [true, true, true, true]);
-	assert.equal((status.body.catalog as unknown[]).length, 39);
+	assert.equal((status.body.catalog as unknown[]).length, 42);
 	const native = (status.body.catalog as { key: string; help: string }[]).find((field) => field.key === "workers.native_claude_research")?.help ?? "";
 	for (const said of [/only when a routing rule .*driver "claude" and this switch is on/, /Off stops new native jobs and refuses resumes and revives .*never move to pi/, /off then on clears a remembered sign-in, lockdown or no-reset limit block/]) assert.match(native, said);
 	assert.ok(!("available_models" in status.body), "the model list has its own read, /api/settings/models");

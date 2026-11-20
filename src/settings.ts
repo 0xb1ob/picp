@@ -362,7 +362,12 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 	native: {
 		file: (home) => nativeConfigFile(home),
 		read: (_home, _env, file) =>
-			settle("native", readOwnerConsistently(file, () => loadNativeConfig(file)), (n: ReturnType<typeof loadNativeConfig>) => ({ "workers.native_claude_research": n.claude_research })),
+			settle("native", readOwnerConsistently(file, () => loadNativeConfig(file)), (n: ReturnType<typeof loadNativeConfig>) => ({
+				"workers.native_claude_research": n.claude_research,
+				"workers.native_codex_research": n.codex_research,
+				"workers.native_codex_ship": n.codex_ship,
+				"workers.native_codex_review": n.codex_review,
+			})),
 	},
 };
 

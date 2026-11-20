@@ -603,11 +603,10 @@ test("CX-8a: a git status failure refuses the revive of a lockdown-killed codex 
 	assertClean(h);
 });
 
-// Scenario: a continue_failed revive names thousands of dirty paths by file, and its freeze commits none (C8 c, g)
-//   Given CX-7c's killed job A plus 3,000 untracked 120-character paths (about 400 KB, past one env string's limit)
+// Scenario (C8 c, g): Given CX-7c's killed job A plus 3,000 untracked 120-character paths (about 400 KB),
 //   When cp_revive continue_failed:true confirm runs and /cp-drain freeze checkpoints the revived turn,
-//   Then the revive names r1.txt "and 2981 more", the list sits in native-unreviewed.json (0600), and the WIP commit
-//   holds wip.txt only. Before C8 the list rode in the spawn env, which fails with E2BIG at this size.
+//   Then the revive names r1.txt "and 2981 more", the list sits in native-unreviewed.json (0600) and the WIP commit
+//   holds wip.txt only. Before C8 the list rode in one env string, which fails with E2BIG at this size.
 test("CX-8b: cp_revive continue_failed names 3,001 unreviewed paths by file; the freeze commits wip.txt only", { skip, timeout: 420_000 }, async (t) => {
 	const h = await shipHome(t);
 	const main = h.originRefs()["refs/heads/main"];

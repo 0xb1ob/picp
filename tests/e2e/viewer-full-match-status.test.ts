@@ -229,7 +229,7 @@ test("S3-claude-line: a separate Claude item only with the switch on — no snap
 	assert.equal(await claude(), undefined, "switch off again: the line is as short as before");
 });
 
-test("S3-codex-line: a separate Codex item only with codex_research on — no snapshot unknown, a future reset limited, a no-reset limit, ok", { timeout: 120_000 }, async (t) => {
+test("S3-codex-line: a separate Codex item only with a codex switch on — no snapshot unknown, a future reset limited, a no-reset limit, ok", { timeout: 120_000 }, async (t) => {
 	const d = await start(t);
 	const url = day(`${DAY}T00:00:00Z`, new Date(NOON + 12 * 60 * MIN).toISOString(), "UTC");
 	const body = async () => (await d.get(url)).body as any;
@@ -240,9 +240,11 @@ test("S3-codex-line: a separate Codex item only with codex_research on — no sn
 		utimesSync(switchFile, 0, 0); // older than every observation below, so none is voided
 	};
 	switches({ claude_research: true });
-	assert.equal((await body()).codex, undefined, "codex_research off: no Codex item");
-	switches({ claude_research: true, codex_research: true });
+	assert.equal((await body()).codex, undefined, "every codex switch off: no Codex item");
 	const label = async () => (await body()).codex?.label;
+	switches({ codex_ship: true });
+	assert.equal(await label(), "Codex unknown", "C8: codex_ship alone shows the item (it keyed on codex_research before)");
+	switches({ claude_research: true, codex_research: true });
 	assert.equal(await label(), "Codex unknown", "no snapshot is unknown, never ok");
 	const snapshot = codexAvailabilityFile(d.home);
 	const write = (value: unknown) => writeFileSync(snapshot, JSON.stringify(value));

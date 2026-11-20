@@ -594,7 +594,8 @@ drain-gated `ParentRestart` buttons (two taps, `POST /api/parent/restart`); noth
 (`models.operator_driver`) follows the operator model and thinking selects and narrows them the same way; a save that
 changes it shows "Operator CLI saved: this operator session keeps its current CLI until it restarts" and the shell's
 `RestartSession` (Restart session / Restart clean); again nothing restarts on save. *Native workers*
-says that the Workers CLI sets its switch too. An older session without `drivers` gets pi's levels and no filtering.
+says that the Workers CLI sets its Claude switch too, and (C8) holds the three Codex CLI checkboxes, which are set there
+only: on saves `true`, off deletes the key. An older session without `drivers` gets pi's levels and no filtering.
 Layout: the new rows reuse the existing 390 px single column and the 900 px rubric grid; a row error and the CLI note
 span the whole row, with `overflow-wrap: anywhere`.
 

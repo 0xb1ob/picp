@@ -114,6 +114,9 @@ export const SETTING_KEYS = [
 	"viewer.strict_host",
 	"viewer.public_url",
 	"workers.native_claude_research",
+	"workers.native_codex_research",
+	"workers.native_codex_ship",
+	"workers.native_codex_review",
 	"workers.driver",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -160,8 +163,11 @@ function deepFreeze<T>(value: T): T {
 }
 
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
+const CODEX_HELP =
+	" run on the installed Codex CLI only when a routing rule (or the dispatch) says driver \"codex\" with an OpenAI GPT model (provider openai, id gpt-…) and this switch is on." +
+	" Tokens only: cost reads unknown, so token caps are the bound. Off stops new jobs and refuses resumes and revives; they never move to pi.";
 
-/** The 39 fields, in `SETTING_KEYS` order. */
+/** The 42 fields, in `SETTING_KEYS` order. */
 export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("grants", "mandate-defaults", { applies: "next_grant", on_invalid: "refuse" }, {
 		expiry_hours: { file_key: "expiry_hours", type: "number", minimum: 0.1, maximum: 720, default: 8, label: "Grant expiry (hours)", help: "How long a new grant stands before it must be re-issued." },
@@ -238,6 +244,9 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	}),
 	...group("workers", "native", { applies: "next_dispatch", on_invalid: "refuse" }, {
 		native_claude_research: { file_key: "claude_research", type: "boolean", default: false, label: "Claude CLI research workers", help: "A job runs on the installed Claude CLI only when a routing rule (or the dispatch) says driver \"claude\" and this switch is on. Off stops new native jobs and refuses resumes and revives of native ones; they never move to pi. Turning it off then on clears a remembered sign-in, lockdown or no-reset limit block." },
+		native_codex_research: { file_key: "codex_research", type: "boolean", default: false, label: "Codex CLI research workers", help: `Planner research (delivery local or answer)${CODEX_HELP}` },
+		native_codex_ship: { file_key: "codex_ship", type: "boolean", default: false, label: "Codex CLI ship workers", help: `Implementer ship jobs (delivery pr or local)${CODEX_HELP}` },
+		native_codex_review: { file_key: "codex_review", type: "boolean", default: false, label: "Codex CLI reviewers", help: `Gate reviews${CODEX_HELP}` },
 	}),
 	...group("workers", "routing", { applies: "next_dispatch", on_invalid: "refuse" }, {
 		driver: { type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets each data/routing.json rubric row's driver, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi." },

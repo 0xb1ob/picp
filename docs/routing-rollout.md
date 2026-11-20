@@ -218,3 +218,39 @@ The operator does this by hand. picp never edits the home's data files. The mech
    snapshot.
 5. **Rollback** means restoring both `.bak` files. New dispatches follow them at once, and a started job keeps its
    driver.
+
+## Codex CLI soak (opt-in)
+
+This section documents the soak; nothing here performs it, and no shipped row or default changes. Defaults stay pi and
+every codex switch stays OFF. The mechanism is in [native-drivers.md](native-drivers.md) ("Codex CLI workers").
+
+1. **Preconditions.** This home runs a build with the C8 Settings switches. `/doctor` shows `codex.cli`, `codex.login`
+   and `codex.containment` ok; fix any of them first (each line names its fix). Work under a mandate with a token cap:
+   a codex job reports tokens only and costs $0.00 in every USD sum, so token caps are the only spend bound.
+2. **Back up** both files with dated copies: `cp -p data/routing.json data/routing.json.<date>.bak` and
+   `cp -p data/native.json data/native.json.<date>.bak` (when it exists).
+3. **A codex row of its own**, above the row it should shadow, with an explicit `openai/gpt-…` model in `allow`, pi
+   models as its `fallbacks`, and `thinking` from `low` to `max` (`off` and `minimal` have no Codex effort):
+
+   ```json
+   { "id": "codex-research", "role": "planner", "scope": ["S"], "model": "openai/gpt-<model>",
+     "fallbacks": ["<the pi research model>"], "thinking": "high", "driver": "codex" }
+   ```
+
+   Settings never writes a codex row; it is written by hand in `data/routing.json`.
+4. **The switch.** Dashboard Settings → Native workers: the Codex CLI switch for that class. Leave
+   `codex_max_concurrent` at 1 (it is set in `data/native.json` by hand and is not in Settings).
+5. **Order.** Research first (`codex_research`), then reviews (the `reviews` row, `codex_review`), then ship (the
+   `small-ship` row, `codex_ship`). Move to the next class only after five clean jobs in the current one.
+6. **What to watch.**
+   - Job detail's Driver fact: `codex, effort <level>` for a codex job, `pi (preferred codex: <reason>)` for a fallback.
+   - The chat footer's Codex item (shown while any codex switch is on): `Codex ok`, `Codex limited until HH:MMZ`,
+     `Codex limited (reset unknown)` or `Codex unknown`.
+   - The run log's `native_run` event: `lockdown: "ok"`, no `bypass`, `hook_failed: false`, measured tokens.
+   - Cost reads "unknown (tokens only)", never a dollar figure.
+7. **Stop rules.** Any kill criterion in native-drivers.md (a forbidden action runs, a dead hook lets a tool act, a
+   report for another job is accepted, usage counted twice, a process outlives a stop, an extra surface is not
+   refused): turn the switch off and report it. Do not work around it.
+8. **Rollback.** Turn the switch off in Settings (the key is deleted): new jobs run on pi, and resumes and revives of
+   codex jobs are refused, never moved to pi. Or remove the row. Before running an older build, restore the `.bak`
+   files and follow the recovery notes in native-drivers.md.

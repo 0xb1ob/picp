@@ -69,10 +69,10 @@ const write = (home: string, owner: SettingFileOwner, body: unknown) =>
 const fieldOf = (key: SettingKey) => SETTING_FIELDS.find((field) => field.key === key) as SettingField;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("(a) catalog: 39 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
-	assert.equal(SETTING_KEYS.length, 39);
+test("(a) catalog: 42 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
+	assert.equal(SETTING_KEYS.length, 42);
 	assert.deepEqual(SETTING_FIELDS.map((field) => field.key), [...SETTING_KEYS]);
-	assert.equal(new Set(SETTING_KEYS).size, 39);
+	assert.equal(new Set(SETTING_KEYS).size, 42);
 	assert.ok(Object.isFrozen(SETTING_FIELDS));
 	for (const field of SETTING_FIELDS) {
 		assert.ok(field.key.startsWith(`${field.section}.`), `${field.key} sits in section ${field.section}`);
@@ -178,7 +178,7 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 			write(home, "viewer", { [key]: value });
 			return accepts(() => loadViewerConfig(ownerFile(home, "viewer"))[key], value);
 		},
-		native: (field, value) => (write(home, "native", { [field.file_key as string]: value }), accepts(() => loadNativeConfig(ownerFile(home, "native")).claude_research, value)),
+		native: (field, value) => (write(home, "native", { [field.file_key as string]: value }), accepts(() => loadNativeConfig(ownerFile(home, "native"))[field.file_key as "claude_research"], value)),
 	};
 	let compared = 0;
 	for (const field of SETTING_FIELDS) {

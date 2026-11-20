@@ -567,7 +567,7 @@ export interface WorkspaceStatusResponse {
  done: {availability: SourceAvailability; observed_at: string; count: number | null};
  /** S3: the Claude subscription item from native runs, never merged into `quota`; absent while the switch is off. */
  claude?: {state: "ok" | "limited" | "blocked" | "unknown"; label: string; detail: string};
- /** C3: the Codex usage-limit item from codex runs; absent while `codex_research` is off. */
+ /** C3: the Codex usage-limit item from codex runs; absent while every codex switch is off (C8). */
  codex?: {state: "ok" | "limited" | "unknown"; label: string; detail: string};
 }
 /** One "Lined up" row: a ready, blocked or queued job with its cp_next verdict. */
