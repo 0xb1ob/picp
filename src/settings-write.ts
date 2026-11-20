@@ -39,7 +39,7 @@ import {
 	type RoutingRule,
 } from "./contracts.ts";
 import { isNativeModel, NATIVE_EFFORTS } from "./drivers/claude.ts";
-import { CODEX_EFFORTS, codexPersistRefusal, isCodexModel } from "./drivers/codex.ts";
+import { CODEX_EFFORTS, codexPersistRefusal, codexRowClass, isCodexModel } from "./drivers/codex.ts";
 import { PACKAGE_ROOT } from "./home.ts";
 import { atomicWriteText, durableAppend } from "./json-store.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
@@ -364,7 +364,7 @@ function refuseRoutingRows(home: string, config: RoutingConfig, prior: Record<st
 	const errors = config.rubric.flatMap((row: RoutingRule) => {
 		const out: string[] = [];
 		const kept = JSON.stringify(rows.get(row.id)) === JSON.stringify(row);
-		const off = row.driver === "codex" && !kept ? codexPersistRefusal(home, `row ${row.id}`) : undefined;
+		const off = row.driver === "codex" && !kept ? codexPersistRefusal(home, `row ${row.id}`, codexRowClass(row.role)) : undefined;
 		if (off !== undefined) out.push(off);
 		if (row.driver === "claude" && !isNativeModel(row.model)) out.push(`row ${row.id}: the Claude CLI runs only an anthropic/claude-… model, not ${row.model}; pick one for this row`);
 		if (row.driver === "claude" && row.thinking !== undefined && !CLAUDE_EFFORTS.includes(row.thinking)) out.push(`row ${row.id}: thinking ${row.thinking} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);

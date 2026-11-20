@@ -22,8 +22,33 @@ export const NATIVE_SCRATCH_PREFIX = "cp-claude-native-";
 /** C1b: the Codex worker's record and scratch dir, in the same schema (teardown and the viewer read both). */
 export const NATIVE_CODEX_SESSION_FILE = "native-codex";
 export const NATIVE_CODEX_SCRATCH_PREFIX = "cp-codex-native-";
-/** C7b (C1): the revive's unreviewed paths (a JSON array) for the revived worker; its checkpoint never commits them. */
-export const NATIVE_UNREVIEWED_ENV = "CP_NATIVE_UNREVIEWED";
+/** C7b (C1), C8 (c): the file holding the revive's unreviewed paths; the revived worker's checkpoint never commits them. */
+export const NATIVE_UNREVIEWED_FILE_ENV = "CP_NATIVE_UNREVIEWED_FILE";
+export const NATIVE_UNREVIEWED_FILE = "native-unreviewed.json";
+
+/** Writes the whole list (0600, tmp + rename) and returns its path; with no list, a stale file is removed. */
+export function writeNativeUnreviewed(runDir: string, list: readonly string[] | undefined): string | undefined {
+	const file = join(runDir, NATIVE_UNREVIEWED_FILE);
+	if (list === undefined || list.length === 0) {
+		rmSync(file, { force: true });
+		return undefined;
+	}
+	writeFileSync(`${file}.tmp`, `${JSON.stringify(list)}\n`, { mode: 0o600 });
+	renameSync(`${file}.tmp`, file);
+	return file;
+}
+
+/** The revive's list; a missing or malformed file is an error, never an empty list. */
+export function readNativeUnreviewed(file: string): string[] | { error: string } {
+	let list: unknown;
+	try {
+		list = JSON.parse(readFileSync(file, "utf8"));
+	} catch (error) {
+		return { error: `the unreviewed-path list ${file} is unreadable (${(error as Error).message}); nothing was checkpointed` };
+	}
+	if (Array.isArray(list) && list.every((path) => typeof path === "string")) return list as string[];
+	return { error: `the unreviewed-path list ${file} is not a JSON array of paths; nothing was checkpointed` };
+}
 
 const REVIVED = "picp revived this job: your previous native run ended without an accepted report (a crash, a stop or a restart). ";
 

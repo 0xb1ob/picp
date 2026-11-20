@@ -361,7 +361,7 @@ test("C1b T-row: with every codex switch off nothing persisted takes a codex val
 		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: plain.id, task: "Report.", model: piModel, driver: "pi", queue: false, when_ready: false } }] },
 	])).filter((end) => end.toolName === "cp_dispatch");
 	assert.match(text(ends[0]), /the switch codex_research is off/);
-	assert.match(text(ends[1]), /not armed: the armed dispatch of \S+ names the codex driver while codex_research is off/);
+	assert.match(text(ends[1]), /not armed: the armed dispatch of \S+ names the codex driver while every codex switch is off/);
 	assert.notEqual(ends[2]?.isError, true, text(ends[2]));
 	await waitFor(() => h.record(plain.id), Boolean, { timeoutMs: 30_000, what: "the pi job's fleet record" });
 	const persisted = [LAYOUT.fleetFile, LAYOUT.dispatchQueueFile, LAYOUT.routingFile, join(LAYOUT.data, "native.json"), join(LAYOUT.data, "armed-dispatches.json")]

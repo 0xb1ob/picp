@@ -33,7 +33,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
-import { NATIVE_UNREVIEWED_ENV, nativeDoorRefusal, nativeReviveBase, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
+import { NATIVE_UNREVIEWED_FILE_ENV, nativeDoorRefusal, nativeReviveBase, nativeReviveRefusal, sendNativeRevive, writeNativeUnreviewed } from "./drivers/claude-followup.ts";
 import { observeNative } from "./native-availability-observer.ts";
 import { nativeBaseEnv, nativeThinkingEnv } from "./drivers/claude.ts";
 import { nativeDriverSpec } from "./drivers/registry.ts";
@@ -73,6 +73,7 @@ export const REVIVE_REFUSAL_CODES = [
 	"model_unrouted",
 	"route_refused",
 	"native_refused",
+	"worktree_unreadable",
 ] as const;
 export type ReviveRefusalCode = (typeof REVIVE_REFUSAL_CODES)[number];
 
@@ -276,7 +277,7 @@ const UNREVIEWED_NAMED_MAX = 20;
  * C7b (C1, RR1): with a dead hook one rule-approved command can write the worktree before picp kills the run. When a
  * Codex implementer's last run stopped on `lockdown`, its uncommitted paths are named before any relaunch.
  */
-async function lockdownChanges(home: string, record: FleetRecord, git: GitRunner): Promise<string[] | undefined> {
+async function lockdownChanges(home: string, record: FleetRecord, git: GitRunner): Promise<{ paths: string[] } | { failed: string } | undefined> {
 	if (isScriptFleetRecord(record) || record.worker.driver !== "codex" || record.worker.role !== "implementer") return undefined;
 	let stop: unknown = "lockdown";
 	try {
@@ -286,9 +287,10 @@ async function lockdownChanges(home: string, record: FleetRecord, git: GitRunner
 	}
 	if (stop !== "lockdown") return undefined;
 	const status = await git(record.worktree, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"]);
-	if (status.status !== 0) return [`(git status failed: ${status.stderr.trim().slice(0, 200)})`];
+	// C8 (a): unnamed dirt fails closed; the caller refuses the revive.
+	if (status.status !== 0) return { failed: status.stderr.trim().slice(0, 200) || "git status exited non-zero" };
 	const paths = status.stdout.split("\0").filter((entry) => entry.length > 3).map((entry) => entry.slice(3));
-	return paths.length > 0 ? paths : undefined;
+	return paths.length > 0 ? { paths } : undefined;
 }
 
 const namedPaths = (paths: readonly string[]): string =>
@@ -564,6 +566,11 @@ export class Reviver {
 		// t3code adoption 7: shown, never restored. A missing ref does not refuse.
 		const checkpointSha = record.checkpoint_ref ? await readCheckpoint(git, record.worktree, record.checkpoint_ref) : undefined;
 		const unreviewed = await lockdownChanges(this.#options.home, record, git);
+		if (unreviewed && "failed" in unreviewed) {
+			return refuse(jobId, "worktree_unreadable", `the last Codex run of ${jobId} was killed (stop lockdown) and git status failed in ` +
+				`${record.worktree} (${unreviewed.failed}), so its uncommitted paths cannot be named. Nothing was spawned or committed; ` +
+				"fix the checkout and retry, or cp_teardown.");
+		}
 		return {
 			ok: true,
 			job_id: jobId,
@@ -580,7 +587,7 @@ export class Reviver {
 			...(closesWorker ? { closesWorker: true as const } : {}),
 			...(record.checkpoint_ref ? { checkpoint: { ref: record.checkpoint_ref, ...(checkpointSha ? { sha: checkpointSha } : {}) } } : {}),
 			...(skills.skills.length ? { skills: skills.skills } : {}),
-			...(unreviewed ? { unreviewedChanges: unreviewed } : {}),
+			...(unreviewed ? { unreviewedChanges: unreviewed.paths } : {}),
 		};
 	}
 
@@ -611,6 +618,8 @@ export class Reviver {
 		const reservation = await this.#options.makeRoom?.(jobId, plan.role);
 		let managed: ReturnType<WorkerManager["spawn"]>;
 		try {
+			// C8 (c): the list travels by file, so a large dirty tree cannot overflow the spawn's env (E2BIG).
+			const unreviewedFile = record.worker.driver ? writeNativeUnreviewed(this.#options.runs.open(jobId).runDir, plan.unreviewedChanges) : undefined;
 			await this.#options.manager.ready();
 			managed = observeNative(this.#options.home, this.#options.manager.spawn({
 				identity: {
@@ -627,7 +636,7 @@ export class Reviver {
 				...(plan.skills?.length ? { skills: plan.skills.map((s) => s.dir) } : {}),
 				sessionFile: plan.session_file,
 				// N3c: a native job respawns its native worker, which resumes the recorded Claude session.
-				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1", ...(plan.unreviewedChanges ? { [NATIVE_UNREVIEWED_ENV]: JSON.stringify(plan.unreviewedChanges) } : {}), ...nativeThinkingEnv(plan.thinking), ...nativeBaseEnv(nativeReviveBase(record.bound_pr?.base, record.worker.session_file, () => projectBaseBranch(this.#options.home, record.project))) } } : {}),
+				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1", ...(unreviewedFile ? { [NATIVE_UNREVIEWED_FILE_ENV]: unreviewedFile } : {}), ...nativeThinkingEnv(plan.thinking), ...nativeBaseEnv(nativeReviveBase(record.bound_pr?.base, record.worker.session_file, () => projectBaseBranch(this.#options.home, record.project))) } } : {}),
 				// No `brief`: a revived pi worker resumes idle. `report_result` stays
 				// write-once (worker-reporter), so nothing here can double-report.
 			}));

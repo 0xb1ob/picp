@@ -262,6 +262,42 @@ test("SD-legacy: a legacy-role codex row while codex is off does not refuse an u
 	assert.match((changed.body.errors as string[]).join("\n"), /row planner-default names the codex driver while codex_research is off/);
 });
 
+// Scenario: C8 (h) — a codex row write needs its own class switch, not codex_research
+//   Given hand-written codex rows on reviews, planner-default and small-ship, and only codex_review on, then only codex_ship
+//   When a rubric write changes one codex row's model at a time
+//   Then reviews saves under codex_review and small-ship under codex_ship; any other codex row is refused naming its
+//   own switch, and nothing is written. Before C8 every one keyed on codex_research and the first save was refused.
+test("SD-codex-class: a changed codex row saves under its own class switch and is refused naming it otherwise", { timeout: 120_000 }, async (t) => {
+	const ids = ["reviews", "planner-default", "small-ship"];
+	const h = await home(t, (root) => {
+		const routing = JSON.parse(readFileSync(join(root, LAYOUT.routingFile), "utf8")) as Json;
+		for (const row of routing.rubric as Json[]) if (ids.includes(row.id as string)) Object.assign(row, { model: "openai/gpt-5", thinking: "high", driver: "codex" });
+		put(join(root, LAYOUT.routingFile), JSON.stringify(routing));
+		put(join(root, LAYOUT.data, "native.json"), JSON.stringify({ codex_review: true }));
+	});
+	const write = async (id: string) => {
+		const shown = (await h.field("models.rubric"))?.value as Json[];
+		return await h.post("/api/settings/apply", { changes: { "models.rubric": shown.map((row) => (row.id === id ? { ...row, model: "openai/gpt-6.1-sol" } : row)) } });
+	};
+	const modelOf = (id: string) => (h.json(LAYOUT.routingFile).rubric as Json[]).find((row) => row.id === id)?.model;
+	const refused = async (id: string, codexClass: string) => {
+		const before = readFileSync(join(h.root, LAYOUT.routingFile), "utf8");
+		const reply = await write(id);
+		assert.equal(reply.status, 400, JSON.stringify(reply.body).slice(0, 400));
+		assert.match((reply.body.errors as string[]).join("\n"), new RegExp(`row ${id} names the codex driver while ${codexClass} is off`));
+		assert.equal(readFileSync(join(h.root, LAYOUT.routingFile), "utf8"), before, "nothing written");
+	};
+	const saved = await write("reviews");
+	assert.equal(saved.status, 200, JSON.stringify(saved.body).slice(0, 400));
+	assert.equal(modelOf("reviews"), "openai/gpt-6.1-sol");
+	await refused("planner-default", "codex_research");
+	put(join(h.root, LAYOUT.data, "native.json"), JSON.stringify({ codex_ship: true }));
+	const ship = await write("small-ship");
+	assert.equal(ship.status, 200, JSON.stringify(ship.body).slice(0, 400));
+	assert.deepEqual([modelOf("small-ship"), (h.json(LAYOUT.routingFile).rubric as Json[]).find((row) => row.id === "small-ship")?.driver], ["openai/gpt-6.1-sol", "codex"]);
+	await refused("reviews", "codex_review");
+});
+
 // Scenario: restore works
 //   Given the parent and every worker on the Claude CLI
 //   When the operator restores the Model routing and the parent keys
