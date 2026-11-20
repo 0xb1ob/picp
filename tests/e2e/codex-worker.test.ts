@@ -131,7 +131,9 @@ test("CX-1b: the switch refuses an explicit codex job by name; a codex row prefe
 	const on = (await h.run([dry(rowOn.id), dry(board.id), dry(ship.id)])).filter((end) => end.toolName === "cp_dispatch");
 	assert.deepEqual([preview(on[0])?.driver, preview(on[0])?.requested_driver], ["codex", "codex"], text(on[0]));
 	assert.match(preview(on[0])?.driver_reason ?? "", /^rule: codex-research prefers codex; effort \w+/);
-	for (const end of [on[1], on[2]]) assert.deepEqual([preview(end)?.requested_driver, preview(end)?.driver], ["codex", "pi"], text(end));
+	assert.deepEqual([preview(on[1])?.requested_driver, preview(on[1])?.driver], ["codex", "pi"], text(on[1]));
+	// C8 (h): the ship fallback's class switch codex_ship is off, so no codex value is recorded.
+	assert.deepEqual([preview(on[2])?.requested_driver, preview(on[2])?.driver], [undefined, "pi"], text(on[2]));
 	assert.match(preview(on[1])?.driver_reason ?? "", /^ineligible: only research \(role planner, delivery local or answer\), ship \(role implementer, delivery pr or local\) and gate reviews run on the Codex CLI/);
 	assert.match(preview(on[2])?.driver_reason ?? "", /^switch: the switch codex_ship is off/);
 	routing([row()], { deny_by_role: { planner: [FAKE_CODEX_REF] } });
