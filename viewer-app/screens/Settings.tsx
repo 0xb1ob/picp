@@ -6,7 +6,7 @@ import { PageHeader } from "../components/PageHeader.tsx";
 import { ParentRestart } from "../components/ParentRestart.tsx";
 import { RestartSession } from "../components/RestartSession.tsx";
 import { ShellContext } from "../components/Shell.tsx";
-import { type Cli, type CliChoices, cliChoices, cliError, type Drafts, fieldError, fieldOf, type ModelsStatus, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
+import { type Cli, type CliChoices, cliChoices, cliError, codexSwitchOf, type Drafts, fieldError, fieldOf, type ModelsStatus, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
 import "./settings.css";
 
 /** The browser bundle takes no values from src/contracts.ts; the type pins this list to `ThinkingLevel`. */
@@ -17,7 +17,7 @@ const CUSTOM = "custom";
 const MAX_FALLBACKS = 4;
 const PEOPLE_MODELS: SettingKey[] = ["models.parent_driver", "models.parent", "models.parent_thinking", "models.operator_driver", "models.operator", "models.operator_thinking"];
 const ROUTING: SettingKey[] = ["models.rubric", "workers.driver"];
-const CLI_LABEL: Record<string, string> = {pi: "pi", claude: "Claude CLI"};
+const CLI_LABEL: Record<string, string> = {pi: "pi", claude: "Claude CLI", codex: "Codex CLI"};
 /** The shipped and flip-era rubric ids in words; any other row shows its id alone. */
 const ROW_LABEL: Record<string, string> = {"planner-default": "Planner", "small-ship": "Small ship", "big-ship": "Big ship", "risky-any": "Risky (any job)", "risky-ship": "Risky ship", reviews: "Reviews", "research-big": "Big research", "native-research": "Native research"};
 const rowName = (id: string) => ROW_LABEL[id] ? `${ROW_LABEL[id]} (${id})` : id;
@@ -156,14 +156,27 @@ function WorkersCli({field, cli, saved, set, disabled}: {field: SettingField | u
  </div>;
 }
 
-/** `choices` filter each row's model and thinking by the workers CLI; fallbacks keep pi's whole list. */
-function Rubric({rows, original, setRow, disabled, models, choices, errors}: {rows: RoutingRule[]; original: RoutingRule[]; setRow: (index: number, patch: Partial<RoutingRule>) => void; disabled: boolean; models: string[] | null | undefined; choices: CliChoices; errors: (string | null)[]}) {
- return <ol class="settings-rules"><li class="settings-rules-head" aria-hidden="true"><span>Rule</span><span>Model</span><span>Fallbacks, in order</span><span>Thinking</span></li>{rows.map((row, index) => {
+/** A rule's CLI: its base (the workers CLI) or the Codex CLI, offered only while the rule's class switch is on. */
+type RowCli = {base: Cli; codex: {on: boolean; name: string}};
+
+/** `choicesOf` filter each row's model and thinking by its CLI; fallbacks keep pi's whole list. */
+function Rubric({rows, original, setRow, disabled, models, choicesOf, cliOf, errors}: {rows: RoutingRule[]; original: RoutingRule[]; setRow: (index: number, patch: Partial<RoutingRule>) => void; disabled: boolean; models: string[] | null | undefined; choicesOf: (row: RoutingRule) => CliChoices; cliOf: (index: number) => RowCli; errors: (string | null)[]}) {
+ return <ol class="settings-rules"><li class="settings-rules-head" aria-hidden="true"><span>Rule</span><span>Model</span><span>Fallbacks, in order</span><span>Thinking</span><span>CLI</span></li>{rows.map((row, index) => {
   const fallbacks = row.fallbacks ?? [];
   const error = errors[index];
+  const choices = choicesOf(row);
+  const {base, codex} = cliOf(index);
+  const codexOff = !codex.on && row.driver !== "codex";
+  const outside = choices.cli === "claude" && choices.native && !choices.native.test(row.model) ? "not a Claude model"
+   : choices.cli === "codex" && choices.native && !choices.native.test(row.model) ? "not a Codex model" : undefined;
+  // Back on the base CLI, a row saved with no driver sends none, so codex-then-pi leaves no change.
+  const pickCli = (cli: string) => {
+   if (cli === "codex") { if (!codexOff) setRow(index, {driver: "codex"}); return; }
+   setRow(index, {driver: original[index]?.driver === undefined ? undefined : base});
+  };
   return <li key={row.id} class={`settings-rule${rowEdited(row, original[index]) ? " settings-rule-edited" : ""}${error ? " settings-rule-invalid" : ""}`}>
   <div class="settings-rule-head">{ROW_LABEL[row.id] && <strong class="settings-rule-name">{ROW_LABEL[row.id]}</strong>}<code>{row.id}</code><span class="settings-chips" title={row.note}>{[row.role, row.scope?.join("/"), row.risk && `risk:${row.risk}`, row.project].filter(Boolean).join(" · ")}</span></div>
-  <label><span class="settings-label">Model</span><ModelSelect label={`Model of ${row.id}`} value={row.model} set={model => setRow(index, {model})} models={choices.models} required disabled={disabled} outside={choices.cli === "claude" && choices.native && !choices.native.test(row.model) ? "not a Claude model" : undefined}/><ModelNote models={models} values={[row.model]}/></label>
+  <label><span class="settings-label">Model</span><ModelSelect label={`Model of ${row.id}`} value={row.model} set={model => setRow(index, {model})} models={choices.models} required disabled={disabled} outside={outside}/><ModelNote models={models} values={[row.model]}/></label>
   <div class="settings-fallbacks" role="group" aria-label={`Fallbacks of ${row.id}`}><span class="settings-label">Fallbacks</span>
    {fallbacks.map((fallback, at) => <span key={at} class="settings-chip">
     <ModelSelect name={`Fallback ${at + 1} of ${row.id}`} label={`Fallback ${at + 1} of ${row.id}`} value={fallback} set={next => setRow(index, {fallbacks: fallbacks.map((item, i) => i === at ? next : item)})} models={models} required disabled={disabled}/>
@@ -175,6 +188,10 @@ function Rubric({rows, original, setRow, disabled, models, choices, errors}: {ro
    <option value="">profile default</option>
    {row.thinking && !choices.efforts.includes(row.thinking) && <option value={row.thinking}>{row.thinking}</option>}
    {choices.efforts.map(level => <option key={level} value={level}>{level}</option>)}
+  </select></label>
+  <label><span class="settings-label">CLI</span><select aria-label={`CLI of ${row.id}`} value={row.driver === "codex" ? "codex" : base} disabled={disabled} onChange={event => pickCli(event.currentTarget.value)}>
+   <option value={base}>{CLI_LABEL[base]}</option>
+   <option value="codex" disabled={codexOff}>{codexOff ? `Codex CLI (${codex.name} is off in Native workers)` : "Codex CLI"}</option>
   </select></label>
   {error && <small class="settings-warn settings-rule-error" role="alert">{error}</small>}
  </li>;
@@ -230,13 +247,19 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
  const routingAbsent = status.snapshot.owners.find(owner => owner.owner === "routing")?.state === "absent";
  const rows = (valueOf(data, drafts, "models.rubric") ?? []) as RoutingRule[];
  const original = (view_("models.rubric")?.value ?? []) as RoutingRule[];
- const setRow = (index: number, patch: Partial<RoutingRule>) => set("models.rubric", rows.map((row, at) => {
-  if (at !== index) return row;
-  const next: RoutingRule = {...row, ...patch};
-  if (!next.thinking) delete next.thinking;
-  if (!next.fallbacks?.length) delete next.fallbacks;
-  return next;
- }) as SettingValue);
+ const setRow = (index: number, patch: Partial<RoutingRule>) => {
+  const next = rows.map((row, at) => {
+   if (at !== index) return row;
+   const edited: RoutingRule = {...row, ...patch};
+   if (!edited.thinking) delete edited.thinking;
+   if (!edited.fallbacks?.length) delete edited.fallbacks;
+   if (!edited.driver) delete edited.driver;
+   return edited;
+  });
+  // Every row back to its saved value drops the draft, so Save has nothing to post (as with the Workers CLI).
+  if (next.length === original.length && next.every((row, at) => !rowEdited(row, original[at]))) setDrafts(current => omit(current, ["models.rubric"]));
+  else set("models.rubric", next as SettingValue);
+ };
  const list = view.models && !("error" in view.models) ? view.models : null;
  const models = list?.pi.models ?? null;
  const cliOf = (key: SettingKey): Cli | null => { const cli = valueOf(data, drafts, key); return cli === "pi" || cli === "claude" ? cli : null; };
@@ -244,7 +267,20 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
  const setCli = (key: SettingKey, cli: SettingValue) => setDrafts(current => cli === view_(key)?.value ? omit(current, [key]) : {...current, [key]: cli});
  const workersCli = cliOf("workers.driver");
  const routeChoices = cliChoices(data, workersCli, THINKING, list);
- const rowErrors = rows.map(row => cliError(routeChoices, row.model, row.thinking));
+ const codexChoices = cliChoices(data, "codex", THINKING, list);
+ const rowChoices = (row: RoutingRule): CliChoices => row.driver === "codex" ? codexChoices : routeChoices;
+ const rowCli = (index: number): RowCli => {
+  const row = rows[index] as RoutingRule;
+  const name = codexSwitchOf(data, row.role);
+  const base: Cli = workersCli ?? (original[index]?.driver === "claude" ? "claude" : "pi");
+  return {base, codex: {on: name !== null && view_(`workers.native_${name}` as SettingKey)?.value === true, name: name ?? "its Codex switch"}};
+ };
+ // A changed codex row needs its class switch on (the server's `codexPersistRefusal`); an unchanged one stays.
+ const rowErrors = rows.map((row, index) => {
+  const {base, codex} = rowCli(index);
+  if (row.driver === "codex" && !codex.on && rowEdited(row, original[index])) return `${codex.name} is off: turn it on under Native workers, or pick ${CLI_LABEL[base]}`;
+  return cliError(rowChoices(row), row.model, row.thinking);
+ });
  const needNew = rows.filter((_, index) => rowErrors[index]).map(row => rowName(row.id));
  const parentChoices = cliChoices(data, cliOf("models.parent_driver"), THINKING, list);
  const operatorChoices = cliChoices(data, cliOf("models.operator_driver"), THINKING, list);
@@ -275,8 +311,8 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
    {routingAbsent ? <p class="settings-readonly">No data/routing.json: every worker route is refused until it exists.</p> : <>
     {modelsState}
     <WorkersCli field={fieldOf(data, "workers.driver")} cli={workersCli} saved={view_("workers.driver")} set={cli => setCli("workers.driver", cli)} disabled={editing}/>
-    {needNew.length > 0 && <p class="settings-warn settings-cli-block" role="alert">The Claude CLI needs a new model or effort on {needNew.join(", ")}. Save stays off until each row is valid.</p>}
-    <Rubric rows={rows} original={original} setRow={setRow} disabled={editing} models={models} choices={routeChoices} errors={rowErrors}/>
+    {needNew.length > 0 && <p class="settings-warn settings-cli-block" role="alert">These rules need a new model, effort or CLI: {needNew.join(", ")}. Save stays off until each row is valid.</p>}
+    <Rubric rows={rows} original={original} setRow={setRow} disabled={editing} models={models} choicesOf={rowChoices} cliOf={rowCli} errors={rowErrors}/>
    </>}
   </Section>
   <Section title="Parent and operator models" help="Empty means unset. A model or thinking change switches the running session at its next idle point. The Parent CLI and Operator CLI apply only when that session restarts; nothing restarts on its own." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models and thinking, and put the parent and operator back on pi (from their next start)?" disabled={disabled} invalid={invalid(PEOPLE_MODELS)}>
@@ -295,7 +331,7 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   <Section title="Dashboard address" help="Public URL applies to the next board or report link; the Host pin applies to the next dashboard request. Neither restarts anything." keys={VIEWER} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: VIEWER}} restoreText="Unset the public URL and turn the Host pin off?" disabled={disabled}>
    {VIEWER.map(field)}
   </Section>
-  <Section title="Native workers" help="Off by default, and pi stays every job's driver; no shipped routing rule names claude or codex. The Workers CLI under Model routing sets the Claude switch too: on with the Claude CLI, off with pi. The Codex switches are set here only; a codex row is written by hand in data/routing.json." keys={WORKERS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: WORKERS}} restoreText="Turn the Claude CLI research workers and every Codex CLI switch off?" disabled={disabled}>
+  <Section title="Native workers" help="Off by default, and pi stays every job's driver; no shipped routing rule names claude or codex. The Workers CLI under Model routing sets the Claude switch too: on with the Claude CLI, off with pi. The Codex switches are set here only; with one on, Model routing offers the Codex CLI on that class's rules." keys={WORKERS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: WORKERS}} restoreText="Turn the Claude CLI research workers and every Codex CLI switch off?" disabled={disabled}>
    {WORKERS.map(field)}
   </Section>
   {children}

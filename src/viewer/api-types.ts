@@ -127,8 +127,8 @@ export interface SettingsResponse {
 	/** The CLI pickers' choices (src/settings-control.ts `DRIVER_CHOICES`); null from an older session. */
 	drivers?: SettingsDriverChoices | null;
 }
-/** Effort levels per CLI and the native model rule (a RegExp source over `provider/id`). */
-export interface SettingsDriverChoices { efforts: { pi: string[]; claude: string[] }; claude_model: string }
+/** Effort levels per CLI, the model rules (RegExp sources over `provider/id`) and each role's Codex switch; codex fields are absent from an older session. */
+export interface SettingsDriverChoices { efforts: { pi: string[]; claude: string[]; codex?: string[] }; claude_model: string; codex_model?: string; codex_class?: Record<string, string> }
 /** pi's `provider/id` models; `loading` while a `pi --list-models` run is going; `listed_at` is when it last landed. */
 export interface ModelList { models: string[] | null; error: string | null; loading: boolean; listed_at: string | null }
 /** `GET /api/settings/models`: the picker list per CLI, pi's whole list and its anthropic/claude-* part. */

@@ -9775,12 +9775,14 @@ model (provider `anthropic`, id `claude-…`), is `refused` with the reason. It 
 `models.operator_driver` ("Operator CLI") is `data/operator.json` `driver`, read the same way as
 `operatorDriverSetting` reads it; it applies at the next operator start (Restart session, which starts a clean session
 when the CLI changed).
-`workers.driver` has no key of its own: it is the one `driver` every `data/routing.json` rubric row names (absent is
-`pi`). Its source is `file` when any row names one. When rows disagree the value is null, with a diagnostic naming
+`workers.driver` has no key of its own: it is the one `driver` every `data/routing.json` rubric row not on `codex`
+names (absent is `pi`); codex rows are left out and noted in the diagnostic as `codex on {ids}` (C8b). Its source is
+`file` when any row names one. When rows disagree the value is null, with a diagnostic naming
 both sides. A `claude` value also names any `data/native.json` switch its rows' roles need that is off. An invalid
 routing file refuses it, as it refuses `models.rubric`. `settings_get` also returns `drivers`: pi's thinking levels,
-the Claude effort levels (`off` plus `NATIVE_EFFORTS`) and the native model rule (`NATIVE_MODEL`). The pickers filter
-by these, so the lists come from the drivers' own code.
+the Claude effort levels (`off` plus `NATIVE_EFFORTS`), the native model rule (`NATIVE_MODEL`), and (C8b) the Codex
+efforts (`efforts.codex`, `CODEX_EFFORTS`), the Codex model rule (`codex_model`) and each role's Codex switch
+(`codex_class`). The pickers filter by these, so the lists come from the drivers' own code.
 
 **Codex switch keys (C8).** `workers.native_codex_research`, `workers.native_codex_ship` and
 `workers.native_codex_review` are `data/native.json` `codex_research`, `codex_ship` and `codex_review` (booleans,
@@ -9857,19 +9859,21 @@ template is 409 and restores nothing. `models.parent_driver` and `models.operato
 below.
 
 **Rubric writes.** A `models.rubric` set sends the snapshot's rows with only `model`,
-`fallbacks` and `thinking` edited; a changed id, role, project, scope, risk or note, or an
+`fallbacks`, `thinking` and (C8b) `driver` edited; a sent `driver` of `pi` deletes the key, an absent `driver` key keeps
+the stored one. A changed id, role, project, scope, risk or note, or an
 added, removed or reordered row is 400. The rest of `routing.json` (`profiles`,
 `deny_by_role`, …) is kept as stored.
 
 **CLI writes.** A `workers.driver` write touches two owners in one transaction. `claude` sets `driver: "claude"` on
-every rubric row and `claude_research`, `claude_ship` and `claude_review: true` in `data/native.json` (created if
-absent). `pi` deletes every row's `driver` and those three keys. `max_concurrent` and every other key stay, the four
+every rubric row not on `codex` and `claude_research`, `claude_ship` and `claude_review: true` in `data/native.json`
+(created if absent). `pi` deletes the `driver` of every row not on `codex` and those three keys; a restore deletes
+every row's `driver`, codex included. `max_concurrent` and every other key stay, the four
 Codex keys too (`codex_research`, `codex_ship`, `codex_review`, `codex_max_concurrent` 1-4): the Workers CLI never sets
-or deletes them, and no Settings field sets a row's driver to `codex`. In the same
+or deletes them. A row's driver is set to `codex` only by a `models.rubric` write (C8b). In the same
 write a `models.rubric` edit applies first, so one Save can switch the CLI and pick the new models. Any routing write is
 then refused 400, with one error per row, when a `claude` row's `model` is not an Anthropic Claude model or its
 `thinking` has no Claude effort (`minimal`), when a `codex` row's `model` is not an OpenAI GPT model or its `thinking` is not
-`low`…`max`, and when a new or changed `codex` row is written while `codex_research` is off. It is also refused when a row's changed `model` fails `models.allow` or
+`low`…`max`, and when a new or changed `codex` row is written while its class switch is off. It is also refused when a row's changed `model` (or a row newly moved to `codex`) fails `models.allow` or
 matches its role's `deny_by_role`. Fallbacks are never checked or dropped. `claude` with no rubric rows is 409. A `set`
 naming both `workers.driver` and `workers.native_claude_research` is 400. A parent write touching `models.parent_driver`,
 `models.parent` or `models.parent_thinking` is refused 400 when the result pairs `driver: "claude"` with a model

@@ -16,7 +16,7 @@ import { MANDATE_ACTIONS, MANDATE_ASK_ON } from "./mandates.ts";
 import { DEFAULT_QUALITY_THRESHOLD, DEFAULT_QUALITY_VOTERS, GATE_REVIEW_TIMEOUT_MAX_MS, GATE_REVIEW_TIMEOUT_MIN_MS } from "./reviews.ts";
 import { ReviewerModelSchema, RoutingRuleSchema, ThinkingLevelSchema } from "./routing.ts";
 
-/** The CLIs a Settings driver field offers: the Codex CLI is set in data/routing.json only (C1b). */
+/** The CLIs a Settings driver field offers: the Codex CLI is set per rule in Model routing (C8b). */
 const SETTING_DRIVERS = ["pi", "claude"] as const;
 
 export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer", "workers"] as const;
@@ -200,7 +200,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	}),
 	...group("models", "routing", { applies: "next_dispatch", on_invalid: "refuse" }, {
 		allow: { file_key: "allow", type: "string_list", max_items: 64, default: ["*/*"], editable: false, label: "Allowed models", help: "Model patterns routing may pick; absent routing.json allows every model." },
-		rubric: { file_key: "rubric", type: "rubric", max_items: 64, default: [], label: "Worker models", help: "Model, fallbacks and thinking per rubric row; restore puts back the shipped rows." },
+		rubric: { file_key: "rubric", type: "rubric", max_items: 64, default: [], label: "Worker models", help: "Model, fallbacks, thinking and CLI per rubric row (Codex only while its class switch is on); restore puts back the shipped rows." },
 	}),
 	...group("models", "parent", { applies: "next_parent_start", on_invalid: "default" }, {
 		parent: { file_key: "model", env: "CP_PARENT_MODEL", type: "model_ref", default: null, label: "Parent model", help: "Switches the running parent when its current turn ends; else the next start. A later Settings change beats an earlier cp_parent model. Beats CP_PARENT_MODEL and the saved control model. Empty unsets it." },
@@ -249,7 +249,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		native_codex_review: { file_key: "codex_review", type: "boolean", default: false, label: "Codex CLI reviewers", help: `Gate reviews${CODEX_HELP}` },
 	}),
 	...group("workers", "routing", { applies: "next_dispatch", on_invalid: "refuse" }, {
-		driver: { type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets each data/routing.json rubric row's driver, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi." },
+		driver: { type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets the driver of each data/routing.json rubric row not on the Codex CLI, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi." },
 	}),
 ]);
 

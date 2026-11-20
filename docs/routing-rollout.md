@@ -229,17 +229,20 @@ every codex switch stays OFF. The mechanism is in [native-drivers.md](native-dri
    a codex job reports tokens only and costs $0.00 in every USD sum, so token caps are the only spend bound.
 2. **Back up** both files with dated copies: `cp -p data/routing.json data/routing.json.<date>.bak` and
    `cp -p data/native.json data/native.json.<date>.bak` (when it exists).
-3. **A codex row of its own**, above the row it should shadow, with an explicit `openai/gpt-…` model in `allow`, pi
-   models as its `fallbacks`, and `thinking` from `low` to `max` (`off` and `minimal` have no Codex effort):
+3. **The switch.** Dashboard Settings → Native workers: the Codex CLI switch for that class. Leave
+   `codex_max_concurrent` at 1 (it is set in `data/native.json` by hand and is not in Settings). The switch comes
+   first: Model routing offers the Codex CLI on a rule only while its class switch is on.
+4. **A codex rule.** In Settings → Model routing, set the rule's CLI to Codex CLI, pick an `openai/gpt-…` model
+   (it must be in `allow`) and a thinking from `low` to `max` (`off` and `minimal` have no Codex effort), keep pi
+   models as its fallbacks, and Save. Or write a row of its own by hand, above the row it should shadow:
 
    ```json
    { "id": "codex-research", "role": "planner", "scope": ["S"], "model": "openai/gpt-<model>",
      "fallbacks": ["<the pi research model>"], "thinking": "high", "driver": "codex" }
    ```
 
-   Settings never writes a codex row; it is written by hand in `data/routing.json`.
-4. **The switch.** Dashboard Settings → Native workers: the Codex CLI switch for that class. Leave
-   `codex_max_concurrent` at 1 (it is set in `data/native.json` by hand and is not in Settings).
+   Settings writes `driver: "codex"` on that rule through the audited write (SD-codex-rule); picking pi again deletes
+   it. The Workers CLI leaves a codex rule alone.
 5. **Order.** Research first (`codex_research`), then reviews (the `reviews` row, `codex_review`), then ship (the
    `small-ship` row, `codex_ship`). Move to the next class only after five clean jobs in the current one.
 6. **What to watch.**

@@ -11,26 +11,41 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export type SettingsStatus = SettingsResponse | {error: string};
 export type ModelsStatus = SettingsModelsResponse | {error: string};
 export type RestoreSelector = {keys: SettingKey[]} | {section: string};
-export type Cli = "pi" | "claude";
-/** A CLI's picker choices: claude keeps the models its rule matches and its efforts; null `models` is no list yet. */
+/** "codex" is a per-rule choice only: no session or Workers CLI field offers it. */
+export type Cli = "pi" | "claude" | "codex";
+/** A CLI's picker choices: claude and codex keep the models their rule matches and their efforts; null `models` is no list yet. */
 export interface CliChoices { cli: Cli | null; models: string[] | null | undefined; efforts: string[]; native: RegExp | null }
 
 /** The choices for `cli` from the session's `drivers` and the models read; an older session gets `fallback` levels. */
 export function cliChoices(status: SettingsResponse, cli: Cli | null, fallback: readonly string[], list: SettingsModelsResponse | null): CliChoices {
  const drivers = status.drivers;
  if (!drivers) return {cli, models: list?.pi.models ?? null, efforts: [...fallback], native: null};
+ if (cli === "codex") {
+  if (!drivers.codex_model) return {cli, models: null, efforts: [], native: null};
+  const codex = new RegExp(drivers.codex_model);
+  return {cli, models: list?.pi.models?.filter(model => codex.test(model)) ?? null, efforts: drivers.efforts.codex ?? [], native: codex};
+ }
  const native = new RegExp(drivers.claude_model);
  if (cli !== "claude") return {cli, models: list?.pi.models ?? null, efforts: drivers.efforts.pi, native};
  return {cli, models: list?.claude.models ?? null, efforts: drivers.efforts.claude, native};
 }
 
-/** Why a model/effort pair cannot run on the Claude CLI (the driver's own rule), or null; pi takes any pair. */
+/** Why a model/effort pair cannot run on the Claude or Codex CLI (the driver's own rule), or null; pi takes any pair. */
 export function cliError(choices: CliChoices, model: string | null | undefined, thinking: string | null | undefined): string | null {
+ if (choices.cli === "codex") {
+  if (!choices.native) return "This operator session offers no Codex CLI choices: pick pi";
+  if (model && !choices.native.test(model)) return `The Codex CLI runs only an openai/gpt-… model, not ${model}: pick one`;
+  if (thinking && !choices.efforts.includes(thinking)) return `Effort ${thinking} has no Codex equivalent: pick ${choices.efforts.join(", ")}`;
+  return null;
+ }
  if (choices.cli !== "claude" || !choices.native) return null;
  if (model && !choices.native.test(model)) return `The Claude CLI runs only an anthropic/claude-… model, not ${model}: pick one`;
  if (thinking && !choices.efforts.includes(thinking)) return `Effort ${thinking} has no Claude equivalent: pick ${choices.efforts.join(", ")}`;
  return null;
 }
+
+/** The Codex switch a rubric role falls under (`codexRowClass`), or null from an older session or a role with none. */
+export const codexSwitchOf = (status: SettingsResponse, role: string): string | null => status.drivers?.codex_class?.[role] ?? null;
 
 /** A write's outcome: the owner transaction's answer with its HTTP status, or why it never reached one. */
 export type SettingsWriteResult = {status: number; body: SettingsWriteResponse} | {status: number; error: string};

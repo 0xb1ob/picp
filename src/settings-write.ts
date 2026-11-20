@@ -212,9 +212,9 @@ const RULE_FIXED_KEYS = ["id", "role", "project", "scope", "risk", "note"] as co
 const RULE_MODEL_KEYS = ["model", "fallbacks", "thinking"] as const;
 
 /**
- * A `models.rubric` set: `submitted` (the snapshot's rows, edited) may change only model, fallbacks and thinking of
- * the existing rows, in place. Any other change, or a different count or order, is 400 with one error per row.
- * Returns the raw rows with those three keys replaced (empty fallbacks and absent thinking are deleted).
+ * A `models.rubric` set: `submitted` (the snapshot's rows, edited) may change only model, fallbacks, thinking and driver
+ * of the existing rows, in place; anything else, or a different count or order, is 400 with one error per row.
+ * Empty fallbacks and absent thinking are deleted; a sent `driver` of pi deletes it, an absent `driver` key keeps it.
  */
 export function mergeRubric(rawRows: unknown, submitted: readonly Record<string, unknown>[]): unknown[] {
 	const raw = Array.isArray(rawRows) ? rawRows : [];
@@ -234,6 +234,10 @@ export function mergeRubric(rawRows: unknown, submitted: readonly Record<string,
 		else delete out.fallbacks;
 		if (next.thinking !== undefined) out.thinking = next.thinking;
 		else delete out.thinking;
+		if ("driver" in next) {
+			if (next.driver === undefined || next.driver === "pi") delete out.driver;
+			else out.driver = next.driver;
+		}
 		return out;
 	});
 	if (errors.length) throw new Refusal(400, "models.rubric: only model, fallbacks and thinking may change on the existing rows", errors);
@@ -337,10 +341,11 @@ const NATIVE_KEYS: Readonly<Record<"parent" | "operator", readonly SettingKey[]>
 /** The workers CLI a request asks for: the set value, or pi (the shipped rows name no driver) on restore. */
 const workersDriver = (request: SettingsWriteRequest): string => (request.mode === "set" ? String(request.changes["workers.driver"]) : "pi");
 
-/** Every rubric row runs `driver`: claude is stored, pi deletes the key (absent is pi). True when a row changed. */
-function setRowDrivers(doc: Record<string, unknown>, driver: string): boolean {
+/** Every rubric row runs `driver` (claude stored, pi deletes the key); `keepCodex` skips codex rows. True on a change. */
+function setRowDrivers(doc: Record<string, unknown>, driver: string, keepCodex: boolean): boolean {
 	let changed = false;
 	for (const row of Array.isArray(doc.rubric) ? doc.rubric.filter(isObject) : []) {
+		if (keepCodex && row.driver === "codex") continue;
 		if (driver === "claude" ? row.driver === "claude" : !("driver" in row)) continue;
 		if (driver === "claude") row.driver = "claude";
 		else delete row.driver;
@@ -378,7 +383,8 @@ function refuseRoutingRows(home: string, config: RoutingConfig, prior: Record<st
 		if (row.driver === "codex" && row.thinking !== undefined && !(CODEX_EFFORTS as readonly string[]).includes(row.thinking)) {
 			out.push(`row ${row.id}: thinking ${row.thinking} has no Codex effort; use ${CODEX_EFFORTS.join(", ")}`);
 		}
-		if (was.get(row.id) === row.model) return out;
+		const toCodex = row.driver === "codex" && rows.get(row.id)?.driver !== "codex";
+		if (was.get(row.id) === row.model && !toCodex) return out;
 		if (!isAllowed(config, row.model)) out.push(`row ${row.id}: models.allow does not permit ${row.model}, so routing would refuse it`);
 		const pattern = deniedFor(config, row.role, row.model);
 		if (pattern !== undefined) out.push(`row ${row.id}: deny_by_role.${row.role} matches ${pattern} for ${row.model}`);
@@ -469,7 +475,7 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			if (field.key === "workers.driver") {
 				const driver = workersDriver(request);
 				if (driver === "claude" && !(Array.isArray(doc.rubric) && doc.rubric.length)) throw new Refusal(409, `${status.path} has no rubric rows to run on the Claude CLI`);
-				if (!setRowDrivers(doc, driver)) continue;
+				if (!setRowDrivers(doc, driver, request.mode === "set")) continue;
 				changes.push({ key: field.key, file_key: "rubric[].driver", action: driver === "claude" ? "set" : "delete", ...old, new: driver, expected: driver });
 				// A rubric edit in the same write reads back with the new drivers.
 				for (const change of changes) if (change.key === "models.rubric") change.expected = normalizeLegacyRoles(clone(doc.rubric)) as SettingValue;

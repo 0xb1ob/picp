@@ -205,26 +205,28 @@ function driverView(read: OwnerRead<unknown>, role: "parent" | "operator", env: 
 /** The native switch each rubric role falls under (`nativeClassOf` in src/drivers/claude.ts). */
 const ROLE_NATIVE_SWITCH: Readonly<Record<Role, NativeClass>> = Object.freeze({ planner: "claude_research", implementer: "claude_ship", "gate-reviewer": "claude_review" });
 
-/** `workers.driver`: the one driver every rubric row names (absent is pi), else null naming the split. */
+/** `workers.driver`: the one driver every non-codex rubric row names (absent is pi), else null naming the split. */
 function workersDriverView(rubric: View | undefined, native: OwnerRead<unknown> | undefined): View {
 	const field = SETTING_FIELDS.find((row) => row.key === "workers.driver") as SettingField;
 	if (!rubric || rubric.status !== "ok") return failed(field, rubric?.diagnostic);
-	const rows = (Array.isArray(rubric.value) ? rubric.value : []) as RoutingRule[];
+	const all = (Array.isArray(rubric.value) ? rubric.value : []) as RoutingRule[];
+	const source = all.some((row) => row.driver !== undefined) ? "file" : "code";
+	const codex = all.filter((row) => row.driver === "codex").map((row) => row.id);
+	const rows = all.filter((row) => row.driver !== "codex");
 	const on = (driver: string) => rows.filter((row) => (row.driver ?? "pi") === driver).map((row) => row.id);
-	const source = rows.some((row) => row.driver !== undefined) ? "file" : "code";
-	const other = rows.filter((row) => row.driver !== undefined && row.driver !== "pi" && row.driver !== "claude");
-	if (other.length) {
-		return { value: null, source, status: "ok", diagnostic: `rows name a driver this switch does not set: ${other.map((row) => `${row.driver} on ${row.id}`).join(", ")}; edit data/routing.json` };
-	}
+	const view = (value: string | null, diagnostic?: string): View => {
+		const note = [diagnostic, codex.length ? `codex on ${codex.join(", ")} (set on its rule; the Workers CLI leaves it)` : undefined].filter(Boolean).join("; ");
+		return { value, source, status: "ok", ...(note ? { diagnostic: note } : {}) };
+	};
 	const claude = on("claude");
 	if (claude.length && claude.length < rows.length) {
-		return { value: null, source, status: "ok", diagnostic: `rows disagree: claude on ${claude.join(", ")}; pi on ${on("pi").join(", ")}. Choose one CLI to set every row` };
+		return view(null, `rows disagree: claude on ${claude.join(", ")}; pi on ${on("pi").join(", ")}. Choose one CLI to set every row`);
 	}
-	if (!claude.length) return { value: "pi", source, status: "ok" };
+	if (!claude.length) return view("pi");
 	const config = native?.state === "valid" || native?.state === "absent" ? (native.result as NativeConfig) : undefined;
-	if (!config) return { value: "claude", source, status: "ok", diagnostic: "data/native.json is unreadable or invalid: every claude row falls back to pi" };
+	if (!config) return view("claude", "data/native.json is unreadable or invalid: every claude row falls back to pi");
 	const off = [...new Set(rows.map((row) => ROLE_NATIVE_SWITCH[row.role]))].filter((name) => !config[name]);
-	return off.length ? { value: "claude", source, status: "ok", diagnostic: `data/native.json has ${off.join(", ")} off: those rows fall back to pi` } : { value: "claude", source, status: "ok" };
+	return view("claude", off.length ? `data/native.json has ${off.join(", ")} off: those rows fall back to pi` : undefined);
 }
 
 type Owner = { file: (home: string) => string; read: (home: string, env: NodeJS.ProcessEnv, file: string) => Settled };
