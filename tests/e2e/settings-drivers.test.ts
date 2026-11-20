@@ -262,11 +262,10 @@ test("SD-legacy: a legacy-role codex row while codex is off does not refuse an u
 	assert.match((changed.body.errors as string[]).join("\n"), /row planner-default names the codex driver while codex_research is off/);
 });
 
-// Scenario: C8 (h) — a codex row write needs its own class switch, not codex_research
-//   Given hand-written codex rows on reviews, planner-default and small-ship; only codex_review on, then only codex_ship
+// Scenario (C8 h): Given codex rows on reviews, planner-default and small-ship; only codex_review on, then codex_ship
 //   When a rubric write changes one codex row's model at a time
-//   Then reviews saves under codex_review and small-ship under codex_ship; any other codex row is refused naming its
-//   own switch, and nothing is written. Before C8 every one keyed on codex_research and the first save was refused.
+//   Then reviews saves under codex_review and small-ship under codex_ship; any other is refused naming its own switch,
+//   with nothing written. Before C8 every row keyed on codex_research and the first save was refused.
 test("SD-codex-class: a changed codex row saves under its own class switch and is refused naming it otherwise", { timeout: 120_000 }, async (t) => {
 	const ids = ["reviews", "planner-default", "small-ship"];
 	const h = await home(t, (root) => {
@@ -296,6 +295,53 @@ test("SD-codex-class: a changed codex row saves under its own class switch and i
 	assert.equal(ship.status, 200, JSON.stringify(ship.body).slice(0, 400));
 	assert.deepEqual([modelOf("small-ship"), (h.json(LAYOUT.routingFile).rubric as Json[]).find((row) => row.id === "small-ship")?.driver], ["openai/gpt-6.1-sol", "codex"]);
 	await refused("reviews", "codex_review");
+});
+
+// Scenario (C8 A2, C1): Given a fresh home with no data/native.json
+//   When the page turns codex_ship on, the API the other two, then codex_ship off, then the three are restored
+//   Then each write reads back with one intent and one applied audit line, and off and restore delete the key, so the
+//   file holds no codex text; an operator's max_concurrent and claude_research stay. Storing false fails the off step.
+test("SD-codex-switches: Settings shows the three Codex switches off; on writes true, off and restore delete the key", { timeout: 120_000 }, async (t) => {
+	const h = await home(t);
+	const keys = ["workers.native_codex_research", "workers.native_codex_ship", "workers.native_codex_review"];
+	const native = `${LAYOUT.data}/native.json`;
+	const catalog = ((await h.read()).catalog as Json[]).filter((field) => keys.includes(field.key as string));
+	assert.deepEqual(catalog.map((field) => [field.key, field.type, field.default, field.section]), keys.map((key) => [key, "boolean", false, "workers"]));
+	for (const field of catalog) assert.match(field.help as string, /driver "codex" with an OpenAI GPT model \(provider openai, id gpt-…\) and this switch is on\. Tokens only: cost reads unknown.*never move to pi/);
+	for (const key of keys) assert.deepEqual(await h.field(key), { key, value: false, source: "code", status: "ok" });
+
+	const ui = await settingsTab(h);
+	const section = ui.section("Native workers");
+	const id = (key: string) => `setting-${key.replace(/\./g, "-")}`;
+	const box = (key: string) => section.querySelector(`#${id(key)}`) as HTMLInputElement;
+	assert.deepEqual(keys.map((key) => [Boolean(box(key).checked), box(key).parentElement?.textContent, section.querySelector(`label[for="${id(key)}"]`)?.textContent]),
+		[[false, "Off", "Codex CLI research workers from code"], [false, "Off", "Codex CLI ship workers from code"], [false, "Off", "Codex CLI reviewers from code"]]);
+	assert.match(section.querySelector(".settings-help")?.textContent ?? "", /The Codex switches are set here only; a codex row is written by hand in data\/routing\.json/);
+	const ship = box("workers.native_codex_ship");
+	ship.checked = true;
+	ship.dispatchEvent(new ui.tab.window.Event("change", { bubbles: true }));
+	await settle();
+	assert.equal(ship.parentElement?.textContent, "On");
+	await ui.press(section, "Save");
+	await ui.tab.find(".settings-ok");
+	assert.deepEqual(ui.posts().map((post) => [post.status, post.json.changes]), [[200, { "workers.native_codex_ship": true }]]);
+	assert.deepEqual(h.json(native), { codex_ship: true });
+
+	const on = await h.post("/api/settings/apply", { changes: { "workers.native_codex_research": true, "workers.native_codex_review": true } });
+	assert.deepEqual([on.status, on.body.state], [200, "applied"], JSON.stringify(on.body));
+	assert.deepEqual(h.json(native), { codex_ship: true, codex_research: true, codex_review: true });
+	for (const key of keys) assert.deepEqual([(await h.field(key))?.value, (await h.field(key))?.source], [true, "file"]);
+	writeFileSync(join(h.root, native), JSON.stringify({ ...h.json(native), max_concurrent: 2, claude_research: true }));
+	const off = await h.post("/api/settings/apply", { changes: { "workers.native_codex_ship": false } });
+	assert.deepEqual([off.status, (off.body.changes as Json[]).map((change) => [change.key, change.action])], [200, [["workers.native_codex_ship", "delete"]]], JSON.stringify(off.body));
+	assert.deepEqual(h.json(native), { codex_research: true, codex_review: true, max_concurrent: 2, claude_research: true });
+	assert.deepEqual(await h.field("workers.native_codex_ship"), { key: "workers.native_codex_ship", value: false, source: "code", status: "ok" });
+	const restored = await h.post("/api/settings/restore", { keys });
+	assert.deepEqual([restored.status, restored.body.state], [200, "applied"], JSON.stringify(restored.body));
+	assert.doesNotMatch(readFileSync(join(h.root, native), "utf8"), /codex/);
+	assert.deepEqual(h.json(native), { max_concurrent: 2, claude_research: true });
+	const audit = readFileSync(settingsAuditFile(h.root), "utf8").trim().split("\n").map((line) => (JSON.parse(line) as Json).type);
+	assert.deepEqual(audit, Array(4).fill(["intent", "applied"]).flat(), "one intent and one applied line per write");
 });
 
 // Scenario: restore works

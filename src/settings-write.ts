@@ -47,6 +47,9 @@ import { operatorCompactDefault } from "./operator-compact.ts";
 import { deniedFor, isAllowed } from "./routing.ts";
 import { readSettings } from "./settings.ts";
 import { acquireSettingsLock } from "./settings-lock.ts";
+import { CODEX_CLASSES } from "./worker-driver.ts";
+
+const CODEX_SWITCH_KEYS: readonly string[] = CODEX_CLASSES;
 
 export const settingsAuditFile = (home: string): string => join(home, LAYOUT.data, "settings-audit.jsonl");
 
@@ -94,6 +97,9 @@ export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "de
 	"viewer.strict_host": "delete",
 	"viewer.public_url": "delete",
 	"workers.native_claude_research": "delete",
+	"workers.native_codex_research": "delete",
+	"workers.native_codex_ship": "delete",
+	"workers.native_codex_review": "delete",
 	"workers.driver": "default",
 });
 
@@ -475,6 +481,8 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			if (request.mode === "set") {
 				value = request.changes[field.key] as SettingValue;
 				if ((field.type === "model_ref" || field.type === "thinking_level" || field.type === "url") && value === null) action = "delete"; // unset, never a stored null
+				// A codex switch off is absent, so a home that turned codex off again holds no codex key (C1).
+				if (field.owner === "native" && CODEX_SWITCH_KEYS.includes(fileKey) && value === false) action = "delete";
 				if (field.type === "rubric") value = mergeRubric(present.value, value as unknown as Record<string, unknown>[]) as SettingValue;
 			} else {
 				const restore = RESTORE_ACTIONS[field.key];

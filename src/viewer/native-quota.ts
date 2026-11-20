@@ -97,11 +97,11 @@ function parseCodex(raw: Json | undefined): { limit?: { reached: string; observe
 		: { limit: { reached, observed_at: observed, ...(resets === undefined ? {} : { resets_at: resets }) } };
 }
 
-/** The Codex item while `codex_research` is on: limited, unknown (no snapshot, a passed or voided limit), or ok. */
+/** The Codex item while any codex switch is on (C8): limited, unknown (no snapshot, a passed or voided limit) or ok. */
 export function codexQuotaLine(stateDir: string, now: number): CodexItem | undefined {
 	const switchFile = join(dirname(stateDir), "data", "native.json");
 	const config = readJson(switchFile);
-	if (!config || !validSwitches(config) || config.codex_research !== true) return undefined;
+	if (!config || !validSwitches(config) || !CODEX_SWITCHES.some((key) => config[key] === true)) return undefined;
 	const snapshot = parseCodex(readJson(join(stateDir, "native-availability-codex.json")));
 	if (!snapshot) return { state: "unknown", label: "Codex unknown", detail: "no readable native-availability-codex snapshot yet" };
 	const limit = snapshot.limit;

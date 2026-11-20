@@ -1044,7 +1044,8 @@ Every other role, kind and delivery stays on pi. No `data/*.json` or `defaults/r
 
 **Switches (`data/native.json`).** `codex_research`, `codex_ship`, `codex_review` (booleans, default off) and
 `codex_max_concurrent` (1-4, default 1, counted apart from Claude's `max_concurrent`). `codex_research`, (C6)
-`codex_review` and (C7b) `codex_ship` select. Settings never sets or deletes them.
+`codex_review` and (C7b) `codex_ship` select. Since C8, Settings → Native workers sets the three switches (on writes
+`true`, off deletes the key); it never sets `codex_max_concurrent` and never writes a codex row.
 
 **Selection** (`codexSelectionRefusal` in `src/drivers/codex.ts`), each a named refusal before any lease, in order:
 
@@ -1258,7 +1259,8 @@ resume admission read it for codex as they read S2 for Claude:
 A no-reset limit blocks until a completed codex turn or the switch file rewritten after it (off then on), as Claude's
 no-reset window does; while it blocks no codex turn runs to clear it (U6). Deleting the file reads unknown again.
 
-**The chat footer.** `/api/workspace/status` gains an optional `codex` item beside `claude` while `codex_research` is on:
+**The chat footer.** `/api/workspace/status` gains an optional `codex` item beside `claude` while any codex switch is on
+(C8; `codex_research` alone before):
 `Codex unknown` (no readable snapshot, a passed or voided limit), `Codex limited until HH:MMZ`, `Codex limited (reset
 unknown)` or `Codex ok`, read with a contracts-free parse that accepts exactly what the snapshot schema accepts.
 
@@ -1383,7 +1385,8 @@ Recovery: `codex_review` off or the row's `driver` removed (the next review rout
 the PR. No data migration. The flip, by hand: add the row, then turn on `codex_review`.
 
 **Known limits.** No MCP server and no `ls`; a full codex slot runs pi; a reviewer's limit observation is not recorded
-(as a Claude reviewer's is not); the footer and the Settings rubric write still key on `codex_research`; a SIGKILLed
+(as a Claude reviewer's is not); since C8 a Settings rubric write keys on the row's own class switch (`codex_review`
+for `reviews`) and the footer's Codex item shows while any codex switch is on; a SIGKILLed
 reviewer worker leaves its thread and scratch dir; a thread refused between `thread/start` and its first turn is not
 deleted, as for the planner. (Until C8 a reviewer's `routing_resolved` event had no `driver`, `driver_reason` or
 `requested_driver` field, only `driver=` in its line; C8 (i) adds them.)
@@ -1585,3 +1588,35 @@ harmless and replaced at the next revive.
 
 Cases: CX-8a…8c in `tests/e2e/codex-ship.test.ts`, CX-8e in `tests/e2e/codex-worker-tools.test.ts`, CX-8i in
 `tests/e2e/codex-reviewer.test.ts`, SD-codex-class in `tests/e2e/settings-drivers.test.ts`.
+
+### C8 Settings, doctor and soak
+
+C8's second PR (cp-tmbb plan, PR 2) makes the three codex switches settable from the dashboard, adds the `/doctor` Codex
+lines and writes the soak steps ([routing-rollout.md](routing-rollout.md#codex-cli-soak-opt-in)). Every switch still
+ships **off**; no `data/*.json` or `defaults/routing*.json` was edited and no shipped row names codex.
+
+- **Settings.** `workers.native_codex_research`, `workers.native_codex_ship` and `workers.native_codex_review` (42
+  catalog fields) sit under Native workers beside the Claude switch. On writes `true`; off and restore delete the key,
+  so a home that turned codex off again has no codex key. There is no availability check at write time: selection
+  refuses by name and `/doctor` explains. The Workers CLI still offers pi and claude only and never touches a codex
+  switch; `codex_max_concurrent` and codex rows stay hand-written.
+- **`/doctor`** (`src/codex-doctor.ts`, selection's own probes): `codex.containment` (`systemd-run` and
+  `CP_WORKER_MEMORY_MAX`), `codex.cli` (`codex --version` against the floor; missing or below it names `codex update`),
+  `codex.login` (the `codex login status` exit code only, `HOME=/nonexistent`; named `codex login`) and
+  `codex.workers` (the switches, `codex_max_concurrent`, the rows naming codex; a row whose class switch is off, or an
+  unreadable `data/native.json`, is `warn`). Each line is `ok` with its fix while no switch is on and no row names
+  codex, `warn` once one does, and never `error`: a codex row falls back to pi and an explicit dispatch refuses by name.
+- **Footer.** The chat footer's Codex item shows while any codex switch is on.
+
+**Persisted shapes.** `data/native.json` takes `codex_*: true` only after an operator turns a switch on, and loses the
+key when it is turned off; `data/settings-audit.jsonl` names the new keys only after such a write. While every codex
+switch is off neither file holds a codex value, so the previous build reads both (SD-codex-switches, T-row, CX-off-2).
+Recovery: turn the switch off in Settings (the key is deleted), or revert the PR; no data migration.
+
+| KC | For C8 PR 2 | Held by |
+|---|---|---|
+| C2 | a codex value is persisted while every codex switch is off | SD-codex-switches (off and restore delete the key), T-row, CX-off-2 |
+| C8 | `/doctor` or a Settings read writes a file, starts an app-server or reads the Codex home | CX-8d (only `--version` and `login status` reach the CLI; the Codex home listing is unchanged), SD-codex-switches |
+
+Cases: CX-8d in `tests/e2e/codex-doctor.test.ts`, SD-codex-switches in `tests/e2e/settings-drivers.test.ts` and the
+`codex_ship` step of S3-codex-line in `tests/e2e/viewer-full-match-status.test.ts`.

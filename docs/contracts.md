@@ -9726,7 +9726,7 @@ reports `config.budget.<profile>`.
 ## Settings catalog
 
 `src/contracts/settings.ts` is the single list of the home's per-machine settings:
-`SETTING_KEYS` and `SETTING_FIELDS` (39 fields, frozen). Each field names its section,
+`SETTING_KEYS` and `SETTING_FIELDS` (42 fields, frozen). Each field names its section,
 its owner file (or env var), its type and range, its code default, when it applies,
 what the consumer does with an invalid value (`on_invalid`), whether a later writer may
 edit it, and a label and help line. `validateSettingValue(key, value)` checks one value
@@ -9781,6 +9781,13 @@ both sides. A `claude` value also names any `data/native.json` switch its rows' 
 routing file refuses it, as it refuses `models.rubric`. `settings_get` also returns `drivers`: pi's thinking levels,
 the Claude effort levels (`off` plus `NATIVE_EFFORTS`) and the native model rule (`NATIVE_MODEL`). The pickers filter
 by these, so the lists come from the drivers' own code.
+
+**Codex switch keys (C8).** `workers.native_codex_research`, `workers.native_codex_ship` and
+`workers.native_codex_review` are `data/native.json` `codex_research`, `codex_ship` and `codex_review` (booleans,
+default `false`, source `code` while absent). A write of `true` stores `true`; a write of `false` and a restore delete
+the key (absent is off), so with every codex switch off the file holds no codex key and a build before C1b still reads
+it. No write checks the Codex CLI: selection refuses by name and `/doctor` explains. `workers.driver` never sets them,
+and `codex_max_concurrent` has no catalog field.
 
 **Live apply (cp-settings-model-apply, slice 1).** A `models.parent` or `models.parent_thinking` write switches the
 running parent in place at its next idle point: never a restart, a drain or a `restartSafety` read, and the parent and
