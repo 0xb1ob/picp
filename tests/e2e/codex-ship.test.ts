@@ -561,7 +561,7 @@ async function lockdownKilled(h: H) {
 	return job;
 }
 
-/** Revives `job` into a turn that writes wip.txt and holds, then runs `/cp-drain freeze`; resolves to the DRAIN line. */
+/** Revives `job` into a turn that writes wip.txt and holds, then runs `/cp-drain freeze`; returns the DRAIN line. */
 async function reviveAndFreeze(h: H, id: string, revive: Record<string, unknown>, whileHeld: () => void = () => {}) {
 	reset(h, { turns: [[{ kind: "shell", command: "printf 'half done\\n' > wip.txt" }, { kind: "hold", marker: "held" }]] });
 	rmSync(join(h.state, "held"), { force: true });

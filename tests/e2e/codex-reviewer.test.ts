@@ -330,7 +330,7 @@ test("CX-6g: cp_gate on a codex reviews row runs the gate reviewer on codex", { 
 });
 
 // Scenario: a reviewer's routing event carries the driver fields (C8 i), and its guard follows codex_review (C8 h)
-//   Given only codex_review on, a signed-out codex and the reviews row on codex with a pi fallback, When cp_review runs,
+//   Given only codex_review on, a signed-out codex and the reviews row on codex with pi fallback, When cp_review runs,
 //   Then the review decides on pi and routing_resolved has driver pi, requested_driver codex and the auth reason.
 //   Before C8 the event had no driver field, and the codex_research-keyed guard dropped requested_driver.
 test("CX-8i: a reviewer's routing_resolved names requested_driver, driver and driver_reason; the guard follows codex_review", { skip, timeout: 300_000 }, async (t) => {

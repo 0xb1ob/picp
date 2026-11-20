@@ -263,7 +263,7 @@ test("SD-legacy: a legacy-role codex row while codex is off does not refuse an u
 });
 
 // Scenario: C8 (h) — a codex row write needs its own class switch, not codex_research
-//   Given hand-written codex rows on reviews, planner-default and small-ship, and only codex_review on, then only codex_ship
+//   Given hand-written codex rows on reviews, planner-default and small-ship; only codex_review on, then only codex_ship
 //   When a rubric write changes one codex row's model at a time
 //   Then reviews saves under codex_review and small-ship under codex_ship; any other codex row is refused naming its
 //   own switch, and nothing is written. Before C8 every one keyed on codex_research and the first save was refused.
