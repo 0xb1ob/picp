@@ -584,8 +584,13 @@ shows a human label over its id: Planner, Small ship, Big ship, Risky (any job),
 Native research. Any other id shows alone. With Claude CLI drafted, each row's model select lists only the
 models matching the session's `drivers.claude_model`. A current value outside it stays selected as "<id> (not a
 Claude model)". The thinking select lists `drivers.efforts.claude`; fallbacks keep pi's whole list. Each row that
-cannot run native gets an inline alert, and one section alert names them all ("The Claude CLI needs a new model or
-effort on …"). Save stays off until each is valid; one Save posts `workers.driver` with the edited rows. The section
+cannot run native gets an inline alert, and one section alert names them all ("These rules need a new model, effort
+or CLI: …"). (C8b) Each row also has a **CLI** select (`CLI of {id}`, after Thinking): the Workers CLI value (or the
+row's saved claude) and "Codex CLI", disabled as "Codex CLI ({switch} is off in Native workers)" unless the row's class
+switch (`drivers.codex_class`) is on. On Codex the row's model select lists pi's models matching `drivers.codex_model`
+("<id> (not a Codex model)" for a current value outside it) and its thinking select `drivers.efforts.codex`; a changed
+codex row whose switch is off gets "{switch} is off: …". Back on the base CLI a row saved with no driver sends none,
+else `driver: "pi"`/`"claude"`. Save stays off until each is valid; one Save posts `workers.driver` with the edited rows. The section
 counts the CLI as one unsaved change, and picking the saved CLI again drops it. *Restore defaults* there restores
 `["models.rubric", "workers.driver"]`. *Parent and operator models* opens with **Parent CLI** (`models.parent_driver`);
 on Claude CLI the parent model and thinking selects narrow the same way, with the same inline error and blocked Save.
@@ -596,7 +601,8 @@ changes it shows "Operator CLI saved: this operator session keeps its current CL
 `RestartSession` (Restart session / Restart clean); again nothing restarts on save. *Native workers*
 says that the Workers CLI sets its Claude switch too, and (C8) holds the three Codex CLI checkboxes, which are set there
 only: on saves `true`, off deletes the key. An older session without `drivers` gets pi's levels and no filtering.
-Layout: the new rows reuse the existing 390 px single column and the 900 px rubric grid; a row error and the CLI note
+Layout: the new rows reuse the existing 390 px single column and the 900 px rubric grid (a fifth 130 px CLI column,
+C8b); a row error and the CLI note
 span the whole row, with `overflow-wrap: anywhere`.
 
 ## Live Data

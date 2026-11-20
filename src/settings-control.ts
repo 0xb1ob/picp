@@ -5,9 +5,10 @@
  * (src/settings-write.ts). The viewer only forwards; this runs in the operator's own session.
  */
 import { resolve } from "node:path";
-import { type Mode, SETTING_FIELDS, THINKING_LEVELS } from "./contracts.ts";
+import { type Mode, ROLES, SETTING_FIELDS, THINKING_LEVELS } from "./contracts.ts";
 import type { ControlPorts } from "./dashboard-control.ts";
 import { NATIVE_EFFORTS, NATIVE_MODEL } from "./drivers/claude.ts";
+import { CODEX_EFFORTS, CODEX_MODEL, codexRowClass } from "./drivers/codex.ts";
 import { readSettings } from "./settings.ts";
 import { applySettings, readSettingsAudit, redact, type SettingsApplyResult, type SettingsWriteRequest } from "./settings-write.ts";
 
@@ -17,8 +18,13 @@ const PEER_MAX = 64;
 
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
-/** The CLI pickers' choices, from the drivers' own code: pi's levels, Claude's efforts and its model rule. */
-export const DRIVER_CHOICES = Object.freeze({ efforts: { pi: [...THINKING_LEVELS], claude: ["off", ...NATIVE_EFFORTS] }, claude_model: NATIVE_MODEL.source });
+/** The CLI pickers' choices, from the drivers' own code: each CLI's levels, the model rules and each role's Codex switch. */
+export const DRIVER_CHOICES = Object.freeze({
+	efforts: { pi: [...THINKING_LEVELS], claude: ["off", ...NATIVE_EFFORTS], codex: [...CODEX_EFFORTS] },
+	claude_model: NATIVE_MODEL.source,
+	codex_model: CODEX_MODEL.source,
+	codex_class: Object.fromEntries(ROLES.flatMap((role) => { const codexClass = codexRowClass(role); return codexClass ? [[role, codexClass]] : []; })) as Record<string, string>,
+});
 
 type Checked = { ok: true; request: SettingsWriteRequest; expected_revision: string | null; dry_run: boolean; request_id: string; peer: string | null } | { ok: false; error: string };
 

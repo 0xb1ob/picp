@@ -606,7 +606,7 @@ started keep their driver.
 **The flip from Settings.** Dashboard Settings → *Model routing* → **Workers CLI** (`workers.driver`) does the flip for
 every worker type at once, through the audited settings path. Claude CLI sets `driver: "claude"` on every rubric row
 and turns `claude_research`, `claude_ship` and `claude_review` on; pi deletes every row's `driver` (absent is pi) and
-deletes those three switches (absent is off). `max_concurrent` is never touched. The router reads the same files as
+deletes those three switches (absent is off). Since C8b a set leaves a row on the Codex CLI alone; restore still clears it. `max_concurrent` is never touched. The router reads the same files as
 before, so no routing code changed. Every rubric role has a native class (`nativeClassOf`), so no row stays pinned.
 Under native, each row's model picker lists only Anthropic Claude models and its thinking picker only the Claude
 effort levels. The page names each row that needs a new model or effort and keeps Save off until all are valid. A
@@ -1045,7 +1045,8 @@ Every other role, kind and delivery stays on pi. No `data/*.json` or `defaults/r
 **Switches (`data/native.json`).** `codex_research`, `codex_ship`, `codex_review` (booleans, default off) and
 `codex_max_concurrent` (1-4, default 1, counted apart from Claude's `max_concurrent`). `codex_research`, (C6)
 `codex_review` and (C7b) `codex_ship` select. Since C8, Settings → Native workers sets the three switches (on writes
-`true`, off deletes the key); it never sets `codex_max_concurrent` and never writes a codex row.
+`true`, off deletes the key); it never sets `codex_max_concurrent`. A codex row is set on its rule under Model routing
+(C8b, below).
 
 **Selection** (`codexSelectionRefusal` in `src/drivers/codex.ts`), each a named refusal before any lease, in order:
 
@@ -1599,7 +1600,7 @@ ships **off**; no `data/*.json` or `defaults/routing*.json` was edited and no sh
   catalog fields) sit under Native workers beside the Claude switch. On writes `true`; off and restore delete the key,
   so a home that turned codex off again has no codex key. There is no availability check at write time: selection
   refuses by name and `/doctor` explains. The Workers CLI still offers pi and claude only and never touches a codex
-  switch; `codex_max_concurrent` and codex rows stay hand-written.
+  switch; `codex_max_concurrent` stays hand-written. Since C8b a rule's own CLI select writes a codex row (below).
 - **`/doctor`** (`src/codex-doctor.ts`, selection's own probes): `codex.containment` (`systemd-run` and
   `CP_WORKER_MEMORY_MAX`), `codex.cli` (`codex --version` against the floor; missing or below it names `codex update`),
   `codex.login` (the `codex login status` exit code only, `HOME=/nonexistent`; named `codex login`) and
@@ -1620,3 +1621,21 @@ Recovery: turn the switch off in Settings (the key is deleted), or revert the PR
 
 Cases: CX-8d in `tests/e2e/codex-doctor.test.ts`, SD-codex-switches in `tests/e2e/settings-drivers.test.ts` and the
 `codex_ship` step of S3-codex-line in `tests/e2e/viewer-full-match-status.test.ts`.
+
+### C8b: Codex per rule in Settings
+
+Settings → Model routing gives each rule a CLI select: the Workers CLI value (or the rule's saved claude) and Codex CLI.
+Codex is offered only while the rule's class switch is on (planner `codex_research`, implementer `codex_ship`,
+gate-reviewer `codex_review`); otherwise the option is disabled and names the switch. On Codex the rule's model list
+narrows to pi's `openai/gpt-…` models and its thinking list to `low`…`max`; fallbacks keep pi's whole list and are
+saved as they are. The save is the audited `models.rubric` write: `mergeRubric` honours a sent `driver` (pi deletes the
+key, an absent key keeps the stored one), and `refuseRoutingRows` keeps every guard: the class-keyed
+`codexPersistRefusal`, the Codex model and effort rules, and the allow list and `deny_by_role`, now also when only the
+driver moved to codex. `data/native.json` is never written by a rubric save. A Workers CLI set leaves codex rows (the
+read model reports the other rows and notes `codex on {ids}`); restoring Model routing clears every driver.
+
+**Persisted shapes.** Only `rubric[].driver` in `data/routing.json`; no new file or key. With every codex switch off the
+page offers no Codex and the server refuses a changed codex row, so no codex value can be written (T-row, CX-off-2).
+Recovery: pick pi on the rule, or Restore defaults on Model routing, or revert the PR.
+
+Cases: SD-codex-rule in `tests/e2e/settings-drivers.test.ts`.
