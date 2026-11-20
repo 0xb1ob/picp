@@ -275,14 +275,14 @@ test("SD-codex-class: a changed codex row saves under its own class switch and i
 		put(join(root, LAYOUT.routingFile), JSON.stringify(routing));
 		put(join(root, LAYOUT.data, "native.json"), JSON.stringify({ codex_review: true }));
 	});
-	const write = async (id: string) => {
+	const write = async (id: string, model = "openai/gpt-6.1-sol") => {
 		const shown = (await h.field("models.rubric"))?.value as Json[];
-		return await h.post("/api/settings/apply", { changes: { "models.rubric": shown.map((row) => (row.id === id ? { ...row, model: "openai/gpt-6.1-sol" } : row)) } });
+		return await h.post("/api/settings/apply", { changes: { "models.rubric": shown.map((row) => (row.id === id ? { ...row, model } : row)) } });
 	};
 	const modelOf = (id: string) => (h.json(LAYOUT.routingFile).rubric as Json[]).find((row) => row.id === id)?.model;
 	const refused = async (id: string, codexClass: string) => {
 		const before = readFileSync(join(h.root, LAYOUT.routingFile), "utf8");
-		const reply = await write(id);
+		const reply = await write(id, "openai/gpt-6.2");
 		assert.equal(reply.status, 400, JSON.stringify(reply.body).slice(0, 400));
 		assert.match((reply.body.errors as string[]).join("\n"), new RegExp(`row ${id} names the codex driver while ${codexClass} is off`));
 		assert.equal(readFileSync(join(h.root, LAYOUT.routingFile), "utf8"), before, "nothing written");
