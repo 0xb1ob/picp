@@ -417,7 +417,7 @@ test("SD-codex-rule: a rule's CLI offers Codex under its class switch, saves dri
 	assert.ok(save().hasAttribute("disabled"), "the page blocks what the server would refuse");
 	assert.equal(fileRow("reviews")?.thinking, "high");
 
-	put(join(h.root, nativeFile), JSON.stringify({ codex_review: true, codex_ship: true, codex_max_concurrent: 1 }));
+	put(join(h.root, nativeFile), nativeBytes);
 	ui = await settingsTab(h);
 	await ui.choose(cli("reviews"), "pi");
 	assert.deepEqual(groupLabels(ui.row("reviews").querySelector("select")!), ["anthropic", "openai"], "pi lists every model again");
@@ -426,10 +426,14 @@ test("SD-codex-rule: a rule's CLI offers Codex under its class switch, saves dri
 	assert.equal((ui.posts().at(-1)?.json.changes["models.rubric"] as Json[]).find((row) => row.id === "reviews")?.driver, "pi");
 	const { driver: _driver, ...piRow } = want;
 	assert.deepEqual(fileRow("reviews"), piRow, "pi deletes the driver key and keeps the row");
-	await ui.choose(cli("small-ship"), "codex");
+	await until(() => (cli("reviews") as HTMLSelectElement).value, (value) => value === "pi", "the re-read after the pi save");
+	assert.ok(codexOption("small-ship").hasAttribute("disabled"), "small-ship stays without Codex while codex_ship is off");
+	assert.match(codexOption("small-ship").textContent ?? "", /codex_ship is off/);
+	await ui.choose(cli("reviews"), "codex");
 	assert.equal(ui.section("Model routing").querySelector(".settings-unsaved")?.textContent, "1 unsaved change");
-	await ui.choose(cli("small-ship"), "pi");
+	await ui.choose(cli("reviews"), "pi");
 	assert.equal(ui.section("Model routing").querySelector(".settings-unsaved"), null, "codex then pi leaves nothing to save");
+	assert.ok(save().hasAttribute("disabled"), "nothing to save");
 
 	const routing = h.json(LAYOUT.routingFile);
 	put(join(h.root, LAYOUT.routingFile), JSON.stringify({ ...routing, allow: ["anthropic/*"] }));

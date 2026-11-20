@@ -247,14 +247,19 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
  const routingAbsent = status.snapshot.owners.find(owner => owner.owner === "routing")?.state === "absent";
  const rows = (valueOf(data, drafts, "models.rubric") ?? []) as RoutingRule[];
  const original = (view_("models.rubric")?.value ?? []) as RoutingRule[];
- const setRow = (index: number, patch: Partial<RoutingRule>) => set("models.rubric", rows.map((row, at) => {
-  if (at !== index) return row;
-  const next: RoutingRule = {...row, ...patch};
-  if (!next.thinking) delete next.thinking;
-  if (!next.fallbacks?.length) delete next.fallbacks;
-  if (!next.driver) delete next.driver;
-  return next;
- }) as SettingValue);
+ const setRow = (index: number, patch: Partial<RoutingRule>) => {
+  const next = rows.map((row, at) => {
+   if (at !== index) return row;
+   const edited: RoutingRule = {...row, ...patch};
+   if (!edited.thinking) delete edited.thinking;
+   if (!edited.fallbacks?.length) delete edited.fallbacks;
+   if (!edited.driver) delete edited.driver;
+   return edited;
+  });
+  // Every row back to its saved value drops the draft, so Save has nothing to post (as with the Workers CLI).
+  if (next.length === original.length && next.every((row, at) => !rowEdited(row, original[at]))) setDrafts(current => omit(current, ["models.rubric"]));
+  else set("models.rubric", next as SettingValue);
+ };
  const list = view.models && !("error" in view.models) ? view.models : null;
  const models = list?.pi.models ?? null;
  const cliOf = (key: SettingKey): Cli | null => { const cli = valueOf(data, drafts, key); return cli === "pi" || cli === "claude" ? cli : null; };
