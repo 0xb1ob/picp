@@ -320,11 +320,11 @@ try {
 		routes["/api/settings"] = { generated_at: GENERATED, enabled: true, running: true, supported: true, writable: true, reason: null, snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS, audit: [] };
 		routes["/api/settings/models"] = modelsBody([]);
 	}
-	// CLI switches: the shipped rubric with small-ship on an openai model, so a Claude CLI draft names a row to fix.
+	// CLI switches: the shipped rubric with implementer-small on an openai model, so a Claude CLI draft names a row to fix.
 	// Settings models: the same page with a long parent model pi does not list, its list held until /fixture/models-land.
 	if (args.stage === "settings-cli" || SM) {
 		const routing = JSON.parse(readFileSync(new URL("../../defaults/routing.default.json", import.meta.url), "utf8")) as { rubric: Array<Record<string, unknown>> };
-		for (const row of routing.rubric) if (row.id === "small-ship") row.model = "openai/gpt-6.1-sol";
+		for (const row of routing.rubric) if (row.id === "implementer-small") row.model = "openai/gpt-6.1-sol";
 		mkdirSync(join(scratch, LAYOUT.data), { recursive: true });
 		writeFileSync(join(scratch, LAYOUT.routingFile), JSON.stringify(routing));
 		writeFileSync(join(scratch, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 150000, model: SM ? LONG_MODEL : "anthropic/claude-opus-5-5", thinking: "minimal" }));

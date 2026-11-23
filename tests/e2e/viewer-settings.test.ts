@@ -455,7 +455,7 @@ async function settingsTab(t: TestContext, { routing = true, models = MODELS, st
 test("P20-settings-page: four sections; Save posts If-Match, the control token and only the drafted keys; a 412 keeps the draft", { timeout: 120_000 }, async (t) => {
 	const ui = await settingsTab(t);
 	assert.deepEqual(ui.tab.$$("section.settings-section > h2").map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Dashboard address", "Native workers", "Devices"], "the six settings sections, then the served page's Devices");
-	assert.equal(ui.section("Model routing").querySelectorAll("li.settings-rule").length, 7, "one row per shipped rubric entry");
+	assert.equal(ui.section("Model routing").querySelectorAll("li.settings-rule").length, 4, "one row per shipped rubric entry");
 	const people = ui.section("Parent and operator models");
 	const parent = people.querySelector("#setting-models-parent")!;
 	await ui.choose(parent, "custom");
@@ -489,8 +489,8 @@ test("P20-settings-rubric: rubric edits post the whole row list; restore bodies 
 	ui.tab.click([...first.querySelectorAll("button")].find((b) => b.textContent === "×")!);
 	await settle();
 	for (const added of ["a/b", "c/d"]) {
-		await ui.choose(first.querySelector("select[aria-label='Add a fallback to risky-any']")!, "custom");
-		await ui.enter(first.querySelector("input[aria-label='Add a fallback to risky-any: custom id']")!, added, "change");
+		await ui.choose(first.querySelector("select[aria-label='Add a fallback to reviews']")!, "custom");
+		await ui.enter(first.querySelector("input[aria-label='Add a fallback to reviews: custom id']")!, added, "change");
 	}
 	const thinking = [...first.querySelectorAll("label")].find((label) => label.textContent?.startsWith("Thinking"))!;
 	await ui.choose(thinking.querySelector("select")!, "low");
@@ -523,7 +523,7 @@ test("P20-settings-rubric: rubric edits post the whole row list; restore bodies 
 	await ui.press(ui.section("Model routing"), "Save");
 	const errors = await ui.tab.find(".settings-error");
 	assert.equal(ui.posts().at(-1)?.status, 400);
-	assert.deepEqual([...errors.querySelectorAll("li")].map((li) => li.textContent), ["models.rubric: 7 rows sent for 6; rows cannot be added, removed or reordered here"]);
+	assert.deepEqual([...errors.querySelectorAll("li")].map((li) => li.textContent), ["models.rubric: 4 rows sent for 3; rows cannot be added, removed or reordered here"]);
 });
 
 test("P20-settings-restore-race: Restore in other sections while one is in flight posts each once, in order, on a fresh revision", { timeout: 120_000 }, async (t) => {
@@ -640,24 +640,24 @@ test("P20-settings-dropdowns: grouped by provider; (unset) only for parent/opera
 	const first = workers.querySelector("li.settings-rule")!;
 	const model = first.querySelector("select")!;
 	assert.equal(optionTexts(model)[0], "anthropic/claude-haiku-5", "a rubric model has no (unset)");
-	assert.equal(optionTexts(first.querySelector("select[aria-label='Fallback 1 of risky-any']")!)[0], "openai/gpt-6.1-sol (not in pi's list)", "the unlisted current value stays selectable");
+	assert.equal(optionTexts(first.querySelector("select[aria-label='Fallback 1 of reviews']")!)[0], "openai/gpt-6.1-sol (not in pi's list)", "the unlisted current value stays selectable");
 	const warns = (scope: Element) => [...scope.querySelectorAll(".settings-warn")].map((warn) => warn.textContent);
 	assert.deepEqual(warns(first), ["Not in pi's model list: openai/gpt-6.1-sol. It can still be saved."]);
 	assert.equal(first.querySelector("input") === null, true, "no text input until Custom…");
 	await ui.choose(model, "custom");
-	const custom = first.querySelector("input[aria-label='Model of risky-any: custom id']") as HTMLInputElement;
+	const custom = first.querySelector("input[aria-label='Model of reviews: custom id']") as HTMLInputElement;
 	assert.equal(custom.value, "anthropic/claude-opus-5-5", "Custom… opens on the current value");
 	await ui.enter(custom, "my/other");
 	assert.equal(warns(first).length, 2, "an unlisted custom model warns too");
 	await ui.choose(model, "openai/gpt-5");
-	assert.equal(first.querySelector("input[aria-label='Model of risky-any: custom id']") === null, true, "picking a listed model closes the custom input");
+	assert.equal(first.querySelector("input[aria-label='Model of reviews: custom id']") === null, true, "picking a listed model closes the custom input");
 	assert.equal(warns(first).length, 1, "a listed value does not warn");
-	const add = () => first.querySelector("select[aria-label='Add a fallback to risky-any']");
+	const add = () => first.querySelector("select[aria-label='Add a fallback to reviews']");
 	assert.equal(optionTexts(add()!)[0], "Add fallback…");
 	await ui.choose(add()!, "anthropic/claude-haiku-5");
 	await ui.choose(add()!, "anthropic/claude-opus-5-5");
 	await ui.choose(add()!, "custom");
-	await ui.enter(first.querySelector("input[aria-label='Add a fallback to risky-any: custom id']")!, "my/fourth", "change");
+	await ui.enter(first.querySelector("input[aria-label='Add a fallback to reviews: custom id']")!, "my/fourth", "change");
 	assert.equal(first.querySelectorAll(".settings-chip:not(.settings-add) select").length, 4);
 	assert.equal(add() === null, true, "no Add fallback past 4");
 	await ui.press(first, "×");
@@ -775,8 +775,8 @@ test("P20-settings-unavailable: an unavailable list keeps each current value plu
 	assert.equal(ui.tab.$("optgroup") === null, true);
 	const first = ui.section("Model routing").querySelector("li.settings-rule")!;
 	assert.deepEqual(optionTexts(first.querySelector("select")!), ["anthropic/claude-opus-5-5", "Custom…"]);
-	assert.deepEqual(optionTexts(first.querySelector("select[aria-label='Fallback 1 of risky-any']")!), ["openai/gpt-6.1-sol", "Custom…"]);
-	assert.deepEqual(optionTexts(first.querySelector("select[aria-label='Add a fallback to risky-any']")!), ["Add fallback…", "Custom…"]);
+	assert.deepEqual(optionTexts(first.querySelector("select[aria-label='Fallback 1 of reviews']")!), ["openai/gpt-6.1-sol", "Custom…"]);
+	assert.deepEqual(optionTexts(first.querySelector("select[aria-label='Add a fallback to reviews']")!), ["Add fallback…", "Custom…"]);
 	assert.equal(ui.tab.$$(".settings-warn").length, 0);
 	assert.match(ui.section("Model routing").querySelector("p[role=status]")?.textContent ?? "", /^Model list unavailable \(model list unavailable\): type a provider\/model\.$/);
 });
