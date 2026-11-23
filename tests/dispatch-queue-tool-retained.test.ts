@@ -40,8 +40,8 @@ test("4B2-T2: spawn_cap queues with a position; a re-dispatch is refused untouch
 	const b = toolBench(t);
 	assert.ok("queue" in b.tool.parameters.properties, "the schema has queue");
 
-	assert.deepEqual((await b.call({ job_id: "cp-aaa1", task: "one" })).details, { state: "queued", position: 1, job_id: "cp-aaa1" });
-	assert.deepEqual((await b.call({ job_id: "cp-aaa2", task: "two", wall_clock_seconds: 60 })).details, { state: "queued", position: 2, job_id: "cp-aaa2" });
+	assert.deepEqual((await b.call({ job_id: "cp-aaa1", task: "one" })).details, { state: "queued", position: 1, job_id: "cp-aaa1", waiting: "waiting for a worker slot" });
+	assert.deepEqual((await b.call({ job_id: "cp-aaa2", task: "two", wall_clock_seconds: 60 })).details, { state: "queued", position: 2, job_id: "cp-aaa2", waiting: "waiting for a worker slot" });
 	assert.deepEqual(b.dispatchQueue.ids(), ["cp-aaa1", "cp-aaa2"]);
 	assert.deepEqual(JSON.parse(readFileSync(b.file, "utf8")).entries[1].request, { task: "two", wall_clock_seconds: 60 }, "only the request params persist");
 
