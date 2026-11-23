@@ -8,7 +8,8 @@ import { existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSyn
 import { basename, dirname, join, resolve } from "node:path";
 import { Value } from "typebox/value";
 import {
-	type FleetRecord, isoTimestamp, layoutForHome, OPERATOR_PICK_VERSION, type OperatorModelPickClaim, OperatorModelPickClaimSchema,
+	type FleetRecord, isoTimestamp, layoutForHome, OPERATOR_DRIVER_PICK_VERSION, OPERATOR_PICK_VERSION, type OperatorDriverPickProof, OperatorDriverPickProofSchema,
+	type OperatorModelPickClaim, OperatorModelPickClaimSchema, type RoutingDriver,
 	type OperatorModelPickProof, OperatorModelPickProofSchema, type OperatorModelPickReference, type OperatorPickErrorCode,
 	type OperatorPickRecord, type OperatorPickSource, type RoutingConfig,
 } from "./contracts.ts";
@@ -18,8 +19,10 @@ import { RoutingError } from "./routing.ts";
 import { controlJournalFile, parseDashboardText } from "./viewer/control-files.ts";
 import { readOperatorSessions } from "./viewer/operator-sessions.ts";
 
-/** A verified pick: a module-created capability, never a JSON flag a caller could forge. */
-export interface VerifiedPick { readonly model: string; readonly proof: OperatorModelPickProof }
+/** A verified pick: a module-created capability, never a JSON flag a caller could forge. `driver`: a v2 proof's CLI. */
+export interface VerifiedPick { readonly model: string; readonly proof: OperatorModelPickProof | OperatorDriverPickProof; readonly driver?: RoutingDriver }
+
+const isProof = (raw: unknown): boolean => Value.Check(OperatorModelPickProofSchema, raw) || Value.Check(OperatorDriverPickProofSchema, raw);
 const VERIFIED = new WeakSet<VerifiedPick>();
 
 /** True only for a capability `verifyOperatorPick` created for exactly `model`. */
@@ -48,6 +51,11 @@ export function quoteNamesModel(quote: string, model: string): boolean {
 		if ((before === undefined || !TOKEN_CHAR.test(before)) && (after === undefined || !TOKEN_CHAR.test(after))) return true;
 	}
 	return false;
+}
+
+/** cp-qmry: the human's words name the CLI as a whole word (case-insensitive), e.g. "run this one on pi". */
+export function quoteNamesDriver(quote: string, driver: string): boolean {
+	return new RegExp(`(?<![A-Za-z0-9_./:+-])${driver}(?![A-Za-z0-9_./:+-])`, "i").test(quote);
 }
 
 interface SessionEntry { type?: string; id?: string; customType?: string; content?: unknown; message?: { role?: string; content?: unknown; toolName?: string } }
@@ -127,10 +135,12 @@ function createOnce(file: string, value: unknown): boolean {
 export interface IssueRequest {
 	home: string; sessionFile: string | undefined; entries: readonly unknown[]; model: string; quote: string; entryId?: string;
 	jobId?: string; controlId?: string; now?: Date;
+	/** cp-qmry: the CLI the human asked for; the proof becomes version 2 and the quote must name it. */
+	driver?: RoutingDriver;
 }
 
 /** Bridge side: write `<proof_id>.json` from a human entry of the operator's own session; any doubt refuses. */
-export function issueOperatorPick(request: IssueRequest): { reference: OperatorModelPickReference; proof: OperatorModelPickProof } {
+export function issueOperatorPick(request: IssueRequest): { reference: OperatorModelPickReference; proof: OperatorModelPickProof | OperatorDriverPickProof } {
 	const fail = (code: OperatorPickErrorCode, detail: string): never => { throw new Error(`${code}: ${detail}; no proof was written`); };
 	if (!request.sessionFile) fail("operator_pick_missing", "this operator session has no session file");
 	const entries = request.entries as SessionEntry[];
@@ -139,17 +149,20 @@ export function issueOperatorPick(request: IssueRequest): { reference: OperatorM
 	const entry = request.entryId !== undefined ? entries.find((each) => each.id === request.entryId) : quoting.find((each) => !nonHumanAuthor(each)) ?? quoting[0];
 	if (!entry) fail("operator_pick_missing", request.entryId !== undefined ? `no entry ${request.entryId} in this operator session` : "no message in this operator session contains the quote");
 	if (!quoteNamesModel(request.quote, request.model)) fail("operator_pick_fabricated", `the quote does not name ${request.model} as a whole provider/model token`);
+	if (request.driver !== undefined && !quoteNamesDriver(request.quote, request.driver)) fail("operator_pick_fabricated", `the quote does not name the ${request.driver} CLI as a whole word`);
 	const source = sourceOf(stateDirOf(request.home), request.sessionFile!, entry!, request.quote);
 	if (Array.isArray(source)) return fail(source[0], source[1]);
 	if (request.controlId !== undefined && source.control_id !== request.controlId) fail("operator_pick_fabricated", `entry ${entry!.id} is not dashboard request ${request.controlId}`);
 	recordOperatorSession(join(resolve(request.home), layoutForHome("multi", request.home).sessions), request.sessionFile);
-	const proof: OperatorModelPickProof = {
-		version: OPERATOR_PICK_VERSION, proof_id: `omp-${randomBytes(16).toString("hex")}`, issuer: "operator-bridge",
+	const base = {
+		proof_id: `omp-${randomBytes(16).toString("hex")}`, issuer: "operator-bridge" as const,
 		issued_at: isoTimestamp(request.now ?? new Date()), model: request.model, quote: request.quote,
 		...(request.jobId ? { job_id: request.jobId } : {}), source,
 	};
+	const proof: OperatorModelPickProof | OperatorDriverPickProof = request.driver === undefined
+		? { version: OPERATOR_PICK_VERSION, ...base } : { version: OPERATOR_DRIVER_PICK_VERSION, ...base, driver: request.driver };
 	if (!createOnce(proofFile(request.home, proof.proof_id), proof)) fail("operator_pick_fabricated", `proof ${proof.proof_id} already exists`);
-	return { reference: { version: OPERATOR_PICK_VERSION, proof_id: proof.proof_id, quote: proof.quote }, proof };
+	return { reference: { version: proof.version, proof_id: proof.proof_id, quote: proof.quote }, proof };
 }
 
 /** A JSON object file, or undefined when it is unreadable or not an object. */
@@ -163,19 +176,25 @@ function readRecord(file: string): Record<string, unknown> | undefined {
 }
 
 /** Parent side: re-read the proof and its registered source; read-only, so a preview may call it. */
-export function verifyOperatorPick(home: string, ref: OperatorModelPickReference, expect: { model: string | undefined; jobId: string; config: RoutingConfig }): VerifiedPick {
+export function verifyOperatorPick(home: string, ref: OperatorModelPickReference, expect: { model: string | undefined; jobId: string; config: RoutingConfig; driver?: RoutingDriver }): VerifiedPick {
 	const { model, jobId, config } = expect;
 	const fail = (code: OperatorPickErrorCode, detail: string): never => { throw operatorPickError(code, detail, config, model); };
 	const upgrade = "update and restart the operator bridge (cp-operator) and the CP parent";
-	if (ref.version !== OPERATOR_PICK_VERSION) fail("operator_pick_bridge_unsupported", `operator_quote version ${ref.version} is not ${OPERATOR_PICK_VERSION}; ${upgrade}`);
+	if (ref.version !== OPERATOR_PICK_VERSION && ref.version !== OPERATOR_DRIVER_PICK_VERSION) {
+		fail("operator_pick_bridge_unsupported", `operator_quote version ${ref.version} is not ${OPERATOR_PICK_VERSION} or ${OPERATOR_DRIVER_PICK_VERSION}; ${upgrade}`);
+	}
 	if (!model) fail("operator_pick_fabricated", "operator_quote needs the explicit provider/model it quotes");
 	const file = proofFile(home, ref.proof_id);
 	if (!existsSync(file)) fail("operator_pick_missing", `no proof ${ref.proof_id} (only cp_parent model_pick issues one; an older bridge cannot — ${upgrade})`);
 	const raw = readRecord(file);
 	if (!raw) fail("operator_pick_missing", `proof ${ref.proof_id} is unreadable`);
-	if (!Value.Check(OperatorModelPickProofSchema, raw)) fail("operator_pick_bridge_unsupported", `proof ${ref.proof_id} is not a version ${OPERATOR_PICK_VERSION} operator-bridge proof; ${upgrade}`);
-	const proof = raw as OperatorModelPickProof;
+	const schema = ref.version === OPERATOR_DRIVER_PICK_VERSION ? OperatorDriverPickProofSchema : OperatorModelPickProofSchema;
+	if (!Value.Check(schema, raw)) fail("operator_pick_bridge_unsupported", `proof ${ref.proof_id} is not a version ${ref.version} operator-bridge proof; ${upgrade}`);
+	const proof = raw as OperatorModelPickProof | OperatorDriverPickProof;
 	if (proof.proof_id !== ref.proof_id || proof.quote !== ref.quote) fail("operator_pick_fabricated", `operator_quote does not match proof ${ref.proof_id}`);
+	const driver = "driver" in proof ? (proof.driver as RoutingDriver) : undefined;
+	if (driver !== undefined && driver !== expect.driver) fail("operator_pick_fabricated", `proof ${ref.proof_id} asks for the ${driver} CLI, not ${expect.driver ?? "the configured one"}; pass driver ${driver}`);
+	if (driver !== undefined && !quoteNamesDriver(proof.quote, driver)) fail("operator_pick_fabricated", `the quote does not name the ${driver} CLI as a whole word`);
 	if (proof.model !== model) fail("operator_pick_fabricated", `proof ${ref.proof_id} picks ${proof.model}, not ${model}`);
 	if (proof.job_id !== undefined && proof.job_id !== jobId) fail("operator_pick_fabricated", `proof ${ref.proof_id} is bound to ${proof.job_id}, not ${jobId}`);
 	if (!quoteNamesModel(proof.quote, model!)) fail("operator_pick_fabricated", `the quote does not name ${model} as a whole provider/model token`);
@@ -200,7 +219,7 @@ export function verifyOperatorPick(home: string, ref: OperatorModelPickReference
 	if (source.text !== proof.source.text || source.sha256 !== proof.source.sha256 || source.kind !== proof.source.kind || source.control_id !== proof.source.control_id) {
 		fail("operator_pick_edited", `session entry ${proof.source.entry_id} no longer matches proof ${proof.proof_id}`);
 	}
-	const pick: VerifiedPick = Object.freeze({ model: model!, proof });
+	const pick: VerifiedPick = Object.freeze({ model: model!, proof, ...(driver ? { driver } : {}) });
 	VERIFIED.add(pick);
 	return pick;
 }
@@ -227,7 +246,7 @@ export function pickedJobClaim(home: string, jobId: string): OperatorModelPickCl
 	const claim = Value.Check(OperatorModelPickClaimSchema, raw) && (raw as OperatorModelPickClaim).job_id === jobId ? (raw as OperatorModelPickClaim) : undefined;
 	const proof = claim && readRecord(proofFile(home, claim.proof_id));
 	const twin = claim && readRecord(claimFile(home, "proof", claim.proof_id));
-	const backed = claim && Value.Check(OperatorModelPickProofSchema, proof) && (proof as OperatorModelPickProof).source.sha256 === claim.source_sha256 &&
+	const backed = claim && isProof(proof) && (proof as OperatorModelPickProof).source.sha256 === claim.source_sha256 &&
 		JSON.stringify(twin) === JSON.stringify(claim);
 	if (!backed) throw new RoutingError(`${jobId}: operator pick claim ${file} is unreadable or not backed by its proof; refusing rather than guessing (inspect it by hand)`);
 	return claim;

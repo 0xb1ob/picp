@@ -65,7 +65,7 @@ async function routedHome(t: TestContext, script: readonly ClaudeStep[], options
 
 const dispatch = (id: string, extra: Record<string, unknown> = {}) => ({ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", scope: "S", queue: false, when_ready: false, ...extra } });
 
-test("S1 native: a claude row runs native with its model and effort; peers, plain rows and overrides stay pi", { skip, timeout: 300_000 }, async (t) => {
+test("S1 native: a claude row runs native with its model and effort; peers and overrides refuse (never pi), plain rows stay pi", { skip, timeout: 300_000 }, async (t) => {
 	const ids: string[] = [];
 	const h = await routedHome(t, [
 		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }], beforeAnswer: () => sleep(8_000) },
@@ -82,12 +82,11 @@ test("S1 native: a claude row runs native with its model and effort; peers, plai
 		{ kind: "tool_calls", calls: [dispatch(override.id, { model: h.piModel })] },
 	], h.env)) as Tool[];
 	const dispatches = ends.filter((end) => end.toolName === "cp_dispatch");
-	for (const end of dispatches) assert.notEqual(end.isError, true, text(end));
-	const native = [a, b].map((job) => h.fleet(job.id)!).filter((record) => record.worker.driver === "claude");
+	const native = [a, b].map((job) => h.fleet(job.id)).filter((record) => record?.worker.driver === "claude");
 	assert.equal(native.length, 1, "exactly one concurrent dispatch ran native");
 	const winner = native[0]!;
 	ids.push(winner.job_id);
-	const loser = h.fleet(winner.job_id === a.id ? b.id : a.id)!;
+	const loser = winner.job_id === a.id ? b.id : a.id;
 	// The native job: its record, routing record and cp_dispatch response name claude, the row's model and effort.
 	assert.equal(winner.worker.model, FAKE_NATIVE_MODEL);
 	assert.deepEqual([winner.routing?.requested_driver, winner.routing?.driver, winner.routing?.thinking], ["claude", "claude", "high"]);
@@ -98,33 +97,38 @@ test("S1 native: a claude row runs native with its model and effort; peers, plai
 	const first = h.claude.requests.find((request) => request.path.split("?")[0] === "/v1/messages" && Array.isArray(request.body.tools));
 	assert.equal(first?.body.model, FAKE_CLAUDE_MODEL, "the CLI ran the row's model");
 	assert.equal((first?.body.output_config as { effort?: string } | undefined)?.effort, "high", "the CLI ran the row's effort");
-	// The concurrent loser and a later peer fall back to pi by name; a plain row and an override never ask for claude.
-	for (const [record, held] of [[loser, /is live or being admitted; tear it down first$/], [h.fleet(peer.id)!, /is live; tear it down first$/]] as const) {
-		assert.equal(record.worker.driver, undefined, `${record.job_id} ran native`);
-		assert.equal(record.worker.model, h.piModel);
-		assert.deepEqual([record.routing?.requested_driver, record.routing?.driver], ["claude", "pi"]);
+	// cp-qmry: the concurrent loser and a later peer refuse occupied (queue:false) instead of running pi; a model-only
+	// override the claude row cannot run refuses too; a plain pi row never asks for claude.
+	const endOf = (id: string) => dispatches.find((end) => JSON.stringify(end.result).includes(id));
+	for (const [id, held] of [[loser, /is live or being admitted; tear it down first/], [peer.id, /is live; tear it down first/]] as const) {
+		assert.equal(endOf(id)?.isError, true, text(endOf(id)));
 		// The loser met the admission-time slot, not the winner's fleet record: the reservation itself is proven.
-		assert.match(record.routing?.driver_reason ?? "", new RegExp(`^occupied: native concurrency is 1 and ${winner.job_id} ${held.source}`));
+		assert.match(text(endOf(id)), new RegExp(`cannot run on the Claude CLI driver: native concurrency is 1 and ${winner.job_id} ${held.source}`));
+		assert.equal(h.fleet(id), undefined, `${id} ran on another CLI`);
+		h.noLease(id);
 	}
-	for (const id of [plain.id, override.id]) {
-		const record = h.fleet(id)!;
-		assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.driver, record.routing?.requested_driver], [undefined, h.piModel, undefined, undefined]);
-	}
+	assert.equal(endOf(override.id)?.isError, true, text(endOf(override.id)));
+	assert.match(text(endOf(override.id)), /cannot run on the configured Claude CLI \(rule native-research\); a model change never changes the CLI/);
+	h.noLease(override.id);
+	const record = h.fleet(plain.id)!;
+	assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.driver, record.routing?.requested_driver], [undefined, h.piModel, undefined, undefined]);
 });
 
-test("N4i concurrency: with max_concurrent 2 two row-preferred jobs run native and the third falls back to pi as occupied", { skip, timeout: 300_000 }, async (t) => {
+test("N4i concurrency: with max_concurrent 2 two row-preferred jobs run native and the third refuses occupied, never pi", { skip, timeout: 300_000 }, async (t) => {
 	const h = await routedHome(t, []);
 	writeFileSync(join(h.b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true, max_concurrent: 2 }));
 	const [first, second, third] = await Promise.all([h.job(), h.job(), h.job()]);
 	const ends = (await h.b.run([first, second, third].map((job) => ({ kind: "tool_calls" as const, calls: [dispatch(job.id)] })), h.env)) as Tool[];
-	for (const end of ends.filter((e) => e.toolName === "cp_dispatch")) assert.notEqual(end.isError, true, text(end));
+	const dispatched = ends.filter((e) => e.toolName === "cp_dispatch");
+	for (const end of dispatched.slice(0, 2)) assert.notEqual(end.isError, true, text(end));
 	for (const job of [first, second]) assert.deepEqual([h.fleet(job.id)?.worker.driver, h.fleet(job.id)?.routing?.driver], ["claude", "claude"]);
-	const fell = h.fleet(third.id)!;
-	assert.deepEqual([fell.worker.driver, fell.worker.model, fell.routing?.requested_driver, fell.routing?.driver], [undefined, h.piModel, "claude", "pi"]);
-	assert.match(fell.routing?.driver_reason ?? "", new RegExp(`^occupied: native concurrency is 2 and ${first.id}, ${second.id} are live`));
+	assert.equal(dispatched[2]?.isError, true, text(dispatched[2]));
+	assert.match(text(dispatched[2]), new RegExp(`native concurrency is 2 and ${first.id}, ${second.id} are live`));
+	assert.equal(h.fleet(third.id), undefined, "the third job ran on another CLI");
+	h.noLease(third.id);
 });
 
-test("S1 fallback: switch off, CLI missing or too old, and a denied primary run pi with the reason named", { skip, timeout: 300_000 }, async (t) => {
+test("S1 refusal: switch off, CLI missing or too old, and a denied primary refuse by name with no lease, never pi", { skip, timeout: 300_000 }, async (t) => {
 	const h = await routedHome(t, []);
 	const [off, absent, old, explicit, denied, deniedExplicit] = await Promise.all([h.job(), h.job(), h.job(), h.job(), h.job(), h.job()]);
 	// Missing: PATH keeps every other tool from claude's directories, minus claude. Too old: a fake that prints 2.1.0.
@@ -152,24 +156,24 @@ test("S1 fallback: switch off, CLI missing or too old, and a denied primary run 
 	const denyRole = { ...JSON.parse(h.routing()) as object, deny_by_role: { planner: [FAKE_NATIVE_MODEL] } };
 	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify(denyRole));
 	const deniedEnds = await runAlone([dispatch(denied.id), dispatch(deniedExplicit.id, { driver: "claude" })].map((call) => ({ kind: "tool_calls" as const, calls: [call] })), h.env);
-	const fellBack = [[offEnds[0], off.id, /^switch: /], [absentEnds[0], absent.id, /^cli_missing: /], [oldEnds[0], old.id, /^cli_version: /],
-		[deniedEnds[0], denied.id, /^denied: deny_by_role\.planner matches /]] as const;
-	for (const [end, id, reason] of fellBack) {
-		assert.notEqual(end?.isError, true, text(end));
-		const record = h.fleet(id)!;
-		assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.driver], [undefined, h.piModel, "pi"]);
-		assert.match(record.routing?.driver_reason ?? "", reason);
-		assert.match(text(end), /driver=pi/);
+	// cp-qmry: the row's CLI binds; each refusal names its reason and nothing runs on pi.
+	const refused = [[offEnds[0], off.id, /workers\.native_claude_research is off/], [absentEnds[0], absent.id, /claude/i], [oldEnds[0], old.id, /2\.1\.0/],
+		[deniedEnds[0], denied.id, /deny_by_role\.planner matches /]] as const;
+	for (const [end, id, reason] of refused) {
+		assert.equal(end?.isError, true, text(end));
+		assert.match(text(end), /cannot run on the Claude CLI driver: /);
+		assert.match(text(end), reason);
+		assert.equal(h.fleet(id), undefined, `${id} ran on another CLI`);
+		h.noLease(id);
 	}
-	// An explicit driver keeps today's strict refusal: no fallback, no lease.
+	// An explicit driver keeps today's strict refusal: no lease.
 	assert.equal(offEnds[1]?.isError, true, text(offEnds[1]));
 	assert.match(text(offEnds[1]), /workers\.native_claude_research is off/);
 	h.noLease(explicit.id);
 	assert.equal(deniedEnds[1]?.isError, true, text(deniedEnds[1]));
 	assert.match(text(deniedEnds[1]), /cannot run on the Claude CLI driver: deny_by_role\.planner matches /);
 	h.noLease(deniedExplicit.id);
-	// D2: a pipeline's planner is no longer a fallback; it runs native (native-worker-followups.test.ts, J3).
-	assert.equal(h.claude.requests.length, 0, "no fallback reached the native model");
+	assert.equal(h.claude.requests.length, 0, "no refused job reached the native model");
 });
 
 // Scenario: Given claude_research is on and an S planner row prefers claude
@@ -258,17 +262,17 @@ test("S1 config: an unknown driver or a non-anthropic claude model refuses with 
 	assert.equal(h.claude.requests.length, requests);
 });
 
-test("S1 carry: a native primary missing from a plain allowlist falls back with denied:, and an explicit driver refuses", { skip, timeout: 300_000 }, async (t) => {
+test("S1 carry: a native primary missing from a plain allowlist refuses with denied (never pi), and so does an explicit driver", { skip, timeout: 300_000 }, async (t) => {
 	const h = await routedHome(t, []);
 	h.toggle(true);
 	const [fallback, explicit] = await Promise.all([h.job(), h.job()]);
 	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ ...JSON.parse(h.routing()) as object, allow: ["mock/*"] }));
 	const ends = (await h.b.run([dispatch(fallback.id), dispatch(explicit.id, { driver: "claude", model: FAKE_NATIVE_MODEL })].map((call) => ({ kind: "tool_calls" as const, calls: [call] })), h.env)) as Tool[];
 	const [first, second] = ends.filter((end) => end.toolName === "cp_dispatch");
-	assert.notEqual(first?.isError, true, text(first));
-	const record = h.fleet(fallback.id)!;
-	assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.driver], [undefined, h.piModel, "pi"]);
-	assert.match(record.routing?.driver_reason ?? "", new RegExp(`^denied: the allowlist refuses ${FAKE_NATIVE_MODEL}$`));
+	assert.equal(first?.isError, true, text(first));
+	assert.match(text(first), new RegExp(`cannot run on the Claude CLI driver: the allowlist refuses ${FAKE_NATIVE_MODEL}`));
+	assert.equal(h.fleet(fallback.id), undefined, "the row's job ran on pi");
+	h.noLease(fallback.id);
 	assert.equal(second?.isError, true, text(second));
 	assert.match(text(second), /allowlist/);
 	h.noLease(explicit.id);
@@ -318,7 +322,7 @@ for (const kind of ["queue", "armed"] as const) {
 	});
 }
 
-test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; a started native job never moves", { skip, timeout: 600_000 }, async (t) => {
+test("S2 availability: spent, reset, no-reset and auth evidence refuse new jobs by name (never pi); a started native job never moves", { skip, timeout: 600_000 }, async (t) => {
 	const reset = Math.floor(Date.now() / 1000) + 3600;
 	// N4e: an unreported clean turn settles idle for a nudge, so the jobs that must end unreported end by turn limit.
 	const ls = { kind: "tool_use" as const, calls: [{ name: "Bash", input: { command: "ls" } }] };
@@ -335,9 +339,12 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 	const runAlone = async (id: string, extra: Record<string, unknown> = {}) => { await h.b.closeParents(); return (await h.b.run([{ kind: "tool_calls", calls: [dispatch(id, extra)] }], h.env)) as Tool[]; };
 	const reason = (id: string) => h.fleet(id)?.routing?.driver_reason ?? "";
 	const ranNative = (id: string) => assert.deepEqual([h.fleet(id)?.worker.driver, h.fleet(id)?.worker.model], ["claude", FAKE_NATIVE_MODEL], reason(id));
-	const ranPi = (id: string, pattern: RegExp) => {
-		assert.deepEqual([h.fleet(id)?.worker.driver, h.fleet(id)?.worker.model], [undefined, h.piModel], reason(id));
-		assert.match(reason(id), pattern);
+	// cp-qmry: a blocked claude never sends a row-routed job to pi; the dispatch refuses naming the evidence.
+	const refusedBy = (ends: Tool[], id: string, pattern: RegExp) => {
+		const end = ends.find((e) => e.toolName === "cp_dispatch");
+		assert.equal(end?.isError, true, text(end));
+		assert.match(text(end), new RegExp(`cannot run on the Claude CLI driver: ${pattern.source}`));
+		assert.equal(h.fleet(id), undefined, `${id} ran on pi`);
 	};
 	const [spent, fallback, afterReset, invalidReset, noReset, signedOut, authFallback, signedIn] = await Promise.all([h.job(), h.job(), h.job(), h.job(), h.job(), h.job(), h.job(), h.job()]);
 	h.toggle(true);
@@ -351,10 +358,9 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 	assert.deepEqual([window?.status, window?.resets_at], ["rejected", reset * 1000], "resetsAt is epoch seconds, kept as epoch ms");
 	const requests = h.claude.requests.length;
 
-	// A spent window sends the next new job to pi by name; the failed native job is never revived, re-dispatched or
+	// A spent window refuses the next new job by name; the failed native job is never revived, re-dispatched or
 	// rerouted onto pi (R1: an operator pick of a pi model), and bounded recovery refused it.
-	await runAlone(fallback.id);
-	ranPi(fallback.id, new RegExp(`^window: five_hour rejected until ${iso(reset * 1000)}$`));
+	refusedBy(await runAlone(fallback.id), fallback.id, new RegExp(`five_hour rejected until ${iso(reset * 1000)}`));
 	const quote = seedOperatorPick(h.b.home, h.piModel, { jobId: spent.id });
 	await h.b.closeParents();
 	const lock = (await h.b.run([
@@ -396,17 +402,15 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 	await waitFailed(h.fleet, invalidReset.id);
 	const noResetEntry = readNativeAvailability(h.b.home)?.windows.five_hour;
 	assert.deepEqual([noResetEntry?.status, noResetEntry?.resets_at], ["rejected", undefined]);
-	await runAlone(noReset.id);
-	ranPi(noReset.id, /^window: five_hour rejected, reset unknown \(observed /);
+	refusedBy(await runAlone(noReset.id), noReset.id, /five_hour rejected, reset unknown \(observed /);
 	h.toggle(false);
 	h.toggle(true);
-	// An auth error sends the next new job to pi with auth:; switching off then on clears it.
+	// An auth error refuses the next new job by name; switching off then on clears it.
 	await runAlone(signedOut.id);
 	ranNative(signedOut.id);
 	await waitFailed(h.fleet, signedOut.id);
 	assert.equal(readNativeAvailability(h.b.home)?.auth?.code, "authentication_failed");
-	await runAlone(authFallback.id);
-	ranPi(authFallback.id, /^auth: authentication_failed at /);
+	refusedBy(await runAlone(authFallback.id), authFallback.id, /authentication_failed at /);
 	h.claude.endAuthError();
 	h.toggle(false);
 	h.toggle(true);
@@ -484,7 +488,7 @@ test("J5 fallback walk: a spent opus window runs the row's native sonnet fallbac
 
 // Scenario: Given seven_day_opus rejected with a future reset and a claude row with a native sonnet fallback
 //   When a job dispatches with the explicit model override anthropic/claude-opus-5-5
-//   Then it does not run sonnet natively: the opus window refuses native and the override is never substituted
+//   Then it does not run sonnet natively: the opus window refuses the job and the override is never substituted
 test("J5 fallback walk: a blocked explicit opus override never runs the row's sonnet fallback natively", { skip, timeout: 300_000 }, async (t) => {
 	const h = await routedHome(t, []);
 	const [opus, sonnet] = ["anthropic/claude-opus-5-5", `${FAKE_NATIVE_MODEL}-sonnet`];
@@ -497,10 +501,11 @@ test("J5 fallback walk: a blocked explicit opus override never runs the row's so
 	const job = await h.job();
 	const ends = (await h.b.run([{ kind: "tool_calls", calls: [dispatch(job.id, { model: opus, dry_run: true })] }], h.env)) as Tool[];
 	const end = ends.find((e) => e.toolName === "cp_dispatch");
-	const decision = (end?.result.details as { decision?: { model?: string; driver?: string; driver_reason?: string } } | undefined)?.decision;
+	const details = end?.result.details as { decision?: unknown; error?: string } | undefined;
 	assert.notEqual(end?.isError, true, text(end));
-	assert.deepEqual([decision?.model, decision?.driver], [opus, "pi"], decision?.driver_reason);
-	assert.match(decision?.driver_reason ?? "", /^window: seven_day_opus rejected until /);
+	// cp-qmry: the preview names the refusal; it never previews pi.
+	assert.equal(details?.decision, undefined, text(end));
+	assert.match(details?.error ?? "", /cannot run on the Claude CLI driver: seven_day_opus rejected until /);
 	assert.equal(h.claude.requests.length, 0, "a preview reached the native model");
 });
 
@@ -531,8 +536,8 @@ test("J5 fallback walk: a claude-locked job whose opus window is spent routes na
 // Scenario: Given a claude implementer row and a pipeline implementer_model anthropic/claude-sonnet-5-5
 //   When advance dispatches the implementer
 //   Then it runs native on sonnet
-//   And an openai override still runs pi
-test("J4 override: a pipeline's anthropic implementer_model runs native on a claude row; an openai one runs pi", { skip, timeout: 300_000 }, async (t) => {
+//   And an openai override refuses (cp-qmry: a model change never changes the CLI)
+test("J4 override: a pipeline's anthropic implementer_model runs native on a claude row; an openai one refuses, never pi", { skip, timeout: 300_000 }, async (t) => {
 	const h = await routedHome(t, [{ kind: "text", text: "Implementing." }]);
 	const sonnet = "anthropic/claude-sonnet-5-5";
 	const planner = h.b.provider.addScript("j4-plan", [{ kind: "text", text: "Planned." }], { onExhausted: "repeat" });
@@ -585,8 +590,7 @@ test("J4 override: a pipeline's anthropic implementer_model runs native on a cla
 	const first = await waitFor(() => h.claude.requests.find((request) => request.path.split("?")[0] === "/v1/messages" && Array.isArray(request.body.tools)),
 		(request) => request !== undefined, { timeoutMs: 60_000, what: "the native implementer's first model call" });
 	assert.equal(first?.body.model, "claude-sonnet-5-5", "the CLI ran the override's model");
-	const pi = await ship(openai);
-	assert.deepEqual([pi.worker.driver, pi.worker.model, pi.routing?.requested_driver, pi.routing?.driver], [undefined, openai, undefined, undefined]);
+	await assert.rejects(ship(openai), /cannot run on the configured Claude CLI \(rule j4-ship\)/);
 });
 
 async function waitFailed(fleet: (id: string) => ReturnType<typeof readFleet>["jobs"][number] | undefined, id: string) {
@@ -599,8 +603,8 @@ async function waitFailed(fleet: (id: string) => ReturnType<typeof readFleet>["j
 }
 
 // N4h: with the reviews row on `driver: "claude"` and claude_review on, cp_review runs a native reviewer (Bash refused,
-// lockdown ok, usage measured) that files the verdict pi would; with the switch off the same review runs on pi.
-test("N4h native reviewer: cp_review on a claude row files pi's verdict natively; claude_review off runs pi", { skip, timeout: 300_000 }, async (t) => {
+// lockdown ok, usage measured) that files the verdict pi would; with the switch off it refuses by name, never pi.
+test("N4h native reviewer: cp_review on a claude row files pi's verdict natively; claude_review off refuses, never pi", { skip, timeout: 300_000 }, async (t) => {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo" });
 	const provider = await MockProvider.start();
@@ -618,7 +622,7 @@ test("N4h native reviewer: cp_review on a claude row files pi's verdict natively
 	mkdirSync(join(fakeHome, ".claude"), { recursive: true, mode: 0o700 });
 	writeFileSync(join(fakeHome, ".claude", "settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: claude.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN } }));
 	const parentEnv = { ...process.env, ...agent.env, HOME: fakeHome, CLAUDE_CONFIG_DIR: join(fakeHome, ".claude") };
-	// pi's lane cannot serve the native model, so the switch-off walk lands on the row's pi fallback.
+	// pi's lane cannot serve the native model.
 	const modelRegistry = () => ({ find: (provider: string, id: string) => ({ provider, id }), hasConfiguredAuth: (m: { provider: string; id: string }) => `${m.provider}/${m.id}` !== FAKE_NATIVE_MODEL });
 	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv, holdsParentLock: () => true, sendWakeup: () => true, modelRegistry });
 	t.after(async () => {
@@ -665,6 +669,10 @@ test("N4h native reviewer: cp_review on a claude row files pi's verdict natively
 	assert.deepEqual([run?.lockdown, run?.report, run?.usage], ["ok", true, "measured"], JSON.stringify(run));
 	assert.ok((JSON.parse(readFileSync(join(native.run, "status.json"), "utf8")) as { usage: { total_tokens: number } }).usage.total_tokens > 0, "native usage is measured");
 	toggle(false);
+	await assert.rejects(post.diffReview({ jobId: piJob }), /cannot run on the Claude CLI driver: the switch workers\.native_claude_review is off/);
+	// The same verdict on a pi reviews row is the shape the native one must match.
+	writeFileSync(join(home.path, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*", FAKE_NATIVE_MODEL],
+		rubric: [{ id: "reviews", role: "gate-reviewer", model: piModel }] }));
 	const pi = await review(piJob);
 	assert.equal(pi.routed?.model, piModel, JSON.stringify(pi.routed));
 	assert.doesNotMatch(String(pi.routed?.line), /driver=claude/);

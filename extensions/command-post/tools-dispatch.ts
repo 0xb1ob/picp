@@ -246,7 +246,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					const { job_id: _id, dry_run: _dry, queue: _queue, when_ready: _ready, ...request } = params;
 					let armed: { rearmed: boolean };
 					try {
-						checkStoredPick(post.home, params.job_id, params.model, params.operator_quote);
+						checkStoredPick(post.home, params.job_id, params.model, params.operator_quote, params.driver as "pi" | "claude" | "codex" | undefined);
 						armed = post.armedDispatches.arm(params.job_id, request as QueuedDispatchRequest, error.blockers);
 					} catch (armError) {
 						// The blocked refusal stands; why it was not armed is named on it.
@@ -265,7 +265,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				const { job_id: _id, dry_run: _dry, queue: _queue, when_ready: _ready, ...request } = params;
 				let position: number;
 				try {
-					checkStoredPick(post.home, params.job_id, params.model, params.operator_quote);
+					checkStoredPick(post.home, params.job_id, params.model, params.operator_quote, params.driver as "pi" | "claude" | "codex" | undefined);
 					position = post.dispatchQueue.enqueue(params.job_id, request as QueuedDispatchRequest);
 				} catch (queueError) {
 					// Today's refusal stands; the queue failure is named on it.

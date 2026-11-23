@@ -613,6 +613,7 @@ export default function (pi: ExtensionAPI): void {
 			quote: Type.Optional(Type.String({ minLength: 1, maxLength: 16_000, description: "model_pick: the human's own words naming the model, verbatim and contiguous" })),
 			source_entry_id: Type.Optional(Type.String({ description: "model_pick: that human message's session entry id; omit for the newest human message containing quote" })),
 			control_id: Type.Optional(Type.String({ description: "model_pick: the dashboard request id (dc-…) when the human typed it in the dashboard" })),
+			driver: Type.Optional(StringEnum(["pi", "claude", "codex"], { description: "model_pick: only when the human asked for this one job to run on that CLI, naming it in quote; the parent relays it as cp_dispatch driver" })),
 			jobs: Type.Optional(OperatorJobsQuerySchema),
 			timeout_s: Type.Optional(Type.Number({ minimum: 0, maximum: DRAIN_MAX_TIMEOUT_S, description: `drain: seconds to wait for live workers to settle (default ${DRAIN_DEFAULT_TIMEOUT_S})` })),
 			freeze: Type.Optional(Type.Boolean({ description: "drain: also steer each mid-turn implementer to commit and push its WIP and end its turn without reporting (before a usage pause)" })),
