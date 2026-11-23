@@ -8,7 +8,7 @@ import { dashboard, openTab, type Tab, until } from "../harness/dashboard.ts";
 
 const KEY = "cp-sidebar-width";
 const HANDLE = ".shell > .sidebar-resizer";
-const width = (tab: Tab): [string, string | null | undefined] => [tab.$(".shell")?.getAttribute("style") ?? "", tab.$(HANDLE)?.getAttribute("aria-valuenow")];
+const width = (tab: Tab): [string, string | null | undefined] => [tab.document.documentElement.getAttribute("style") ?? "", tab.$(HANDLE)?.getAttribute("aria-valuenow")];
 const pointer = (tab: Tab, target: EventTarget, type: string, clientX: number) =>
 	target.dispatchEvent(Object.assign(new tab.window.Event(type, { bubbles: true, cancelable: true }), { clientX, button: 0 }));
 const drag = (tab: Tab, from: number, to: number) => {

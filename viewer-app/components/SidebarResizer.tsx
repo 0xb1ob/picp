@@ -1,7 +1,8 @@
 import type { JSX } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 
 export const SIDEBAR_WIDTH_KEY = "cp-sidebar-width";
+const SIDEBAR_VAR = "--sidebar-width";
 export const SIDEBAR_MIN = 180, SIDEBAR_MAX = 480, SIDEBAR_STEP = 16;
 const DRAG_THRESHOLD = 3;
 const clamp = (px:number) => Math.round(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, px)));
@@ -19,14 +20,19 @@ function persist(px:number | null) {
 }
 
 /**
- * The desktop sidebar's user-chosen width: `style` sets `--sidebar-width` on the shell (absent until the user resizes),
- * `handle(fallback)` draws the drag/keyboard separator for a column whose CSS default is `fallback` px.
+ * The desktop sidebar's user-chosen width as `--sidebar-width` on the document root (absent until the user resizes),
+ * as viewport-fit sets its variables; `handle(fallback)` draws the separator for a column whose CSS default is `fallback`.
  */
 export function useSidebarWidth() {
  const [width,setWidth] = useState<number | null>(stored);
  const commit = (px:number | null) => { setWidth(px); persist(px); };
  const drag = useRef<(() => void) | null>(null);
  useEffect(() => () => drag.current?.(), []);
+ useLayoutEffect(() => {
+  const root = document.documentElement.style;
+  if (width === null) root.removeProperty(SIDEBAR_VAR); else root.setProperty(SIDEBAR_VAR, `${width}px`);
+  return () => root.removeProperty(SIDEBAR_VAR);
+ }, [width]);
  const handle = (fallback:number) => {
   const now = width ?? fallback;
   const down = (event:JSX.TargetedPointerEvent<HTMLDivElement>) => {
@@ -55,5 +61,5 @@ export function useSidebarWidth() {
    aria-valuenow={now} aria-valuemin={SIDEBAR_MIN} aria-valuemax={SIDEBAR_MAX} title="Drag to resize; double-click to reset"
    onPointerDown={down} onKeyDown={key} onDblClick={() => commit(null)}/>;
  };
- return { width, style: width === null ? undefined : { "--sidebar-width": `${width}px` }, handle };
+ return { width, handle };
 }
