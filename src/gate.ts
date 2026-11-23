@@ -51,7 +51,7 @@ import { ReviewRunsError, type ReviewRuns, type ReviewWait, type ReviewWakeup } 
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { type ModelProbe, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
-import { holdReviewerSlot, resolveReviewerRoute } from "./reviewer-route.ts";
+import { borrowedFrom, holdReviewerSlot, resolveReviewerRoute } from "./reviewer-route.ts";
 import { nativeSpawn } from "./dispatch-driver.ts";
 import { RunRecorder } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -916,7 +916,7 @@ export class Gate {
 				model,
 				// The resolved effort travels with the resolved model: a rubric row that
 				// routes reviewers at medium must not be spawned at the profile's high.
-				...(route.decision.thinking ? { thinking: route.decision.thinking } : {}), ...nativeSpawn(route.decision),
+				...(route.decision.thinking ? { thinking: route.decision.thinking } : {}), ...nativeSpawn(route.decision), ...borrowedFrom(route.decision, jobId),
 				brief,
 				sessionDir: join(home, LAYOUT.sessions),
 				sessionName: key,

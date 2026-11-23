@@ -118,7 +118,7 @@ test("CX-3c: a run with no token update is usage_unavailable, never 0", { skip, 
 	assertClean(h);
 });
 
-test("CX-3d: a usage-limit turn fails as provider_limit, is not revived, and turns codex selections and resumes away until its reset", { skip, timeout: 300_000 }, async (t) => {
+test("CX-3d: a usage-limit turn fails as provider_limit, is not revived, and refuses codex selections and resumes by name until its reset", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t);
 	const [spent, rowed, explicit, after] = await Promise.all([h.job(), h.job(), h.job(), h.job()]);
 	codexRow(h, "cx3d");
@@ -148,13 +148,13 @@ test("CX-3d: a usage-limit turn fails as provider_limit, is not revived, and tur
 	const snapshot = readCodexAvailability(h.b.home);
 	assert.deepEqual([snapshot?.limit?.reached, snapshot?.limit?.resets_at], ["usageLimitExceeded", r2 * 1000], JSON.stringify(snapshot));
 	assert.equal(existsSync(nativeAvailabilityFile(h.b.home)), false, "the Claude snapshot is untouched");
-	// While the limit holds: a codex row falls back to pi, an explicit codex dispatch and a revive are refused by name.
+	// While the limit holds: a codex row's job, an explicit codex dispatch and a revive are all refused by name (never pi).
 	await h.b.closeParents();
 	const spawned = appServers(h).length;
 	const ends = await h.run([dry(rowed.id), explicit.dispatch(), tool("cp_revive", { job_id: spent.id, confirm: true })]);
-	const [fellBack, refused] = ends.filter((end) => end.toolName === "cp_dispatch");
-	assert.deepEqual([preview(fellBack)?.driver, preview(fellBack)?.requested_driver], ["pi", "codex"], text(fellBack));
-	assert.match(preview(fellBack)?.driver_reason ?? "", /^window: usage limit reached until \d{4}-/);
+	const [rowRefused, refused] = ends.filter((end) => end.toolName === "cp_dispatch");
+	assert.equal(preview(rowRefused), undefined, text(rowRefused));
+	assert.match(String((rowRefused?.result.details as { error?: string } | undefined)?.error), /cannot run on the Codex CLI driver: usage limit reached until \d{4}-/);
 	assert.equal(refused?.isError, true, text(refused));
 	assert.match(text(refused), /cannot run on the Codex CLI driver: usage limit reached until/);
 	assert.equal(existsSync(join(h.b.home, paths.runDir(explicit.id))), false, "no run for the refused dispatch");
@@ -187,9 +187,9 @@ test("CX-3d2: a reached limit on a turn that still completed blocks the next cod
 	assert.deepEqual(observed, ["limit"]);
 	const limit = readCodexAvailability(h.b.home)?.limit;
 	assert.deepEqual([limit?.reached, limit?.resets_at], ["rate_limit_reached", undefined], JSON.stringify(limit));
-	const fellBack = ends.filter((end) => end.toolName === "cp_dispatch").at(-1);
-	assert.equal(preview(fellBack)?.driver, "pi", text(fellBack));
-	assert.match(preview(fellBack)?.driver_reason ?? "", /^window: usage limit reached, reset unknown/);
+	const rowRefused = ends.filter((end) => end.toolName === "cp_dispatch").at(-1);
+	assert.equal(preview(rowRefused), undefined, text(rowRefused));
+	assert.match(String((rowRefused?.result.details as { error?: string } | undefined)?.error), /cannot run on the Codex CLI driver: usage limit reached, reset unknown/);
 	// The switch file rewritten after the observation (off then on) voids a no-reset limit.
 	writeFileSync(h.nativeFile, readFileSync(h.nativeFile, "utf8"));
 	await h.b.closeParents();

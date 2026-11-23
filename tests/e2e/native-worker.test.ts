@@ -25,7 +25,8 @@ import { jobsView } from "../../src/viewer/jobs-view.ts";
 import { startViewer } from "../harness/dashboard.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, subscriberEnv, toolResults } from "../harness/claude-mock-provider.ts";
-import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, routeDriver, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -44,6 +45,8 @@ async function nativeHome(t: TestContext, script: readonly ClaudeStep[], usage =
 	const b = await dispatchS29(t, { files: { ".claude/settings.json": JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "touch /tmp/picp-n3b-hook-ran" }] }] } }), ".claude/commands/extra.md": "extra\n", "big.txt": big } });
 	const claude = await startClaudeMockProvider(script, { usage });
 	routeNativeModel(b.home);
+	// cp-qmry P3: the CLI is configured, not chosen per job; the demo planner and implementer rows run claude.
+	routeDriver(b.home, "claude", FAKE_NATIVE_MODEL);
 	const fakeHome = mkdtempSync(join(tmpdir(), "cp-n3b-home-"));
 	t.after(async () => { await claude.close(); rmSync(fakeHome, { recursive: true, force: true }); });
 	const settingsFile = join(fakeHome, ".claude", "settings.json");
@@ -78,7 +81,10 @@ test("P3a/c/d/h/i/j: a native research job reports once, refuses peers and ship 
 		{ kind: "text", text: "Reported." },
 	]);
 	const model = worker;
-	const dispatch = (id: string, driver = true) => ({ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", model: driver ? FAKE_NATIVE_MODEL : model, queue: false, when_ready: false, ...(driver ? { driver: "claude" } : {}) } });
+	// The pi job is the human's own per-job pick on this claude-configured home (cp-qmry P3).
+	const piPick = seedOperatorPick(h.b.home, model, { jobId: pi.id, driver: "pi" });
+	const dispatch = (id: string, driver = true) => ({ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", model: driver ? FAKE_NATIVE_MODEL : model, queue: false, when_ready: false,
+		...(driver ? { driver: "claude" } : { driver: "pi", operator_quote: piPick }) } });
 	const bash = (command: string) => ({ name: "bash", args: { command } });
 	const ends = (await h.b.run([
 		{ kind: "tool_calls", calls: [dispatch(native.id)] },
@@ -234,8 +240,8 @@ test("J2 board: a native board job writes its board, survives a kill through cp_
 });
 
 // N4f Acceptance 2: a `small-ship` row with driver claude ships an implementer natively when claude_ship is on (commit,
-// git_push, pr_create on a non-main base, head_sha report); with the switch off the same row runs pi, reason named.
-test("N4f: a claude small-ship row ships natively with claude_ship on; off, the same dispatch runs pi by name", { skip, timeout: 420_000 }, async (t) => {
+// git_push, pr_create on a non-main base, head_sha report); with the switch off the same row refuses by name (cp-qmry).
+test("N4f: a claude small-ship row ships natively with claude_ship on; off, the same dispatch refuses by name, never pi", { skip, timeout: 420_000 }, async (t) => {
 	const ids: string[] = [];
 	const worktree = () => readFleet(h.b.home).jobs.find((job) => job.job_id === ids[0])!.worktree;
 	const git = (...args: string[]) => execFileSync("git", args, { cwd: worktree(), encoding: "utf8" }).trim();
@@ -281,12 +287,12 @@ test("N4f: a claude small-ship row ships natively with claude_ship on; off, the 
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(native!.id)) } }] },
 	], { ...h.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, FORGE_GH_LOG: ghLog, GIT_CONFIG_GLOBAL: join(bin, "gitconfig") }, undefined, 300_000)) as Tool[];
 	const [offEnd, nativeEnd] = ends.filter((end) => end.toolName === "cp_dispatch");
-	assert.notEqual(offEnd?.isError, true, text(offEnd));
 	assert.notEqual(nativeEnd?.isError, true, text(nativeEnd));
-	// Switch off: the claude row falls back to pi with the class switch named; no native run.
-	const offRecord = readFleet(h.b.home).jobs.find((job) => job.job_id === off!.id)!;
-	assert.deepEqual([offRecord.worker.driver, offRecord.worker.model, offRecord.routing?.requested_driver, offRecord.routing?.driver], [undefined, piModel, "claude", "pi"]);
-	assert.match(offRecord.routing?.driver_reason ?? "", /^switch: the switch workers\.native_claude_ship is off/);
+	// Switch off: the claude row's job refuses naming the class switch; no run on pi or claude.
+	assert.equal(offEnd?.isError, true, text(offEnd));
+	assert.match(text(offEnd), /cannot run on the Claude CLI driver: the switch workers\.native_claude_ship is off/);
+	assert.equal(existsSync(join(h.b.home, paths.runDir(off!.id))), false, "the refused job has a run");
+	assert.equal(h.b.provider.requests("n4f-pi-ship").length, 0, "the pi model ran");
 	// Switch on: the Driver fact is claude, and the report's head_sha is the worktree HEAD and origin/<job>.
 	const record = readFleet(h.b.home).jobs.find((job) => job.job_id === native!.id)!;
 	assert.deepEqual([record.worker.driver, record.routing?.driver], ["claude", "claude"]);

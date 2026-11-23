@@ -1192,9 +1192,9 @@ export class Doctor {
 		} catch (error) {
 			if (error instanceof RoutingError && error.rule) matched = error.rule;
 		}
-		// Native routing S1: a claude row's primary runs on the CLI, never pi credentials; only its pi fallback is probed.
+		// A claude row's jobs run only on the CLI, never on pi (cp-qmry); the pi-lane probe below is informational.
 		const native = routing.rubric.find((rule) => rule.id === matched && rule.driver === "claude");
-		const lane = native ? `driver=claude ${native.model}; pi fallback ` : "";
+		const lane = native ? `driver=claude ${native.model}, never pi; pi lane (unused) ` : "";
 		try {
 			const decision = resolveModel(request, routing, probe);
 			// A resolvable model is simply ok, and a route with no usable candidate
@@ -1229,7 +1229,7 @@ export class Doctor {
 				finding: {
 					check: `models.${who}`,
 					severity: native ? "warn" : "error",
-					what: native ? `${who}: native ${native.model} needs no pi credentials, but its pi fallback has no usable model` : `${who} has no usable model`,
+					what: native ? `${who}: native ${native.model} needs no pi credentials and never falls back to pi; the row's pi models are unusable here (informational)` : `${who} has no usable model`,
 					detail: message,
 					fix: cappedFix(refusalFix(refusal, who)),
 				},

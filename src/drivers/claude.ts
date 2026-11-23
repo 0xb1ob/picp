@@ -12,15 +12,18 @@ import type { WorkerSpawnOptions } from "../worker-process.ts";
 import { resolveClaudeAsync } from "./claude-cli.ts";
 import { NATIVE_SHUTDOWN_GRACE_MS } from "./claude-usage.ts";
 
-/** Why a job may not run native (S1): the resolver falls back to pi on these; an explicit request refuses.
+/** Why a job may not run native (S1): every one refuses, never switches CLI; `occupied` queues the work instead.
  * `pipeline` is no longer returned (D2): it stays for recorded `driver_reason`s and their readers. */
 export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort" | "denied" | "window" | "auth" | "lockdown" | "containment";
 
 export class NativeDriverError extends Error {
 	readonly category?: NativeRefusal;
-	constructor(message: string, category?: NativeRefusal) {
+	/** The CLI the job is bound to, so a caller can say which capacity it waits for. */
+	readonly driver?: NativeDriver;
+	constructor(message: string, category?: NativeRefusal, driver?: NativeDriver) {
 		super(message);
 		if (category) this.category = category;
+		if (driver) this.driver = driver;
 	}
 }
 

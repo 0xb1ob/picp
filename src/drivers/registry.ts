@@ -2,6 +2,7 @@
 import { codexAvailability, type NativeAvailability, nativeAvailability } from "../native-availability.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
 import type { NativeDriver } from "../worker-driver.ts";
+import type { WorkerManager } from "../worker-manager.ts";
 import {
 	assertNativeEffort, isNativeModel, nativeMaxConcurrent, nativeModelId, type NativeRefusal, type NativeSelection, nativeSelectionRefusal,
 	nativeSlotRefusal, nativeSpawnOptions,
@@ -54,3 +55,18 @@ export function nativeWorkerSlotRefusal(home: string, driver: NativeDriver, hold
 	const spec = nativeDriverSpec(driver);
 	return nativeSlotRefusal(holders, key, spec.maxConcurrent(home), "live", spec.noun);
 }
+
+type Lender = Pick<WorkerManager, "active" | "get" | "stopping">;
+
+/** The live reviewer running in `key`'s native slot (cp-912x ruling), if any. */
+export const borrowerOf = (manager: Pick<WorkerManager, "active">, key: string): string | undefined =>
+	manager.active.find((managed) => managed.borrowsSlotOf === key)?.key;
+
+/** Whether `key`'s slot may be lent: alive, idle, not stopping, and not already lent to another worker. */
+export function lendable(manager: Lender, key: string): boolean {
+	const managed = manager.get(key);
+	return managed !== undefined && managed.worker.alive && !managed.worker.busy && !manager.stopping(key) && borrowerOf(manager, key) === undefined;
+}
+
+/** The author a spawn may borrow from, only while still lendable at the spawn itself. */
+export const lentSlot = (manager: Lender, key: string | undefined): string | undefined => (key !== undefined && lendable(manager, key) ? key : undefined);

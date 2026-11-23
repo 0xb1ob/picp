@@ -224,9 +224,9 @@ function workersDriverView(rubric: View | undefined, native: OwnerRead<unknown> 
 	}
 	if (!claude.length) return view("pi");
 	const config = native?.state === "valid" || native?.state === "absent" ? (native.result as NativeConfig) : undefined;
-	if (!config) return view("claude", "data/native.json is unreadable or invalid: every claude row falls back to pi");
+	if (!config) return view("claude", "data/native.json is unreadable or invalid: every claude row refuses its jobs (they never run on pi)");
 	const off = [...new Set(rows.map((row) => ROLE_NATIVE_SWITCH[row.role]))].filter((name) => !config[name]);
-	return view("claude", off.length ? `data/native.json has ${off.join(", ")} off: those rows fall back to pi` : undefined);
+	return view("claude", off.length ? `data/native.json has ${off.join(", ")} off: those rows refuse their jobs by name (never pi)` : undefined);
 }
 
 type Owner = { file: (home: string) => string; read: (home: string, env: NodeJS.ProcessEnv, file: string) => Settled };

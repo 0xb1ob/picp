@@ -15,6 +15,7 @@ import type { ProjectOf } from "../../src/project-report.ts";
 import type { RecordedSessionTool } from "../../src/session-tools.ts";
 import { WedgedWatch } from "../../src/wedged.ts";
 import type { OpenPlanViewerDeps } from "./plan-viewer.ts";
+import type { AskResult } from "./session-post.ts";
 
 /**
  * What a cp_* tool body reads of its caller: pi builds it from its ctx (`piToolContext`), a native parent from its entry.
@@ -78,7 +79,7 @@ export interface ExtensionDeps {
 		thinking?: ThinkingLevel;
 		operatorQuote?: OperatorModelPickReference;
 		registry?: unknown;
-	}) => Promise<{ job_id: string; dispatch: Awaited<ReturnType<CommandPost["dispatch"]>> }>;
+	}) => Promise<AskResult>;
 	/** An accessor like the rest: a module reads the session's current array at call time, never a registration-time copy. */
 	readonly createdThisTurn: string[];
 	readonly sessionTools: RecordedSessionTool[] | undefined;

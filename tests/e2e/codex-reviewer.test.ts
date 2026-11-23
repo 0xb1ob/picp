@@ -46,8 +46,8 @@ function nextTurn(h: H, steps: FakeCodexStep[], knobs?: Record<string, unknown>)
 
 // Scenario: Given the reviews row on codex with a pi fallback and codex_review on, When cp_review runs on held job A,
 // Then the Codex reviewer reads the packet, files pi's verdict.json once (a wrong-job verdict refused) and its thread
-// is deleted; And with codex_review off the same review of B runs on pi and decides the same.
-test("CX-6a: cp_review on a codex reviews row files pi's verdict.json through report_verdict; codex_review off runs pi", { skip, timeout: 300_000 }, async (t) => {
+// is deleted; And on a pi reviews row the same review of B decides the same (cp-qmry: a codex row never runs pi).
+test("CX-6a: cp_review on a codex reviews row files pi's verdict.json through report_verdict, as a pi reviews row does", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_review: true } });
 	const [a, b] = ["cp-cx6a-a", "cp-cx6a-b"];
 	await h.heldShipJob(a);
@@ -88,12 +88,13 @@ test("CX-6a: cp_review on a codex reviews row files pi's verdict.json through re
 	await allScopesKilled(h);
 	assert.equal(h.record(a)?.worker.driver, undefined, "the subject's record names no driver");
 
-	writeFileSync(h.nativeFile, "{}");
+	const routingFile = join(h.b.home, LAYOUT.routingFile);
+	const config = JSON.parse(readFileSync(routingFile, "utf8")) as { rubric: Array<{ id: string }> };
+	writeFileSync(routingFile, JSON.stringify({ ...config, rubric: [...config.rubric.filter((row) => row.id !== "reviews"), { id: "reviews", role: "gate-reviewer", model: piModel }] }));
 	await h.b.closeParents();
 	await h.run([h.review(b)]);
 	const pi = await h.reviewRun(b);
 	assert.equal(pi.routed?.model, piModel, JSON.stringify(pi.routed));
-	assert.match(String(pi.routed?.line), /driver=pi/);
 	assert.doesNotMatch(String(pi.routed?.line), /driver=codex/);
 	assert.equal(nativeRun(pi.events), undefined);
 	const same = (v: typeof pi.result) => ({ verdict: v.verdict, cause: v.cause, flags: v.flags, reasons: v.reasons });
@@ -213,40 +214,33 @@ test("CX-6c: a codex reviewer reads only its packet: outside paths refused, a de
 	assert.equal(result.bypass, undefined);
 });
 
-// Scenario: with no data/native.json and a hand-written codex reviews row, a review runs pi and nothing persisted names
-// codex, so the previous build reads every file (S5).
-test("CX-6d: switches off, a codex reviews row runs pi and no persisted file names codex", { skip, timeout: 300_000 }, async (t) => {
+// Scenario: with no data/native.json and a hand-written codex reviews row, a review refuses naming the switch (cp-qmry:
+// never pi) and nothing persisted names codex, so the previous build reads every file (S5).
+test("CX-6d: switches off, a codex reviews row refuses by name (never pi) and no persisted file names codex", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: null });
 	const id = "cp-cx6d";
 	await h.heldShipJob(id);
 	const piModel = h.b.provider.addScript("cx6d-pi", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: verdict(id) }] }]);
 	h.reviewsRow(piModel);
-	await h.run([h.review(id)]);
-	const pi = await h.reviewRun(id);
-	assert.equal(pi.routed?.model, piModel, JSON.stringify(pi.routed));
-	assert.match(String(pi.routed?.line), /driver=pi/);
-	assert.deepEqual([pi.routed?.driver, "requested_driver" in (pi.routed ?? {})], ["pi", false], JSON.stringify(pi.routed));
-	assert.match(String(pi.routed?.driver_reason), /^switch: the switch codex_review is off/);
-	assert.equal(nativeRun(pi.events), undefined);
-	assert.deepEqual(pi.verdict, verdict(id));
-	assert.equal(existsSync(join(pi.run, "native-codex-session.json")), false);
-	assert.equal(existsSync(join(pi.run, "codex-system-prompt.md")), false);
+	const [refused] = (await h.run([h.review(id)])).filter((end) => end.toolName === "cp_review");
+	assert.equal(refused?.isError, true, JSON.stringify(refused?.result.content));
+	assert.match(JSON.stringify(refused?.result.content), /cannot run on the Codex CLI driver: the switch codex_review is off/);
+	assert.equal(h.b.provider.requests("cx6d-pi").length, 0, "a reviewer ran on another CLI");
 	assert.equal(existsSync(codexAvailabilityFile(h.b.home)), false);
 	assert.equal(existsSync(h.nativeFile), false, "native.json was never written");
 	const codexValue = /"(?:requested_)?driver":"codex"|driver=codex/;
 	for (const file of [LAYOUT.fleetFile, LAYOUT.dispatchQueueFile, LAYOUT.armedDispatchFile].map((rel) => join(h.b.home, rel))) {
 		if (existsSync(file)) assert.doesNotMatch(readFileSync(file, "utf8"), codexValue, file);
 	}
-	assert.doesNotMatch(readFileSync(join(pi.run, "events.jsonl"), "utf8"), codexValue);
 	const rubric = (JSON.parse(readFileSync(join(h.b.home, LAYOUT.routingFile), "utf8")) as { rubric: Array<{ id: string; driver?: string }> }).rubric;
 	assert.deepEqual(rubric.filter((row) => row.driver === "codex").map((row) => row.id), ["reviews"]);
 	assert.deepEqual(fakeSpawns(h.state).filter((each) => each.argv[0] === "app-server"), [], "no app-server started");
 	assertClean(h);
 });
 
-// Scenario: a live codex research job holds the one codex slot, so a review on a codex row runs its pi fallback;
-// once that job tears down, the next review takes the slot on codex (the control).
-test("CX-6e: a reviewer that finds the codex slot full runs pi; a free slot runs codex", { skip, timeout: 300_000 }, async (t) => {
+// Scenario: a live codex research job holds the one codex slot, so a review on a codex row waits for Codex CLI capacity
+// (cp-qmry: its pi fallback never runs); once that job tears down, the review takes the slot on codex.
+test("CX-6e: a reviewer that finds the codex slot full waits for Codex CLI capacity, never pi; a free slot runs codex", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_review: true } });
 	const research = await h.job();
 	const [full, free] = ["cp-cx6e-full", "cp-cx6e-free"];
@@ -254,13 +248,11 @@ test("CX-6e: a reviewer that finds the codex slot full runs pi; a free slot runs
 	const piModel = h.b.provider.addScript("cx6e-pi", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: verdict(full) }] }]);
 	h.reviewsRow(piModel);
 	h.setScript({ turns: [h.reporting(research.id), [{ kind: "tool", tool: "report_verdict", arguments: verdict(free) }]] });
-	await h.run([research.dispatch(), h.awaitEnvelope(research.id), h.review(full)]);
-	const occupied = await h.reviewRun(full);
+	const [occupied] = (await h.run([research.dispatch(), h.awaitEnvelope(research.id), h.review(full)])).filter((end) => end.toolName === "cp_review");
 	assert.equal(h.record(research.id)?.worker.driver, "codex");
-	assert.equal(occupied.routed?.model, piModel, JSON.stringify(occupied.routed));
-	assert.match(String(occupied.routed?.line), /driver=pi/);
-	assert.equal(nativeRun(occupied.events), undefined);
-	assert.deepEqual(occupied.verdict, verdict(full));
+	assert.equal(occupied?.isError, true, JSON.stringify(occupied?.result.content));
+	assert.match(JSON.stringify(occupied?.result.content), new RegExp(`codex concurrency is 1 and ${research.id} is live.* is waiting for Codex CLI capacity`));
+	assert.equal(h.b.provider.requests("cx6e-pi").length, 0, "a reviewer ran on pi");
 	await h.b.closeParents();
 	await h.run([{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: research.id } }] }, h.pause(2), h.review(free)]);
 	const codex = await h.reviewRun(free);
@@ -271,9 +263,9 @@ test("CX-6e: a reviewer that finds the codex slot full runs pi; a free slot runs
 });
 
 // Scenario: a codex quality voter row; voter 1 runs on codex and, while it runs, codex_max_concurrent drops to 1 with
-// the subject holding a slot, so voter 2's spawn is refused "codex concurrency" and it votes on pi, never abstains.
-// Pins the quality.ts fallback regex for codex: with `/native concurrency/` voter 2 abstained.
-test("CX-6f: a quality voter that loses the codex slot at spawn votes on pi", { skip, timeout: 300_000 }, async (t) => {
+// the subject holding a slot, so voter 2's spawn is refused "codex concurrency". cp-qmry: it abstains by name and
+// never votes on pi (the old quality.ts re-route ran it on the row's pi fallback).
+test("CX-6f: a quality voter that loses the codex slot at spawn abstains by name, never votes on pi", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_review: true, codex_max_concurrent: 2 } });
 	const subject = await h.job();
 	const marker = join(h.state, "voter-1-running");
@@ -302,8 +294,8 @@ test("CX-6f: a quality voter that loses the codex slot at spawn votes on pi", { 
 	const panel = await post.qualityPass().runAndWait({ jobId: subject.id, task: "Report what README.md says.", config: { verify: true, voters: 2, threshold: 1 } });
 	await lose;
 	const votes = panel?.verify?.votes ?? [];
-	assert.deepEqual(votes.map((vote) => [vote.model, vote.sound, vote.abstained ?? false]), [[FAKE_CODEX_REF, true, false], [piVoter, true, false]], JSON.stringify(votes));
-	assert.equal(panel?.passed, true);
+	assert.deepEqual(votes.map((vote) => [vote.model, vote.abstained ?? false]), [[FAKE_CODEX_REF, false], [FAKE_CODEX_REF, true]], JSON.stringify(votes));
+	assert.match(JSON.stringify(votes[1]), /codex concurrency is 1/);
 	assertClean(h);
 });
 
@@ -329,22 +321,19 @@ test("CX-6g: cp_gate on a codex reviews row runs the gate reviewer on codex", { 
 	assertClean(h);
 });
 
-// Scenario: a reviewer's routing event carries the driver fields (C8 i), and its guard follows codex_review (C8 h)
+// Scenario: the reviewer's guard follows codex_review (C8 h)
 //   Given only codex_review on, a signed-out codex and the reviews row on codex with pi fallback, When cp_review runs,
-//   Then the review decides on pi and routing_resolved has driver pi, requested_driver codex and the auth reason.
-//   Before C8 the event had no driver field, and the codex_research-keyed guard dropped requested_driver.
-test("CX-8i: a reviewer's routing_resolved names requested_driver, driver and driver_reason; the guard follows codex_review", { skip, timeout: 300_000 }, async (t) => {
+//   Then cp-qmry: the review refuses naming the auth reason and never runs on pi.
+test("CX-8i: a signed-out codex refuses a codex-row review by name, never pi; the guard follows codex_review", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_review: true } });
 	const id = "cp-cx8i";
 	await h.heldShipJob(id);
 	h.reviewsRow(h.b.provider.addScript("cx8i-pi", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: verdict(id) }] }]));
 	h.setScript({ knobs: { loginStatus: 1 }, turns: [] });
-	await h.run([h.review(id)]);
-	const pi = await h.reviewRun(id);
-	assert.deepEqual([pi.routed?.driver, pi.routed?.requested_driver], ["pi", "codex"], JSON.stringify(pi.routed));
-	assert.match(String(pi.routed?.driver_reason), /^auth: codex is not signed in/);
-	assert.deepEqual(pi.verdict, verdict(id));
-	assert.equal(nativeRun(pi.events), undefined);
+	const [refused] = (await h.run([h.review(id)])).filter((end) => end.toolName === "cp_review");
+	assert.equal(refused?.isError, true, JSON.stringify(refused?.result.content));
+	assert.match(JSON.stringify(refused?.result.content), /cannot run on the Codex CLI driver: codex is not signed in/);
+	assert.equal(h.b.provider.requests("cx8i-pi").length, 0, "a reviewer ran on another CLI");
 	assert.deepEqual(fakeSpawns(h.state).filter((each) => each.argv[0] === "app-server"), [], "no app-server started");
 	assertClean(h);
 });

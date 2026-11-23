@@ -29,7 +29,7 @@ import {
 	validateArmedDispatchFile,
 } from "./contracts.ts";
 import { BlockedDispatchError, type DispatchRequest } from "./dispatch.ts";
-import { toDispatchRequest } from "./dispatch-queue.ts";
+import { nativeOccupied, toDispatchRequest, waitingLabel } from "./dispatch-queue.ts";
 import { assertDispatchOpen, readDrain } from "./drain.ts";
 import { UpdateHoldError } from "./update-hold.ts";
 import { atomicWriteJson } from "./json-store.ts";
@@ -136,8 +136,9 @@ export class ArmedDispatches {
 				if (error instanceof BlockedDispatchError) continue; // a blocker reopened: still armed
 				if (error instanceof UpdateHoldError) continue; // held for a pending update: still armed
 				if (error instanceof MandateError && error.code === "parallelism_full") continue;
-				if (error instanceof SpawnSafetyError && error.code === "spawn_cap") {
-					this.#queue(entry);
+				// cp-qmry: a full configured CLI queues like the spawn cap, never dropped and never switched.
+				if ((error instanceof SpawnSafetyError && error.code === "spawn_cap") || nativeOccupied(error)) {
+					this.#queue(entry, waitingLabel(error) ?? "the spawn cap is full");
 					continue;
 				}
 				this.#finish(entry, "dropped", ((error as Error).message ?? String(error)).split("\n")[0]!.slice(0, 300));
@@ -159,25 +160,25 @@ export class ArmedDispatches {
 		return undefined;
 	}
 
-	#queue(entry: ArmedDispatchEntry): void {
+	#queue(entry: ArmedDispatchEntry, why: string): void {
 		let position: number;
 		try {
 			position = this.#options.enqueue(entry.job_id, entry.request);
 		} catch (error) {
 			if (error instanceof UpdateHoldError) return; // the hold turned on after the spawn_cap refusal: still armed
-			this.#finish(entry, "dropped", `its blockers landed but the spawn cap is full and it could not be queued: ${(error as Error).message.split("\n")[0]}`);
+			this.#finish(entry, "dropped", `its blockers landed but ${why} and it could not be queued: ${(error as Error).message.split("\n")[0]}`);
 			return;
 		}
-		this.#finish(entry, "queued", `position ${position}`);
+		this.#finish(entry, "queued", `position ${position}`, why);
 	}
 
-	#finish(entry: ArmedDispatchEntry, outcome: "started" | "queued" | "dropped", detail: string): void {
+	#finish(entry: ArmedDispatchEntry, outcome: "started" | "queued" | "dropped", detail: string, why = "the spawn cap is full"): void {
 		this.disarm(entry.job_id);
 		const content =
 			outcome === "started"
 				? `ARMED DISPATCH STARTED — ${entry.job_id} (${detail}): ${entry.blockers.length > 0 ? "its blockers landed" : "its foreign-CI wait ended"} (armed at ${entry.armed_at}). Its envelope is the next wake-up.`
 				: outcome === "queued"
-					? `ARMED DISPATCH QUEUED — ${entry.job_id} (${detail}): its blockers landed but the spawn cap is full; it starts when a worker slot frees. Do not re-dispatch.`
+					? `ARMED DISPATCH QUEUED — ${entry.job_id} (${detail}): its blockers landed but ${why}; it starts when a slot frees. Do not re-dispatch.`
 					: `ARMED DISPATCH DROPPED: ${detail} — ${entry.job_id}, armed at ${entry.armed_at}. Nothing was dispatched; cp_next decides what runs next.`;
 		// A job that did not start has no fleet record; keys would make its notice stale.
 		const keys = outcome === "started" ? { keys: [entry.job_id] } : {};

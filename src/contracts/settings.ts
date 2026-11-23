@@ -249,7 +249,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		native_codex_review: { file_key: "codex_review", type: "boolean", default: false, label: "Codex CLI reviewers", help: `Gate reviews${CODEX_HELP}` },
 	}),
 	...group("workers", "routing", { applies: "next_dispatch", on_invalid: "refuse" }, {
-		driver: { type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets the driver of each data/routing.json rubric row not on the Codex CLI, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi." },
+		driver: { type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets the driver of each data/routing.json rubric row not on the Codex CLI, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi. A full CLI queues new jobs (waiting for its capacity); they never run on another CLI." },
 	}),
 ]);
 

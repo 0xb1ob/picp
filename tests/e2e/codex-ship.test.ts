@@ -415,9 +415,9 @@ test("CX-7h: cp_send to a held codex ship job resumes its thread, merges origin/
 
 // Scenario: codex ship ships off (CX-7i)
 //   Given every codex switch off, When an explicit codex ship dispatch and a codex small-ship row dispatch run,
-//   Then the explicit one is refused before any lease naming codex_ship, the row runs pi by `switch:` with no
-//   requested_driver, and no persisted file holds a codex value; with only codex_research on codex ship still refuses.
-test("CX-7i: with codex_ship off an explicit codex ship refuses by name and a codex row runs pi with no codex value persisted", { skip, timeout: 300_000 }, async (t) => {
+//   Then both are refused before any lease naming codex_ship (cp-qmry: the row never runs pi), and no persisted file
+//   holds a codex value; with only codex_research on codex ship still refuses.
+test("CX-7i: with codex_ship off an explicit codex ship and a codex row both refuse by name, never pi, with no codex value persisted", { skip, timeout: 300_000 }, async (t) => {
 	const h = await shipHome(t, null);
 	const [explicit, rowed, second] = [await h.job("pr", "ship"), await h.job("pr", "ship"), await h.job("pr", "ship")];
 	const piModel = h.b.provider.addScript(`cx7i-pi-${Math.random().toString(36).slice(2, 8)}`, [
@@ -425,28 +425,25 @@ test("CX-7i: with codex_ship off an explicit codex ship refuses by name and a co
 	]);
 	const row = { id: "small-ship", role: "implementer", scope: ["S"], model: FAKE_CODEX_REF, fallbacks: [piModel], driver: "codex" };
 	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*", FAKE_CODEX_REF], rubric: [row] }));
-	const ends = (await h.run([explicit.dispatch(), tool("cp_dispatch", { job_id: rowed.id, task: "Ship.", scope: "S", queue: false, when_ready: false })]))
+	const ends = (await h.run([explicit.dispatch({ scope: "S" }), tool("cp_dispatch", { job_id: rowed.id, task: "Ship.", scope: "S", queue: false, when_ready: false })]))
 		.filter((end) => end.toolName === "cp_dispatch");
 	assert.equal(ends[0]?.isError, true, text(ends[0]));
 	assert.match(text(ends[0]), /cannot run on the Codex CLI driver: the switch codex_ship is off/);
 	assert.equal(existsSync(join(h.b.home, paths.runDir(explicit.id))), false, "no lease, no run");
-	assert.notEqual(ends[1]?.isError, true, text(ends[1]));
-	const record = await waitFor(() => h.record(rowed.id), Boolean, { timeoutMs: 30_000, what: "the pi job's fleet record" });
-	assert.deepEqual([record?.worker.driver, record?.worker.model, record?.routing?.driver, record?.routing?.requested_driver], [undefined, piModel, "pi", undefined]);
-	assert.match(record?.routing?.driver_reason ?? "", /^switch: the switch codex_ship is off/);
-	assert.equal(existsSync(join(h.b.home, paths.runDir(rowed.id), "native-codex")), false);
+	assert.equal(ends[1]?.isError, true, text(ends[1]));
+	assert.match(text(ends[1]), /cannot run on the Codex CLI driver: the switch codex_ship is off/);
+	assert.equal(existsSync(join(h.b.home, paths.runDir(rowed.id))), false, "the row's job ran on pi");
 	// The previous build reads every file: no driver key names codex (a reason text may name the switch).
 	const drivers = (value: unknown): unknown[] => (value === null || typeof value !== "object" ? [] : Object.entries(value as Record<string, unknown>)
 		.flatMap(([key, child]) => [...(key === "driver" || key === "requested_driver" ? [child] : []), ...drivers(child)]));
 	const persisted = [LAYOUT.fleetFile, LAYOUT.dispatchQueueFile, join(LAYOUT.data, "armed-dispatches.json")].map((rel) => join(h.b.home, rel)).filter((file) => existsSync(file));
-	assert.ok(persisted.length >= 1, persisted.join(","));
-	for (const value of [...persisted.map((file) => JSON.parse(readFileSync(file, "utf8")) as unknown), ...readRunEvents(h.b.home, rowed.id)]) {
+	for (const value of persisted.map((file) => JSON.parse(readFileSync(file, "utf8")) as unknown)) {
 		for (const driver of drivers(value)) assert.ok(driver === "pi" || driver === "claude", `a persisted driver value ${String(driver)}`);
 	}
 	assert.equal(existsSync(h.nativeFile), false, "native.json was never written");
 	writeFileSync(h.nativeFile, JSON.stringify({ codex_research: true }));
 	await h.b.closeParents();
-	const [only] = (await h.run([second.dispatch()])).filter((end) => end.toolName === "cp_dispatch");
+	const [only] = (await h.run([second.dispatch({ scope: "S" })])).filter((end) => end.toolName === "cp_dispatch");
 	assert.match(text(only), /the switch codex_ship is off/);
 	assert.equal(existsSync(join(h.b.home, paths.runDir(second.id))), false);
 	assertClean(h);

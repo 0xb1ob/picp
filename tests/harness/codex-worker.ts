@@ -16,7 +16,7 @@ import { SCAFFOLD_MANDATE_DEFAULTS } from "../../src/mandate-defaults.ts";
 import { routeNativeModel } from "./claude-mock-provider.ts";
 import { AUTH_SENTINEL, type FakeCodexScript, type FakeCodexStep, installCodexStub, writeCodexScript } from "./codex-mock.ts";
 import { dispatchS29 } from "./dispatch-s29.ts";
-import { readFleet, readRunEvents, type ScriptStep, waitFor } from "./index.ts";
+import { readFleet, readRunEvents, routeDriver, type ScriptStep, waitFor } from "./index.ts";
 import { EXCLUDE_PATHS } from "./native-worker.ts";
 
 export const FAKE_CODEX_REF = "openai/gpt-picp-fake";
@@ -30,6 +30,8 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 	const nativeFile = join(b.home, LAYOUT.data, "native.json");
 	if (opts.native !== null) writeFileSync(nativeFile, JSON.stringify(opts.native ?? { codex_research: true }));
 	routeNativeModel(b.home, [FAKE_CODEX_REF]);
+	// The CLI is configured, not chosen per job (cp-qmry P3); with every codex switch off no codex value is written.
+	if (opts.native !== null) routeDriver(b.home, "codex", FAKE_CODEX_REF);
 	const root = mkdtempSync(join(tmpdir(), "cp-codex-worker-e2e-"));
 	t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 5 }));
 	const [bin, state, codexHome, outside, forge] = ["codex-release/bin", "state", "codex-home", "outside", "forge"].map((name) => join(root, name)) as [string, string, string, string, string];
@@ -51,7 +53,7 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 	};
 	const record = (id: string) => readFleet(b.home).jobs.find((job) => job.job_id === id);
 
-	/** A ledger job, its artifact dir made, and the parent step that dispatches it (explicit codex unless `driver` says). */
+	/** A ledger job, its artifact dir made, and the parent step that dispatches it (codex, as its row is configured). */
 	async function job(delivery: Delivery = "local", kind: JobKind = "research") {
 		const created = await b.ledger.create({ title: `codex ${kind} ${Math.random()}`, project: "demo", delivery, kind });
 		mkdirSync(join(b.home, paths.artifactDir(created.id)), { recursive: true });
