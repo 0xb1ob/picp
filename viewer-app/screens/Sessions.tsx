@@ -385,7 +385,6 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {shell.rail?.head}
    <div class="session-sidebar-chats">{chats(sessionHref("you"))}</div>
    {shell.rail?.status}
-   {shell.rail?.nav("Desktop primary")}
   </aside>
   {shell.resizer?.(261)}
   <div class="session-panel">
