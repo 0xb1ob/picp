@@ -678,7 +678,7 @@ lines with its full text in `title`, and the date keeps its own column on the he
 spans the heading's full width under the page title, which stays one line; the stage asserts both at 390 px.
 
 **Chat Jobs surfaces (M3 slice 2, cp-zm9f).** Only the operator's Full transcript has them
-(`viewer-app/components/WorkspaceSurfaces.tsx`): a `Jobs ⌘J` button on its filter row and Ctrl/Cmd+J, registered
+(`viewer-app/components/WorkspaceSurfaces.tsx`): Ctrl/Cmd+J (the header's `Jobs ⌘J` button was removed), registered
 while that chat is on screen and removed when it leaves, so every other screen keeps the key (no `preventDefault`) and
 Ctrl/Cmd+K search is unchanged. The drawer (`JobsDrawer.tsx`) is a native modal `<dialog>`: an 860 px right drawer
 from 900 px and a bottom sheet (18 px radius) below. It reads `/api/jobs` only while open and lists In flight, With the
@@ -697,7 +697,7 @@ drawer and Context still open it on Details. Only an unmodified primary click is
 click, and a fresh `#job/<id>?tab=transcript` URL, keep the full job route, and outside the operator chat the link is
 an ordinary link. An unreadable job shows the pane's existing alert; a new session file drops the pane.
 
-**Chat context and Conversations (M3 slice 3, cp-zm9f).** The same Full transcript gains `Context` beside `Jobs ⌘J`
+**Chat context and Conversations (M3 slice 3, cp-zm9f).** The same Full transcript gains `Context` in its heading
 (an amber badge counts the open asks). `ConversationContext.tsx` shows "This conversation": Asked you (the transcript's
 open asks, answered only here) and In flight (the live workers in the M1 selection, each with
 project, model, context, cost and last activity, "not recorded" when absent, Open job into the slice 2 pane and its
@@ -814,7 +814,7 @@ Conversations drawer (`ShellContext.rail`: `head`, `nav`, `status`): the brand w
 `.cvh`), the Chats, the live status, then Chat/Jobs/More as icons at the foot (design `.inav`), each link keeping its
 href, label (visually hidden, also its title) and the awaiting count on More; other screens keep the 208 px rail with
 the search field and labelled items. The drawer drops its "Conversations" title row for the same head and icon nav.
-`Jobs ⌘J` and Context share the Full transcript heading's one 48 px row (its project filter moved to the sidebar's
+Context sits alone at the end of the Full transcript heading's one 48 px row (its project filter moved to the sidebar's
 Project rows with cp-2tf2), and Context is an icon toggle with the ask count. On a phone the top bar is 53 px and the heading becomes a 45 px live/ask strip (a
 neutral run ring, *N working · first id* counting only a recorded `working` run, *none working* when there is none, then
 the ask badge only when one is open) carrying the same actions. The phone composer is one rounded card (frames 6 and
@@ -822,8 +822,8 @@ the ask badge only when one is open) carrying the same actions. The phone compos
 transcript's 14 px. The current operator chat opens its inspector by default from
 900 px (docked from 1280 px, over the chat's edge between); the user's close holds until they leave the chat or reload,
 a historical file and a phone never open it on load, and a session change still drops the job and sheet state.
-`--stage full-match-shell` measures 1440, 1279, 900, 899 and 390 px plus the phone drawer and the
-header's Jobs ⌘J; the committed captures are `desktop`, `phone`, `899`, `900`, `drawer` and `header-jobs` `.png` under
+`--stage full-match-shell` measures 1440, 1279, 900, 899 and 390 px plus the phone drawer; the committed captures are
+`desktop`, `phone`, `899`, `900` and `drawer` `.png` under
 `docs/tui-verification/full-match-shell/`.
 
 **Composer menu (M3 slice 4, cp-zm9f; commands full match S6).** In the operator chat's composer (`ComposerMenu.tsx`), a
