@@ -434,6 +434,9 @@ try {
 	mkdirSync(out, { recursive: true });
 	/** `steps`: [script, ready expression] pairs run in order after load — real clicks on real handlers, each awaited. */
 	type Step = [string | { cdp: string; params: object }, string];
+	/** Opens the context with `open`, then its "Asked you" disclosure (collapsed on every mount) once it renders. */
+	const openAsks = (open: string) => `(async () => { ${open}; const t = () => document.querySelector(".workspace-context .workspace-context-asked-toggle[aria-expanded=false]");
+		for (let i = 0; i < 100 && !t(); i++) await new Promise(r => setTimeout(r, 20)); t()?.click(); })()`;
 	const capture = async (name: string, hash: string, width: number, height: number, theme: "light" | "dark", ready: string, scroll?: "top" | "bottom", steps: Step[] = []) => {
 		await cdp("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 900 });
 		await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
@@ -630,7 +633,7 @@ try {
 	if (stage === "m3-context") {
 		// Real clicks open the context (inspector from 900 px, sheet below) and the phone's Conversations drawer.
 		const asked = `!!document.querySelector(".workspace-context .workspace-context-ask")`;
-		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, asked];
+		const context: Step = [openAsks(`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`),asked];
 		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .session-choice")`];
 		const fits: Step = ["true", `[...document.querySelectorAll(".workspace-close, .workspace-context-open, .workspace-sessions-open, .workspace-context button, .workspace-context a, .workspace-sessions .session-choice")]
 			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
@@ -735,7 +738,7 @@ try {
 	}
 	if (stage === "m3-shell") {
 		// Combine: [shell rail, chat column, conversation] widths; Context open at 1440 leaves 1440 - 261 - 340.
-		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, `!!document.querySelector("aside.workspace-context .workspace-context-ask")`];
+		const context: Step = [openAsks(`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`),`!!document.querySelector("aside.workspace-context .workspace-context-ask")`];
 		const family = `(() => { const s = document.querySelector(".stats select"); return !!s && getComputedStyle(s).fontFamily === getComputedStyle(document.body).fontFamily; })()`;
 		const shots6: [string, string, string, number, number, Step[], string][] = [
 			["desktop-dark-1440x1000", transcript, loaded, 1440, 1000, [context], "0,261,839"], ["900-dark-900x1000", transcript, loaded, 900, 1000, [], "0,261,639"],
@@ -782,7 +785,7 @@ try {
 		const log: Step[] = [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-link")`],
 			[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".sessions > .workspace-job .job-detail-embedded[data-tab=transcript] .job-transcript") && location.hash === ${JSON.stringify(transcript)}`]];
 		const jobs: Step = [`document.querySelector(".workspace-jobs-open").click()`, `document.querySelectorAll(".workspace-jobs[open] .workspace-jobs-row").length === 4`];
-		const context: Step = [`document.querySelector(".workspace-context-open").click()`, `!!document.querySelector("dialog.workspace-context-sheet[open] .workspace-context-ask")`];
+		const context: Step = [openAsks(`document.querySelector(".workspace-context-open").click()`),`!!document.querySelector("dialog.workspace-context-sheet[open] .workspace-context-ask")`];
 		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .session-choice")`];
 		const box = (selector: string) => `(() => { const e = document.querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect();
 			return [r.left, r.top, r.width, r.height].map(Math.round).join(" ") + " " + getComputedStyle(e).backgroundColor; })()`;
@@ -805,7 +808,7 @@ try {
 		// the raised padding-6 menu from the box's edge, the ask fill. Negative control: a surface/padding-4 menu fails.
 		// S6: three commands, then the two in-flight jobs and the one done today.
 		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu button").length === 6`];
-		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, `!!document.querySelector(".workspace-context .workspace-context-ask")`];
+		const context: Step = [openAsks(`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`),`!!document.querySelector(".workspace-context .workspace-context-ask")`];
 		const reply: Step = [`(() => { const t = document.querySelector(".session-transcript"), m = [...document.querySelectorAll(".session-message.session-other")].at(-1);
 			t.scrollTop += m.getBoundingClientRect().top - t.getBoundingClientRect().top - 120; })()`, "true"];
 		const look = `(() => { const q = s => document.querySelector(s), r = s => q(s)?.getBoundingClientRect(), cs = s => q(s) && getComputedStyle(q(s)), n = Math.round;
@@ -889,7 +892,7 @@ try {
 					bridge: box(".session-bridge-line"), bridge_chip_border: q(".session-bridge-chip") ? getComputedStyle(q(".session-bridge-chip")).borderTopWidth : null, chip: box("a.pr-chip"), strip: box(".session-strip") },
 				outside: all(".workspace-context button, .workspace-context a, .session-steps-earlier, .session-steps-link, .pr-chip, .session-strip-job")
 					.filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className).join() }; })()`;
-		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, `!!document.querySelector(".workspace-context .workspace-context-option")`];
+		const context: Step = [openAsks(`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`),`!!document.querySelector(".workspace-context .workspace-context-option")`];
 		const joined: Step = ["true", `document.querySelector(".workspace-context-job dd")?.textContent === "9m / 2h 0m"`];
 		const why = `document.querySelector(".workspace-context-why > summary")`;
 		const toggled: Step[] = [[`${why}.click()`, `!document.querySelector(".workspace-context-why").open`], [`${why}.click()`, `document.querySelector(".workspace-context-why").open`]];

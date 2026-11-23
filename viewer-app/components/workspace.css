@@ -89,6 +89,9 @@
 .workspace-context-body > section { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--divider); }
 :where(.workspace-context-body) h3 { margin: 0; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
 .workspace-context-asked { color: var(--amber); }
+.workspace-context-asked-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; margin: -6px 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; }
+.workspace-context-chevron { flex-shrink: 0; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+.workspace-context-asked-toggle[aria-expanded=true] > .workspace-context-chevron { transform: rotate(45deg); }
 .workspace-context-body ul { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .workspace-context-body p { margin: 0; font-size: 13px; color: var(--muted); }
 .workspace-context-ask, .workspace-context-job { display: flex; flex-direction: column; gap: 6px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; font-size: 13px; }

@@ -1,0 +1,1 @@
+- Viewer: the chat's context panel shows "Asked you · N" as a collapsed disclosure by default (amber when N > 0); click, Enter or Space shows the ask cards. A new ask updates the count without expanding, and the choice is not persisted.
