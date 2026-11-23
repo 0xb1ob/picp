@@ -82,7 +82,7 @@ export function Shell({current,awaiting,status,updatedAt,children}: {current:Rou
  const live = <span class={`shell-live shell-live-${status}`} role="status"><span/>{status === "live" ? clockNow ?? status : <>{status}{clockNow && <> · {clockNow}</>}</>}</span>;
  const railHead = <><Brand/><button type="button" class="shell-desktop-search" aria-haspopup="dialog" title="Search (Ctrl/⌘ K)" onClick={openSearch}><Icon name="search" size={16}/><span>Search</span><kbd>⌘K</kbd></button><Navigation current={current} awaiting={awaiting} desktop/></>;
  const railStatus = <div class="shell-sidebar-status"><span class={`shell-live shell-live-${status}`} role="status"><span/>{status}</span></div>;
- // The phone drawer (design `.cvh` and `.inav`): brand and a search icon on top, the primary items as icons at the foot.
+ // The phone drawer (design `.cvh`, `.inav`): brand and a search icon on top, the primary items as icons at the foot.
  const chatHead = <div class="shell-rail-head"><Brand/><button type="button" class="shell-rail-search" aria-label="Search" aria-haspopup="dialog" title="Search (Ctrl/⌘ K)" onClick={openSearch}><Icon name="search" size={18}/></button></div>;
  const chatNav = (label:string) => <Navigation current={current} awaiting={awaiting} icons label={label}/>;
  return <div class={`shell${current.screen === "sessions" ? " shell-sessions" : current.screen === "report" ? " shell-report" : ""}`}><header class={`shell-header${current.screen === "files" ? " shell-files-header" : subpage ? " shell-header-subpage" : ""}`}>

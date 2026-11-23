@@ -255,7 +255,7 @@ test("M3-shell: desktop Chat is one 261 px column of the shared sidebar head (se
 	await tab.find(".shell-main > .sessions");
 	assert.equal(await until(() => tab.$(".shell-sidebar"), (rail) => rail === null, "the rail claim"), null, "Chat drops the shell's rail");
 	const column = tab.$(".session-sidebar")!;
-	// cp-unify-sidebar: the other pages' head (brand, Search ⌘K, Chat/Jobs/More) sits above Operator, projects and Fleet.
+	// cp-unify-sidebar: the other pages' head (brand, Search ⌘K, Chat/Jobs/More) sits above Operator, projects, Fleet.
 	// Negative control: the old icon-only rail (`shell-rail-head`, search icon, icon nav at the foot) fails here.
 	assert.deepEqual([...column.children].map((el) => el.getAttribute("class") ?? el.tagName), ["shell-brand", "shell-desktop-search", "shell-sidebar-nav", "session-sidebar-chats", "shell-sidebar-status"],
 		"sidebar head, chats, status in one column");
