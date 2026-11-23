@@ -62,6 +62,7 @@ import type { RunRecorder } from "./run-artifacts.ts";
 import { RunRegistry } from "./runs.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
+import { NativeDriverError } from "./drivers/claude.ts";
 import { type DriverContext, driverFields, holdNativeSlot, liveNativeWorkers, nativeSpawn, observeNative, resolveDriverRoute } from "./dispatch-driver.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
@@ -493,7 +494,7 @@ export class Dispatcher {
 				options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, profile: profile.frontmatter.name, jobs: options.fleet.read().jobs, ...(request.driver ? { explicit: request.driver } : {}) },
 			);
 		} catch (thrown) {
-			if (!(thrown instanceof RoutingError)) throw thrown;
+			if (!(thrown instanceof RoutingError) && !(thrown instanceof NativeDriverError)) throw thrown;
 			error = thrown.message;
 		}
 		// Absent supported_thinking means the probe cannot tell, never "unsupported".

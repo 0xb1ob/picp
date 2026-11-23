@@ -454,6 +454,9 @@ export class Sender {
 		if (budget?.state === "warn") {
 			runs.open(request.jobId).cp("budget_warning", { ...budget });
 		}
+		// cp-912x ruling: while its reviewer runs in this author's slot, waking the author would overfill its CLI.
+		const borrower = native ? manager.borrowerOf(request.jobId) : undefined;
+		if (borrower) throw new SendError(`${request.jobId} is waiting for ${spec?.label} capacity: its reviewer is using the held author's slot (${borrower}); send again after its cp-verdict wake-up. Nothing was sent.`);
 		// N3c: a native send starts or queues a claude process, so it passes the native admission before anything moves.
 		if (native) await assertNativeResume({ home, jobId: request.jobId, what: mode === "steer" ? "steer" : busy ? "queued follow-up" : "resume" }).catch((error: unknown) => { throw new SendError((error as Error).message); });
 

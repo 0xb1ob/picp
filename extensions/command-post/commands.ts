@@ -8,6 +8,7 @@ import { formatQuota } from "../../src/quota.ts";
 import { describeRuntime } from "../../src/mode.ts";
 import { AWAITING_DIALOG_TIMEOUT_MS } from "../../src/contracts.ts";
 import { formatDispatchResult } from "../../src/dispatch.ts";
+import { formatAskDispatch } from "./session-post.ts";
 import { DOCTOR_EXIT_BROKEN, formatDoctor, formatDoctorJson } from "../../src/doctor.ts";
 import { snapshotSessionTools } from "../../src/session-tools.ts";
 import { formatParentSession, parentSession } from "../../src/parent-session.ts";
@@ -283,7 +284,7 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 				refreshWidget(ctx);
 				// The dispatch record, never an answer: the answer arrives on its own as
 				// a card when the worker reports.
-				emit(ctx, "cp-ask", `${result.job_id} asked — the answer will appear here as a card.\n${formatDispatchResult(result.dispatch)}`);
+				emit(ctx, "cp-ask", `${result.job_id} asked — the answer will appear here as a card.\n${formatAskDispatch(result)}`);
 			} catch (error) {
 				const message = (error as Error).message;
 				if (ctx.hasUI) ctx.ui.notify(message, "error");

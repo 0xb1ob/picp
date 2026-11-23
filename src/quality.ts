@@ -61,10 +61,10 @@ import { type ReviewRuns, type ReviewWait, type ReviewWakeup } from "./review-ru
 import { atomicWriteJson } from "./json-store.ts";
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
 import { type ModelProbe, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
-import { holdReviewerSlot, resolveReviewerRoute } from "./reviewer-route.ts";
+import { borrowedFrom, holdReviewerSlot, reserveReviewerSlot, resolveReviewerRoute } from "./reviewer-route.ts";
 import { nativeSpawn } from "./dispatch-driver.ts";
 import { RunRecorder } from "./run-artifacts.ts";
-import { SpawnSafetyError, type WorkerManager } from "./worker-manager.ts";
+import type { WorkerManager } from "./worker-manager.ts";
 
 export class QualityError extends Error {}
 
@@ -419,7 +419,7 @@ export class QualityPass {
 		const { home, artifacts, manager } = this.#options;
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
 		const record = this.#options.fleet?.get(request.jobId);
-		let model = route.decision.model;
+		const model = route.decision.model;
 		const runDir = join(home, paths.qualityRunDir(request.jobId, options.slot));
 		const scratch = join(runDir, "review");
 		mkdirSync(scratch, { recursive: true });
@@ -459,23 +459,15 @@ export class QualityPass {
 			model: decision.model,
 			// The voter spawns at the effort routing resolved, not the profile's.
 			...(decision.thinking ? { thinking: decision.thinking } : {}),
-			...nativeSpawn(decision),
+			...nativeSpawn(decision), ...borrowedFrom(decision, request.jobId),
 			brief,
 			sessionDir: join(home, LAYOUT.sessions),
 			sessionName: key,
 		});
+		const native = route.decision.driver === "claude" || route.decision.driver === "codex" ? route.decision.driver : undefined;
 		try {
-			let managed: ReturnType<typeof spawn>;
-			try {
-				managed = await holdReviewerSlot(home, request.jobId, async () => spawn(route.decision));
-			} catch (error) {
-				// A native worker took the slot after the panel's route: this voter runs on pi rather than abstain.
-				if (!(error instanceof SpawnSafetyError && /(?:native|codex) concurrency/.test(error.message))) throw error;
-				const pi = await this.#route(profile, request, record, "pi");
-				recorder.cp("routing_resolved", reviewerRoutingEvent({ surface: `quality/${options.slot}`, ...pi }));
-				model = pi.decision.model;
-				managed = spawn(pi.decision);
-			}
+			// cp-qmry: never another CLI. Serial voters keep the panel's one slot (re-taken below before each exit).
+			const managed = await holdReviewerSlot(home, request.jobId, async () => spawn(route.decision));
 			recorder.markSpawned({ pid: managed.worker.pid, model, profile: profile.frontmatter.name });
 			recorder.attach(managed.worker);
 			const receipt = await managed.worker.send(brief);
@@ -499,6 +491,7 @@ export class QualityPass {
 			// A voter that cannot start abstains; it never blocks the job.
 			return { model, note: `voter could not run: ${(error as Error).message}` };
 		} finally {
+			if (native) reserveReviewerSlot(home, request.jobId, native);
 			await manager.shutdown(key);
 			recorder.close();
 		}
@@ -510,7 +503,7 @@ export class QualityPass {
 	 * is still an explicit override and still wins; what it no longer does is
 	 * throw away the effort and the subject's impact on the way to the spawn.
 	 */
-	async #route(profile: WorkerProfile, request: QualityRequest, record?: { project: string; routing?: JobRouting }, explicit?: "pi"): Promise<ReviewerRoute> {
+	async #route(profile: WorkerProfile, request: QualityRequest, record?: { project: string; routing?: JobRouting }): Promise<ReviewerRoute> {
 		const inputs = reviewerRoutingInputs(record);
 		const decision = await resolveReviewerRoute(
 			{
@@ -527,7 +520,7 @@ export class QualityPass {
 			this.#options.capacity,
 			{
 				home: this.#options.home, jobId: request.jobId, record: this.#options.fleet?.get(request.jobId), jobs: this.#options.fleet?.read().jobs ?? [],
-				manager: this.#options.manager, ...(explicit ? { explicit } : { reserve: true }),
+				manager: this.#options.manager, reserve: true,
 			},
 		);
 		return { decision, inputs };

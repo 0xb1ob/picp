@@ -8,8 +8,9 @@ import { Type } from "typebox";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { OperatorModelPickReferenceSchema, type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, SkillNameSchema, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
 import { BlockedDispatchError, formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
-import { nativeOccupied } from "../../src/dispatch-queue.ts";
+import { nativeOccupied, waitingLabel } from "../../src/dispatch-queue.ts";
 import { checkStoredPick } from "../../src/reroute.ts";
+import { formatAskDispatch } from "./session-post.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
 import { currentRuntime } from "./helpers.ts";
@@ -76,10 +77,10 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				content: [
 					{
 						type: "text",
-						text: `${result.job_id} (kind:research, delivery:answer) — the answer will be shown to the operator as a card; you will get the headline only.\n${formatDispatchResult(result.dispatch)}`,
+						text: `${result.job_id} (kind:research, delivery:answer) — the answer will be shown to the operator as a card; you will get the headline only.\n${formatAskDispatch(result)}`,
 					},
 				],
-				details: { job_id: result.job_id, dispatch: { ...result.dispatch } },
+				details: { job_id: result.job_id, ...(result.dispatch ? { dispatch: { ...result.dispatch } } : { state: "queued", ...result.queued }) },
 			};
 		},
 	});
@@ -138,7 +139,8 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			driver: Type.Optional(
 				StringEnum(["pi", "claude", "codex"], {
 					description:
-						"Omit to let routing decide. \"pi\" pins this job to pi, bypassing native routing. \"claude\" runs a research job (delivery local or answer) on the installed Claude CLI; " +
+						"Omit to let routing decide: the CLI the settings name binds, and a full CLI queues the job, never another CLI. " +
+						"\"pi\" is refused when the job's row names claude or codex: your choice is not an override, only the operator's own per-job request is. \"claude\" runs a research job (delivery local or answer) on the installed Claude CLI; " +
 						"refused before any spawn unless the Settings switch is on, no other native worker is live and claude is the pinned version. " +
 						"\"codex\" runs a research job (delivery local or answer) on the installed Codex CLI, refused unless codex_research is on.",
 				}),
@@ -271,9 +273,10 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					throw error;
 				}
 				tc.refresh();
+				const waiting = waitingLabel(error) ?? "waiting for a worker slot";
 				return {
-					content: [{ type: "text", text: `queued (position ${position}): ${params.job_id} starts when a worker slot frees; the outcome arrives as a wake-up — do not re-dispatch` }],
-					details: { state: "queued", position, job_id: params.job_id },
+					content: [{ type: "text", text: `queued (position ${position}): ${params.job_id} ${waiting}; it starts when a slot frees, on the same CLI, and the outcome arrives as a wake-up — do not re-dispatch` }],
+					details: { state: "queued", position, job_id: params.job_id, waiting },
 				};
 			}
 			// A dispatch that started supersedes any armed request for the same job; a fault there never hides the dispatch.

@@ -969,6 +969,8 @@ export function formatRoutingDecision(decision: RoutingDecision): string {
 	const parts = [`source=${decision.source}`, `model=${decision.model}`, `rule=${decision.rule}`];
 	if (decision.thinking) parts.push(`thinking=${decision.thinking}`);
 	if (decision.driver) parts.push(`driver=${decision.driver}`);
+	const borrowed = /^borrowed: reviewer using held author's slot \(([^)]+)\)/.exec(decision.driver_reason ?? "")?.[1];
+	if (borrowed) parts.push(`slot="reviewer using held author's slot ${borrowed}"`);
 	if (decision.requested && decision.requested !== decision.model) parts.push(`requested=${decision.requested}`);
 	// cp-ot3b: an effort that differs from the one asked for must be legible at a
 	// glance. `thinking=high` after an operator asked for xhigh was previously
