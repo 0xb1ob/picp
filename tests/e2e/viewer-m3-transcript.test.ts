@@ -238,7 +238,7 @@ test("M3-nav: Chat, Jobs and More are the primary items on phone and desktop; ev
 	}
 });
 
-test("M3-shell: desktop Chat is one 261 px column of rail head, chats, status and icon navigation; other screens keep the 208 px rail; selects use the system sans", { timeout: 180_000 }, async (t) => {
+test("M3-shell: desktop Chat is one 261 px column of the shared sidebar head (search, Chat/Jobs/More), chats and status; other screens keep the 208 px rail; selects use the system sans", { timeout: 180_000 }, async (t) => {
 	const d = await viewer(t);
 	const css = await servedCss(d);
 	// Combine: negative control — the old 208 px rail beside a 281 px Chats column (56 px title row) fails here.
@@ -255,18 +255,31 @@ test("M3-shell: desktop Chat is one 261 px column of rail head, chats, status an
 	await tab.find(".shell-main > .sessions");
 	assert.equal(await until(() => tab.$(".shell-sidebar"), (rail) => rail === null, "the rail claim"), null, "Chat drops the shell's rail");
 	const column = tab.$(".session-sidebar")!;
-	// Full match S1 (design `.cvh`, `.inav`): brand and a search icon on top, the primary items as icons at the foot.
-	assert.deepEqual([...column.children].map((el) => el.getAttribute("class") ?? el.tagName), ["shell-rail-head", "session-sidebar-chats", "shell-sidebar-status", "shell-sidebar-nav shell-icon-nav"],
-		"rail head, chats, status, icon navigation in one column");
-	const search = tab.$(".shell-rail-head > .shell-rail-search")!;
-	assert.deepEqual([search.getAttribute("aria-label"), tab.$$('nav[aria-label="Desktop primary"] a').map((a) => [a.getAttribute("title"), a.textContent])],
-		["Search", [["Chat", "Chat"], ["Jobs", "Jobs"], ["More", "More"]]], "icons keep their names");
+	// cp-unify-sidebar: the other pages' head (brand, Search ⌘K, Chat/Jobs/More) sits above Operator, projects, Fleet.
+	// Negative control: the old icon-only rail (`shell-rail-head`, search icon, icon nav at the foot) fails here.
+	assert.deepEqual([...column.children].map((el) => el.getAttribute("class") ?? el.tagName), ["shell-brand", "shell-desktop-search", "shell-sidebar-nav", "session-sidebar-chats", "shell-sidebar-status"],
+		"sidebar head, chats, status in one column");
+	assert.deepEqual([...column.querySelectorAll(".session-sidebar-chats > section")].map((s) => s.getAttribute("aria-label") ?? s.querySelector("h2")?.textContent?.split(" ·")[0]), ["Operator", "Fleet"],
+		"Operator (with its project rows) and Fleet below the nav");
+	assert.ok(column.querySelector('.session-sidebar-chats [aria-label="Projects"]'), "project filters below the nav");
+	assert.deepEqual(column.querySelectorAll(".shell-icon-nav, .shell-rail-head, .shell-rail-search").length, 0, "no bottom-left icon buttons");
+	const search = column.querySelector(".shell-desktop-search")!;
+	assert.deepEqual([search.textContent, column.querySelectorAll('nav[aria-label="Desktop primary"]').length, tab.$$('.session-sidebar nav[aria-label="Desktop primary"] a').map((a) => [a.getAttribute("href"), a.textContent])],
+		["Search⌘K", 1, [["#sessions", "Chat"], ["#jobs", "Jobs"], ["#more", "More"]]], "one labelled nav block, as on other pages");
 	const proto = tab.window.HTMLElement.prototype as { showModal?: () => void; close?: () => void };
 	proto.showModal ??= function (this: Element) { this.setAttribute("open", ""); };
 	proto.close ??= function (this: Element) { this.removeAttribute("open"); };
 	tab.click(search);
 	await tab.find("dialog[open] .search-shortcuts a");
 	assert.equal(tab.$(".sessions > .page-header > h1")?.textContent, "Chats");
+	// Each nav link's own href opens its screen and lights itself; Chat brings the unified column back.
+	for (const [label, marker] of [["Jobs", ".shell-main > .jobs-screen"], ["More", ".shell-main > .more"], ["Chat", ".shell-main > .sessions"]] as const) {
+		const link = tab.$$('nav[aria-label="Desktop primary"] a').find((a) => a.textContent === label)!;
+		tab.go(link.getAttribute("href")!);
+		await tab.find(marker);
+		assert.equal(await until(() => tab.$('nav[aria-label="Desktop primary"] a[aria-current=page]')?.textContent, (lit) => lit === label, `${label} lit`), label);
+	}
+	assert.ok(await until(() => tab.$(".session-sidebar > .shell-sidebar-nav"), (nav) => nav !== null, "the column back"), "Chat keeps the shared nav block");
 	tab.go("#stats");
 	await tab.find(".shell-main > .stats");
 	assert.ok(await until(() => tab.$(".shell-sidebar .shell-sidebar-nav"), (nav) => nav !== null, "the rail back"), "leaving Chat restores the shell's rail");
