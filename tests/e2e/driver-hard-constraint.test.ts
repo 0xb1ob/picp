@@ -119,7 +119,7 @@ test("P3: an explicit codex on a claude or pi row and an explicit claude on a co
 const step = (name: string, args: Record<string, unknown>) => ({ kind: "tool_calls" as const, calls: [{ name, args }] });
 const ofType = (h: H, id: string, type: string) => readRunEvents(h.b.home, id).filter((event) => event.type === type);
 const waitEntries = (h: H) => (existsSync(join(h.b.home, LAYOUT.nativeWaitFile)) ? (JSON.parse(readFileSync(join(h.b.home, LAYOUT.nativeWaitFile), "utf8")) as { entries: unknown[] }).entries : []);
-/** Lowers codex to one slot once `holder` reported: two live codex jobs then fill it (CX-6f's trick, at a real boundary). */
+/** Lowers codex to one slot: two live codex jobs then fill it (CX-6f's trick, at a real boundary). */
 const lowerToOne = (h: H) => writeFileSync(h.nativeFile, JSON.stringify({ codex_research: true, codex_max_concurrent: 1 }));
 
 // Scenario (T5a, R4 respawn): Given a codex job that dies while another codex job fills the one slot, When bounded
@@ -160,8 +160,8 @@ test("T5a: a dead codex job's revive waits for Codex CLI capacity (no attempt sp
 });
 
 // Scenario (T5b, R5 continuation): Given two held codex jobs filling the one slot, When cp_send reaches one of them,
-// Then it is queued "waiting for Codex CLI capacity" (nothing sent, never pi); And once the other tears down the message
-// is delivered on codex, on the job's own thread, and it reports again.
+// Then it is queued "waiting for Codex CLI capacity" (nothing sent, never pi); And once the other tears down the
+// message is delivered on codex, on the job's own thread, and it reports again.
 test("T5b: a cp_send whose codex slot is full is queued and delivered on codex when the slot frees", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_max_concurrent: 2 } });
 	codexRow(h);

@@ -228,7 +228,7 @@ export async function assertNativeResume(input: { home: string; jobId: string; w
 	if (window) refuse(`the subscription window is spent (${window.why})`);
 }
 
-/** cp_revive's native admission: a recorded session (Codex: thread) id, then `assertNativeResume`; `full` names a full CLI. */
+/** cp_revive's native admission: a recorded session (Codex: thread) id, then `assertNativeResume`; `full` if full. */
 export async function nativeReviveRefusal(home: string, jobId: string, sessionFile: string): Promise<{ why: string; full?: NativeDriver } | undefined> {
 	try {
 		const session = readNativeSession(sessionFile);

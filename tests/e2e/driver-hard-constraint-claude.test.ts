@@ -26,7 +26,7 @@ type Tool = { toolName: string; isError?: boolean; result: { details?: Record<st
 const text = (end: Tool | undefined) => JSON.stringify(end?.result.content ?? "");
 const call = (id: string, args: Record<string, unknown> = {}) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", ...args } }] });
 
-/** PATH without any real `claude`: the shim dir (if any), `tools` (links to every other tool of a dir holding claude), the rest. */
+/** PATH without any real `claude`: the shim dir (if any), `tools` (links to a claude dir's other tools), the rest. */
 function pathWith(tools: string, shim?: string): string {
 	const dirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
 	for (const dir of dirs.filter((each) => existsSync(join(each, "claude")))) {
@@ -38,7 +38,7 @@ function pathWith(tools: string, shim?: string): string {
 	return [...(shim ? [shim] : []), tools, ...dirs.filter((dir) => !existsSync(join(dir, "claude")))].join(delimiter);
 }
 
-/** A home whose planner row names a Claude model with a pi fallback, then Workers CLI = claude through the settings writer. */
+/** A home whose planner row names a Claude model with a pi fallback, then Workers CLI = claude (settings writer). */
 async function claudeHome(t: TestContext) {
 	const b = await dispatchS29(t);
 	const script = `hard-claude-pi-${Math.random().toString(36).slice(2, 8)}`;
@@ -89,7 +89,7 @@ test("claude saturation: with Workers CLI claude and max_concurrent 1 full, a se
 });
 
 // T7 (R2): a pipeline whose planner row is on the full Claude CLI never starts that planner on pi: cp_pipeline start
-// returns queued "waiting for Claude CLI capacity" and the research job waits in the dispatch queue (its replay is T1's).
+// returns queued "waiting for Claude CLI capacity"; the research job waits in the dispatch queue (replay: T1).
 test("T7: cp_pipeline start on a full Claude CLI queues its planner waiting for Claude CLI capacity, never pi", { timeout: 300_000 }, async (t) => {
 	const h = await claudeHome(t);
 	const holder = await h.job();
@@ -198,11 +198,10 @@ test("P3: an explicit claude on a pi or codex row refuses; the human's claude pi
 	h.piUntouched();
 });
 
-// Scenario (T9, T10, T11 — ruling ps-20261123080922): Given the default claude config (claude_ship and claude_review on,
-// max_concurrent 1) and a held, idle native ship job X, When cp_review X runs, Then its reviewer runs on claude in X's
-// slot ("reviewer using held author's slot X") and a verdict lands — no deadlock; And while it runs a cp_send to X is
-// queued "its reviewer is using the held author's slot" and an unrelated claude job queues for capacity (no borrow, no
-// pi); And after the verdict the send is delivered to X on claude and X reports again, the unrelated job still waiting.
+// T9-T11 (ruling ps-20261123080922): at the default claude max_concurrent 1, a held idle ship job X lends its slot to
+// its own reviewer (routing line names it; a verdict lands, no deadlock). Meanwhile a cp_send to X queues (its reviewer
+// uses the held author's slot) and an unrelated claude job queues with no borrow and no pi; after the verdict the send
+// reaches X on claude and X reports again, while the unrelated job still waits.
 test("T9/T10/T11: a held claude author lends its slot to its own reviewer; a send waits for the verdict, an unrelated job keeps waiting", { skip, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const release = { file: "" };

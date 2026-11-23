@@ -30,7 +30,7 @@ export const reserveReviewerSlot = (home: string, jobId: string, driver: NativeD
 
 const reviewerSlot = (jobId: string): string => `${jobId}/review`;
 
-/** cp-912x ruling: a held, idle author's slot, lent to its own reviewer only (same CLI: the resolver counts per CLI). */
+/** cp-912x ruling: a held, idle author's slot, lent to its own reviewer only (same CLI: the resolver counts per CLI) */
 function lender(ctx: ReviewerDriverContext): string | undefined {
 	const record = ctx.record;
 	if (!record || record.phase !== "held" || isScriptFleetRecord(record) || record.worker.driver === undefined) return undefined;

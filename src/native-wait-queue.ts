@@ -1,8 +1,7 @@
 /**
- * cp-912x R6: the persisted wait queue for work on an existing job that a full CLI keeps waiting — a review or gate
- * start, a revive, a send, a pipeline advance (`state/native-wait.json`). Never another CLI: each entry replays its full
- * entry point, FIFO per CLI, on the same CLI when a slot frees, before the dispatch queue's new jobs. Only the lock
- * owner drains; nothing drains during a home drain. Every outcome but "still full" wakes the parent.
+ * cp-912x R6 (`state/native-wait.json`): a review, gate, revive, send or pipeline advance a full CLI keeps waiting,
+ * replayed FIFO per CLI on that same CLI, never another, before the dispatch queue's new jobs. Only the lock owner
+ * drains, never during a home drain; every outcome but "still full" wakes the parent.
  */
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -195,7 +194,7 @@ const sameEntry = (a: NativeWaitEntry, b: NativeWaitEntry): boolean => a.kind ==
 
 type ReplayPost = Pick<CommandPost, "diffReviewModule" | "gateModule" | "reviewRuns" | "revive" | "sender" | "pipeline"> & { fleet: { get(id: string): FleetRecord | undefined } };
 
-/** Each kind's full entry point, re-run without queueing again: a still-full CLI throws `occupied` and keeps the head. */
+/** Each kind's full entry point, re-run without queueing again: a still-full CLI throws `occupied` (head kept). */
 export function replayOn(post: ReplayPost): (entry: NativeWaitEntry) => Promise<string> {
 	return async (entry) => {
 		const r = entry.request;

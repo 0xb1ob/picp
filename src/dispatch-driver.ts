@@ -1,6 +1,7 @@
 /**
  * Native routing S1: which driver a dispatch runs on. A rubric row's `driver` binds (cp-qmry: never another CLI, a
- * full one queues), a started job keeps its driver (D1). Each driver's spec (src/drivers/registry.ts) decides eligibility.
+ * full one queues), a started job keeps its driver (D1). Each driver's spec (src/drivers/registry.ts) decides
+ * eligibility.
  */
 import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision, type RoutingDriver } from "./contracts.ts";
 import { liveNativeJobs, nativeBaseEnv, NativeDriverError, type NativeRefusal, nativeSlotRefusal, nativeThinkingEnv } from "./drivers/claude.ts";
@@ -166,7 +167,7 @@ function slotRefusal(ctx: DriverContext, driver: NativeDriver): { category: Nati
 	return nativeSlotRefusal(holders, ctx.jobId, spec.maxConcurrent(ctx.home), "live or being admitted", spec.noun);
 }
 
-/** Keys of this parent's live native workers other than `except`'s, per driver: reviewers hold a slot without a record. */
+/** Keys of this parent's live native workers other than `except`'s, per driver: reviewers hold slots, no record. */
 export function liveNativeWorkers(manager: Pick<WorkerManager, "active">, except: string): Partial<Record<NativeDriver, string[]>> {
 	const live: Partial<Record<NativeDriver, string[]>> = {};
 	for (const worker of manager.active) if (worker.driver !== undefined && worker.key !== except) (live[worker.driver] ??= []).push(worker.key);

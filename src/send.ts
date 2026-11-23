@@ -135,7 +135,7 @@ export interface SendResult {
 	risk_warning?: string;
 	/** N3c: what a native send actually did (resumed, queued until the turn ends, or a Codex turn/steer acked, C2b). */
 	native?: string;
-	/** cp-912x R5: the message waits for this CLI's capacity (`state/native-wait.json`), delivered on it when a slot frees. */
+	/** cp-912x R5: the message waits for this CLI's slot (`state/native-wait.json`), delivered on it when a slot frees */
 	waiting?: string;
 }
 

@@ -12,7 +12,7 @@ export const NATIVE_WAIT_MAX = 32;
 export const NATIVE_WAIT_KINDS = ["review", "gate", "revive", "send", "pipeline-advance"] as const;
 export type NativeWaitKind = (typeof NATIVE_WAIT_KINDS)[number];
 
-/** What a replay re-runs with (snake_case, like the tool parameters); the send body lives in the run dir, never here. */
+/** What a replay re-runs with (snake_case, like tool parameters); the send body lives in the run dir, never here. */
 export const NativeWaitRequestSchema = Type.Object(
 	{
 		model: Type.Optional(Type.String({ minLength: 1 })),

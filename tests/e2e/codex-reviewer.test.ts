@@ -239,7 +239,7 @@ test("CX-6d: switches off, a codex reviews row refuses by name (never pi) and no
 });
 
 // Scenario (cp-912x T8, R3): Given a live codex research job holding the one codex slot, When cp_review runs on held
-// subjects S1 then S2, Then both return state: queued "waiting for Codex CLI capacity" with no attempt claimed and no pi
+// subjects S1 then S2, Then both return state: queued "waiting for Codex CLI capacity", no attempt claimed, no pi
 // reviewer; And once that job tears down S1's review runs on codex, then S2's (FIFO on the same CLI).
 test("CX-6e/T8: reviews that find the codex slot full queue FIFO for Codex CLI capacity and run on codex when it frees, never pi", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_review: true } });
