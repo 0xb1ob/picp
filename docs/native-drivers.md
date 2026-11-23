@@ -634,8 +634,8 @@ refusal) and never runs pi. An explicit or locked native job is refused by name 
 
 1. Back up both files with dated copies, e.g. `cp data/routing.json data/routing.json.2026-11-06.bak` and
    `cp data/native.json data/native.json.2026-11-06.bak`.
-2. In `data/routing.json`, set `driver: "claude"` on the `risky-ship`, `big-ship`, `small-ship` and `reviews` rows
-   (each keeps its explicit `anthropic/claude-…` model).
+2. In `data/routing.json`, set `driver: "claude"` on the `implementer-small`, `implementer-default` and `reviews` rows
+   (before cp-4iyy: `risky-ship`, `big-ship`, `small-ship`; each keeps its explicit `anthropic/claude-…` model).
 3. In `data/native.json`, set `claude_ship` and `claude_review` to `true`. Leave `max_concurrent` at 1 at first.
 4. Raise `max_concurrent` only after 5 native ship jobs show no `allowed_warning` in the availability snapshot (S2).
 

@@ -10,7 +10,7 @@
  * stops `ask_on: [risk:high]` from dispatching — it becomes a one-line warning
  * naming the matched keywords and where the low was recorded, carried on the
  * result, in the run journal and relayed by the cp-bridge. Routing is
- * unchanged: it may still pick the risky-ship tier on the inferred high. A high
+ * unchanged: the inferred high still keeps the job off a risk-low row. A high
  * that was `explicit` or `assessed` gates exactly as before, and a recorded or
  * declared high (riskkw-f10) gates, routes high and beats every low.
  *

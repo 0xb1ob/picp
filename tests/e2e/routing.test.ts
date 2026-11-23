@@ -127,9 +127,8 @@ test("P16-route-default: the scaffolded template routes every role and size as d
 	// The documented table: [profile, scope, risk] -> [source, rule, model, thinking] on the shipped template.
 	const want = (profile: string, scope: string, risk: string): [string, string, string, string] => {
 		if (profile === "gate-reviewer") return ["rubric", "reviews", OPUS, "high"];
-		if (profile === "implementer") return risk === "high" ? ["rubric", "risky-ship", OPUS, "high"] : scope === "S" ? ["rubric", "small-ship", SONNET, "high"] : ["rubric", "big-ship", OPUS, "medium"];
-		if (risk === "high") return ["rubric", "risky-any", OPUS, "xhigh"];
-		return scope === "L" ? ["rubric", "research-big", OPUS, "high"] : ["rubric", "planner-default", OPUS, profile === "qa" ? "low" : "medium"];
+		if (profile === "implementer") return scope === "S" && risk === "low" ? ["rubric", "implementer-small", SONNET, "high"] : ["rubric", "implementer-default", OPUS, "medium"];
+		return ["rubric", "planner-default", OPUS, profile === "qa" ? "low" : "medium"];
 	};
 	const anthropic = await parent(b, { phases: [{ calls: grid }], doctor: true, env: { ANTHROPIC_API_KEY: "sk-ant-test" } });
 	assert.equal(readFileSync(join(b.home, LAYOUT.routingFile), "utf8"), SHIPPED, "session start copies the shipped template");
@@ -140,7 +139,7 @@ test("P16-route-default: the scaffolded template routes every role and size as d
 	}
 	assert.deepEqual(routes.slice(0, 4).map((p) => p.profile), ["implementer", "planner", "gate-reviewer", "qa"]);
 	assert.equal(said(routes.at(-1)!), `source=override model=${OPUS} rule=explicit override (model+effort) thinking=xhigh effort=override`);
-	assert.deepEqual(findings(anthropic.doctor, "config.routing").map((f) => [f.severity, f.what, f.detail]), [["ok", "routing config: 7 rubric row(s)", "allow: */*"]]);
+	assert.deepEqual(findings(anthropic.doctor, "config.routing").map((f) => [f.severity, f.what, f.detail]), [["ok", "routing config: 4 rubric row(s)", "allow: */*"]]);
 	assert.deepEqual(findings(anthropic.doctor, "config.routing.effort").map((f) => f.severity), ["ok"]);
 	assert.deepEqual(findings(anthropic.doctor, "config.routing.shadowed"), [], "the shipped template has no dead row");
 	assert.ok(!anthropic.notes.some((note) => note.startsWith("routing:")), "a clean shipped home gets no routing nudge");
@@ -158,7 +157,7 @@ test("P16-route-default: the scaffolded template routes every role and size as d
 
 	// Nothing authenticated: the dispatch is refused before any lease, naming every rung and its gate.
 	const none = await parent(b, { phases: [{ calls: grid.slice(0, 2) }], doctor: true });
-	assert.match(said(none.previews[0]![0]!), new RegExp(`no usable model for implementer job ${ship}: every candidate for rubric row small-ship was refused — ${SONNET} \\(availability\\), ${OPUS} \\(availability\\), ${SOL} \\(availability\\)`));
+	assert.match(said(none.previews[0]![0]!), new RegExp(`no usable model for implementer job ${ship}: every candidate for rubric row implementer-small was refused — ${SONNET} \\(availability\\), ${OPUS} \\(availability\\), ${SOL} \\(availability\\)`));
 	assert.match(said(none.previews[0]![1]!), new RegExp(`every candidate for rubric row planner-default was refused — ${OPUS} \\(availability\\), ${SOL} \\(availability\\)`));
 	assert.equal(none.previews[0]![0]!.decision, undefined);
 	assert.ok(findings(none.doctor, "models.implementer").every((f) => f.severity === "error" && f.what === "implementer: every candidate refused"));
@@ -209,8 +208,8 @@ test("P16-route-migrate: a rubric that left a role to its profile gets one defau
 	// [rule, model, thinking]; undefined is a cell that fell through to the profile on main.
 	type Route = [string, string, string] | undefined;
 	const shipped = (role: string, scope: string, risk: string): Route => role === "gate-reviewer" ? ["reviews", OPUS, "high"]
-		: role === "implementer" ? (risk === "high" ? ["risky-ship", OPUS, "high"] : scope === "S" ? ["small-ship", SONNET, "high"] : ["big-ship", OPUS, "medium"])
-		: risk === "high" ? ["risky-any", OPUS, "xhigh"] : scope === "L" ? ["research-big", OPUS, "high"] : undefined;
+		: role === "implementer" ? (scope === "S" && risk === "low" ? ["implementer-small", SONNET, "high"] : ["implementer-default", OPUS, "medium"])
+		: undefined;
 	const old = (role: string, scope: string, risk: string): Route => role === "planner"
 		? (risk === "high" ? ["risky-any", "anthropic/claude-opus-5", "xhigh"] : ["research", "anthropic/claude-opus-5", "medium"])
 		: role === "implementer" && scope === "S" ? ["small-ship", "anthropic/claude-haiku-4-5", "low"] : undefined;

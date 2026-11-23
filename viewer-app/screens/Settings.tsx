@@ -19,7 +19,7 @@ const PEOPLE_MODELS: SettingKey[] = ["models.parent_driver", "models.parent", "m
 const ROUTING: SettingKey[] = ["models.rubric", "workers.driver"];
 const CLI_LABEL: Record<string, string> = {pi: "pi", claude: "Claude CLI", codex: "Codex CLI"};
 /** The shipped and flip-era rubric ids in words; any other row shows its id alone. */
-const ROW_LABEL: Record<string, string> = {"planner-default": "Planner", "small-ship": "Small ship", "big-ship": "Big ship", "risky-any": "Risky (any job)", "risky-ship": "Risky ship", reviews: "Reviews", "research-big": "Big research", "native-research": "Native research"};
+const ROW_LABEL: Record<string, string> = {"planner-default": "Planner", "implementer-small": "Small implementer", "implementer-default": "Implementer", "small-ship": "Small ship", "big-ship": "Big ship", "risky-any": "Risky (any job)", "risky-ship": "Risky ship", reviews: "Reviews", "research-big": "Big research", "native-research": "Native research"};
 const rowName = (id: string) => ROW_LABEL[id] ? `${ROW_LABEL[id]} (${id})` : id;
 const GRANTS: SettingKey[] = ["grants.expiry_hours", "grants.spend_usd", "grants.spend_tokens", "grants.token_ceiling", "grants.job_cap", "grants.dispatch_parallelism", "grants.allowed_actions", "grants.ask_on", "grants.exclude_paths"];
 const COMPACTION: SettingKey[] = ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"];

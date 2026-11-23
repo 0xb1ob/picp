@@ -4808,7 +4808,7 @@ latter frozen on `task_impact`, the value `cp_pipeline classify` advises), or a
 planner `self_assessment` with `destructive_scope: false` and no
 `blocking_unknowns`/low confidence. `composeImplementationRouting` hands it to the
 implementer dispatch as `DispatchRequest.recordedRisk`, never as routing input:
-routing still infers from the ship job's words and may pick the risky-ship tier.
+routing still infers from the ship job's words, and an inferred high keeps it off a risk-low row.
 A pipeline axis is a record only when it was `explicit` or `assessed`: a `defaulted`
 axis (nobody named a risk at `cp_pipeline start`) and an `inferred` one are not
 records, so a standing low can never warn a high away, and the planner's own half is
@@ -9637,11 +9637,10 @@ candidates and the capability evidence behind them are in
 [`docs/routing-rollout.md`](routing-rollout.md); with Anthropic authenticated
 every route resolves to its preferred candidate, with no `attempted` list.
 
-Rows are matched in order, so the narrow ones come first: the two `risk: "high"`
-rows before the size rows. The planner rows resolve to the same model and
-differ only in `thinking` — kept explicit rather than collapsed, because each row
-documents an operator decision and a later model change is then a one-row edit.
-Add `"project": "<registered name>"` to
+Rows are matched in order, so the narrow one comes first: `implementer-small`
+(scope S **and** risk low) before `implementer-default`, so S/high work stays off
+the small model. The template has one row per role otherwise (cp-4iyy: risk and
+size no longer pick the planner's model or effort). Add `"project": "<registered name>"` to
 a row to make it apply in one repository only.
 
 **Ordinary planning and ordinary QA share one last planner row, `planner-default`,
@@ -9652,9 +9651,8 @@ each profile's own `thinking` still separates them. What each case resolves to:
 | case | source | model | effort |
 |---|---|---|---|
 | QA (`cp_ask`, S/low) | rubric `planner-default` | Opus 5.5 | `low` (`profiles/qa.md`) |
-| ordinary planning (S or M, low risk) | rubric `planner-default` | Opus 5.5 | `medium` (`profiles/planner.md`) |
-| planning, scope L, low risk | rubric `research-big` | Opus 5.5 | `high` |
-| planning, any scope, high risk | rubric `risky-any` | Opus 5.5 | `xhigh` |
+| planning, any scope or risk | rubric `planner-default` | Opus 5.5 | `medium` (`profiles/planner.md`) |
+| ops, any scope or risk | rubric `planner-default` | Opus 5.5 | `medium` (`profiles/ops.md`) |
 | explicit `model`/`thinking` override | `override` | as named | as named |
 
 **History.** cp-routing-t4 removed the template's broad `research` catch-all,
