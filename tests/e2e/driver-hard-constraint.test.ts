@@ -284,10 +284,8 @@ function fileResearch(post: CommandPost, h: H, id: string): void {
 
 const VOTE = (id: string) => ({ job_id: id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["reviewed the packet"] });
 
-// Scenario (R3, quality): Given a pipeline opted into the quality panel, its reviewer row on codex, and a codex job
-// holding the one slot, When the advance starts the panel, Then it queues as kind "quality" "waiting for Codex CLI
-// capacity" (without QualityPass's wait it would queue a "pipeline-advance"); And once the slot frees the panel
-// replays (nativeReplay) and its voter votes on codex, never pi.
+// Scenario (R3): a pipeline's quality panel on a full codex queues as kind "quality" (without QualityPass's wait: a
+// "pipeline-advance"); once the slot frees it replays (nativeReplay) and its voter votes on codex, never pi.
 test("R3-quality: a quality panel start on a full codex queues as quality and replays its voter on codex when the slot frees", { skip: ciSkip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_review: true } });
 	const planner = h.b.provider.addScript("r3q-plan", [{ kind: "text", text: "Planned." }], { onExhausted: "repeat" });
@@ -337,10 +335,8 @@ function seedRecoveryAttempt(h: H, jobId: string, dependents: [string, string]):
 	return attempt_id;
 }
 
-// Scenario (R3, recovery gate): Given a codex job holding the one slot and a prepared recovery attempt, When cp_gate
-// runs with recovery_attempt_id, Then it queues as kind "gate" carrying that id (orWait), nothing claimed; And once the
-// slot frees the replay re-reads the attempt through recoveryGateRequest, claims the next ordinal and re-validates it:
-// this fixture's attempt names no recorded authority, so it is invalidated and no reviewer runs on any CLI.
+// Scenario (R3): cp_gate with recovery_attempt_id on a full codex queues as kind "gate" with that id, nothing claimed;
+// the replay re-reads, claims and re-validates the attempt (no recorded authority here: invalidated, no reviewer runs).
 test("R3-recovery-gate: a recovery gate on a full codex queues with its attempt id and replays with the attempt re-read", { skip: ciSkip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_review: true } });
 	h.reviewsRow(h.b.provider.addScript("r3g-pi", [{ kind: "text", text: "unused" }]));
@@ -349,12 +345,12 @@ test("R3-recovery-gate: a recovery gate on a full codex queues with its attempt 
 	const attemptId = seedRecoveryAttempt(h, subject.id, [first.id, second.id]);
 	const runDir = join(h.b.home, paths.runDir(subject.id));
 	const terminal = join(runDir, `recovery-attempt-${attemptId}-terminal.json`);
-	const snapshot = join(h.state, "native-wait-snapshot.json");
+	const [snapshot, listing] = [join(h.state, "native-wait-snapshot.json"), join(h.state, "run-dir-while-queued.txt")];
 	h.setScript({ turns: [h.reporting(holder.id)] });
 	const ends = await h.run([
 		holder.dispatch(), h.awaitEnvelope(holder.id),
 		step("cp_gate", { job_id: subject.id, recovery_attempt_id: attemptId }),
-		step("bash", { command: `cp '${join(h.b.home, LAYOUT.nativeWaitFile)}' '${snapshot}'` }),
+		step("bash", { command: `cp '${join(h.b.home, LAYOUT.nativeWaitFile)}' '${snapshot}' && ls -1 '${runDir}' > '${listing}'` }),
 		step("cp_teardown", { job_id: holder.id }), h.awaitFile(terminal), h.pause(2),
 	]);
 	const gate = ends.find((end) => end.toolName === "cp_gate");
@@ -363,6 +359,8 @@ test("R3-recovery-gate: a recovery gate on a full codex queues with its attempt 
 		["queued", "gate", 1, "waiting for Codex CLI capacity"], text(gate));
 	const queued = (JSON.parse(readFileSync(snapshot, "utf8")) as { entries: Array<{ kind: string; job_id: string; driver: string; request: { recovery_attempt_id?: string } }> }).entries;
 	assert.deepEqual(queued.map((entry) => [entry.kind, entry.job_id, entry.driver, entry.request.recovery_attempt_id]), [["gate", subject.id, "codex", attemptId]]);
+	const whileQueued = readFileSync(listing, "utf8").split("\n").filter(Boolean);
+	assert.deepEqual(whileQueued.filter((name) => /^gate-\d+-standing\.json$/.test(name)), [], `the queued gate claimed an ordinal: ${JSON.stringify(whileQueued)}`);
 	// The replay, not the refused start, claimed a gate ordinal for this attempt and re-validated its authority.
 	const standing = readdirSync(runDir).filter((name) => /^gate-\d+-standing\.json$/.test(name));
 	assert.equal(standing.length, 1, JSON.stringify(readdirSync(runDir)));

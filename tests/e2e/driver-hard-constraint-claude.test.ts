@@ -268,24 +268,23 @@ test("T9/T10/T11: a held claude author lends its slot to its own reviewer; a sen
 const ciSkip = process.env.CI === "true" ? false : skip;
 
 /**
- * A pass-through `git` first on PATH that logs each fetch with its parent's name: `treehouse get` fetches on every
- * lease, so only a fetch from another parent (picp's preflight runs in this process) is a fetch:false violation.
+ * A pass-through `git` first on PATH that logs each fetch with its parent pid. `treehouse get` (however wrapped)
+ * fetches on every lease from its own process; only a fetch this process spawns (picp's preflight) breaks fetch:false.
  */
-function fetchLog(dir: string): { bin: string; fetches: () => Array<{ parent: string; args: string }> } {
+function fetchLog(dir: string): { bin: string; fetches: () => Array<{ ownProcess: boolean; args: string }> } {
 	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 	const [bin, log] = [join(dir, "git-shim"), join(dir, "git-fetches.log")];
 	mkdirSync(bin);
-	writeFileSync(join(bin, "git"), `#!/bin/sh\ncase " $* " in *" fetch "*) printf '%s\\t%s\\n' "$(cat /proc/$PPID/comm)" "$*" >> '${log}';; esac\nexec '${real}' "$@"\n`, { mode: 0o755 });
+	writeFileSync(join(bin, "git"), `#!/bin/sh\ncase " $* " in *" fetch "*) printf '%s\\t%s\\n' "$PPID" "$*" >> '${log}';; esac\nexec '${real}' "$@"\n`, { mode: 0o755 });
 	const fetches = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => {
 		const [parent = "", args = ""] = line.split("\t");
-		return { parent, args };
+		return { ownProcess: parent === String(process.pid), args };
 	}) : []);
 	return { bin, fetches };
 }
 
-// Scenario (R2, fetch:false): Given a held claude job filling the one Claude CLI slot, When a pipeline starts its
-// claude planner with fetch:false, Then it queues with fetch:false in its dispatch-queue entry (the contract); And once
-// the slot frees it starts on claude and picp's preflight never runs `git fetch` (treehouse's lease still does).
+// Scenario (R2): a pipeline planner started with fetch:false on a full Claude CLI queues with fetch:false (contract)
+// and, once the slot frees, starts on claude with no preflight `git fetch` (treehouse's lease still fetches).
 test("R2-fetch: a pipeline planner queued with fetch:false on a full Claude CLI keeps fetch:false when it starts on claude", { skip: ciSkip, timeout: 300_000 }, async (t) => {
 	const ids = { holder: "" };
 	const research = (id: string) => ({ job_id: id, kind: "research", status: "done", summary: "Native research done.", artifact_path: join(h.b.home, paths.artifactFile(id)),
@@ -317,6 +316,6 @@ test("R2-fetch: a pipeline planner queued with fetch:false on a full Claude CLI 
 	assert.deepEqual([record?.worker.role, record?.routing?.driver], ["planner", "claude"]);
 	await waitFor(() => queue().length, (left) => left === 0, { timeoutMs: 30_000, what: "the started planner leaving the dispatch queue" });
 	const replayed = git.fetches().slice(leased);
-	assert.ok(replayed.some((fetch) => fetch.parent === "treehouse"), `the shim saw the replay's lease fetch: ${JSON.stringify(replayed)}`);
-	assert.deepEqual(replayed.filter((fetch) => fetch.parent !== "treehouse"), [], "the replayed planner's preflight fetched origin");
+	assert.ok(replayed.some((fetch) => !fetch.ownProcess), `the shim saw the replay's lease fetch: ${JSON.stringify(replayed)}`);
+	assert.deepEqual(replayed.filter((fetch) => fetch.ownProcess), [], "the replayed planner's preflight fetched origin");
 });
