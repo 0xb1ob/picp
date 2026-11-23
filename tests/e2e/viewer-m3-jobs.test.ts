@@ -98,15 +98,15 @@ test("M3-jobs-drawer: chat Cmd+J opens the Jobs drawer; segments and the M1 filt
 	const field = await tab.find(".operator-composer textarea") as unknown as HTMLElement & { value: string };
 	tab.type(field as unknown as Element, "KEEP-DRAFT");
 	field.focus();
-	const trigger = await tab.find(".session-filter > .workspace-jobs-open");
+	await tab.find(".session-filter > .workspace-context-open");
 	// Full match S2: the chat's context reads /api/jobs once (exact-id join); the closed drawer reads nothing more.
-	assert.deepEqual([trigger.textContent, trigger.getAttribute("aria-expanded"), tab.$(DRAWER), await until(() => reads(tab), (n) => n > 0, "the context read")], ["Jobs⌘J", "false", null, 1], "closed: one trigger, one context read");
-	assert.deepEqual([trigger.closest("header.session-heading") !== null, trigger.getAttribute("title")], [true, "Jobs (Ctrl/⌘ J)"], "Full match S1: Jobs ⌘J sits in the compact header");
+	assert.deepEqual([tab.$(DRAWER), await until(() => reads(tab), (n) => n > 0, "the context read")], [null, 1], "closed: one context read");
+	// The header's "Jobs ⌘J" button was removed on request; Ctrl/⌘ J and the context's All jobs open the drawer.
+	assert.deepEqual([tab.$(".workspace-jobs-open"), tab.$$(".session-filter > *").length], [null, 1], "the compact header keeps only Context");
 
 	for (const modifier of ["metaKey", "ctrlKey"] as const) {
 		assert.equal(chord(tab, "j", modifier), true, `${modifier}+J is the chat's`);
 		await tab.find(`${DRAWER}[open] .workspace-jobs-row`);
-		assert.equal(trigger.getAttribute("aria-expanded"), "true", `${modifier}+J opens the drawer from the header's opener`);
 		assert.deepEqual(headings(tab), ["In flight · 2", "With the team · 1", "Done today · 1"], "every group, newest done first");
 		assert.equal(tab.$$(DRAWER).length, 1);
 		assert.equal(chord(tab, "J", modifier), true, "the same chord closes it");
@@ -141,10 +141,11 @@ test("M3-jobs-drawer: chat Cmd+J opens the Jobs drawer; segments and the M1 filt
 	assert.equal(escape(tab), true, "Full match S1: Escape next closes the inspector the chat opened by default");
 	await until(() => tab.$(".workspace-context"), (el) => el === null, "Escape to close the inspector");
 	assert.equal(escape(tab), false, "with nothing open Escape is not the chat's");
-	tab.click(trigger);
+	field.focus();
+	chord(tab, "j");
 	(await tab.find(`${DRAWER}[open]`)).dispatchEvent(new tab.window.Event("cancel", { cancelable: true }));
 	await until(() => tab.$(DRAWER), (el) => el === null, "the dialog's cancel to close it");
-	assert.ok(focused() === trigger, "the button gets its own focus back");
+	assert.ok(focused() === field, "the opener gets its own focus back");
 });
 
 test("M3-jobs-pane: a picked job opens beside the chat with its P2 review guide and P1 Ask; Escape closes it; Full page is the route", { timeout: 180_000 }, async (t) => {
@@ -152,9 +153,10 @@ test("M3-jobs-pane: a picked job opens beside the chat with its P2 review guide 
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	const focused = browserShims(t, tab);
 	await tab.waitText(/REPLY-CARD/);
-	tab.type(await tab.find(".operator-composer textarea"), "KEEP-DRAFT");
-	const trigger = await tab.find(".workspace-jobs-open");
-	tab.click(trigger);
+	const trigger = await tab.find(".operator-composer textarea") as unknown as HTMLElement;
+	tab.type(trigger as unknown as Element, "KEEP-DRAFT");
+	trigger.focus();
+	chord(tab, "j");
 	tab.click(await tab.find(".workspace-jobs-row", (b) => b.textContent!.includes("cp-park")));
 	const pane = await tab.find(".sessions > section.workspace-job");
 	await tab.find(".workspace-job .review-guide");
@@ -170,7 +172,7 @@ test("M3-jobs-pane: a picked job opens beside the chat with its P2 review guide 
 	await until(() => tab.$(".workspace-job"), (el) => el === null, "Escape to close the pane");
 	assert.ok(focused() === trigger, "focus returns to the opener");
 
-	tab.click(trigger);
+	chord(tab, "j");
 	tab.click(await tab.find(".workspace-jobs-row", (b) => b.textContent!.includes("cp-park")));
 	const ask = await tab.find(".workspace-job a.evidence-ask", (a) => a.textContent === "Ask about this job");
 	const ref = JSON.parse(new URLSearchParams(ask.getAttribute("href")!.split("?")[1]).get("ref")!);
@@ -187,7 +189,7 @@ test("M3-jobs-scope: Cmd+J belongs to the operator chat only; elsewhere it is un
 	await tab.waitText(/REPLY-CARD/);
 	for (const hash of ["#jobs", "#overview", "#sessions?view=parent", "#job/cp-park"]) {
 		tab.go(hash);
-		await until(() => tab.$(".workspace-jobs-open"), (el) => el === null, `${hash} without the chat`);
+		await until(() => tab.$(".workspace-context-open"), (el) => el === null, `${hash} without the chat`);
 		await settle();
 		assert.equal(chord(tab, "j"), false, `${hash}: J is not prevented`);
 		await settle();
@@ -200,14 +202,14 @@ test("M3-jobs-scope: Cmd+J belongs to the operator chat only; elsewhere it is un
 	await until(() => tab.$("dialog"), (el) => el === null, "search to close");
 
 	tab.go(CHAT);
-	await tab.find(".workspace-jobs-open");
+	await tab.find(".workspace-context-open");
 	await settle();
 	assert.equal(chord(tab, "j"), true);
 	await tab.find(`${DRAWER}[open]`);
 	assert.equal(tab.$$(DRAWER).length, 1, "one drawer after a remount");
 	assert.equal(chord(tab, "j"), true);
 	await until(() => tab.$(DRAWER), (el) => el === null, "one listener: the second press closes it");
-	tab.click(tab.$(".workspace-jobs-open")!);
+	tab.click(tab.$(".workspace-context-jobs")!);
 	await tab.find(`${DRAWER}[open]`);
 	assert.equal(chord(tab, "k"), true, "K opens search over the drawer");
 	await until(() => tab.$$("dialog[open]").length, (n) => n === 2, "search on top");
@@ -275,7 +277,7 @@ test("M3-jobs-reply-log: a reply's job link opens the job's Transcript in the pa
 	assert.ok(focused() === rollup);
 
 	tab.go(CHAT); // All projects: the drawer lists cp-park again
-	tab.click(tab.$(".workspace-jobs-open")!);
+	chord(tab, "j");
 	tab.click(await tab.find(".workspace-jobs-row", (b) => b.textContent!.includes("cp-park")));
 	await pane("cp-park");
 	assert.equal(await tabOf(), "details", "a drawer pick keeps the pane's Details default");
@@ -431,7 +433,8 @@ test("M3-jobs-query (full match S3): Today/In flight, project and query narrow c
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	const focused = browserShims(t, tab);
 	await tab.waitText(/REPLY-CARD/);
-	tab.click(await tab.find(".workspace-jobs-open"));
+	await tab.find(".workspace-context-open");
+	chord(tab, "j");
 	await tab.find(`${DRAWER}[open] .workspace-jobs-row`);
 	const segments = () => tab.$$(`${DRAWER} .jobs-segments button`).map((b) => b.textContent);
 	const ids = (group: string) => tab.$$(`${DRAWER} section[aria-label="${group}"] .workspace-jobs-row`).map((b) => b.getAttribute("data-job"));
@@ -506,7 +509,7 @@ test("M3-jobs-query (full match S3): Today/In flight, project and query narrow c
 	assert.match(tab.$(".workspace-job .review-guide")!.textContent!, /GUIDE-NOTE/, "P2 retained");
 	assert.equal(escape(tab), true);
 	await until(() => tab.$(".workspace-job"), (el) => el === null, "Escape to close the pane");
-	tab.click(tab.$(".workspace-jobs-open")!);
+	chord(tab, "j");
 	await tab.find(`${DRAWER}[open]`);
 	assert.deepEqual([(tab.$(`${DRAWER} input[type="search"]`) as unknown as { value: string }).value, tab.$(`${DRAWER} .workspace-full`)!.getAttribute("href")], ["", "#jobs"],
 		"a reopened drawer starts unfiltered; Full page keeps its route");
@@ -519,7 +522,7 @@ test("M3-jobs-css: phone bottom sheet from y96 and full-screen job; desktop 861 
 	const d = await start(t);
 	const css = (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
 	const rule = (sheet: string, selector: string) => [...sheet.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
-	const split = css.indexOf("@media(min-width:900px){.workspace-jobs-open>kbd"), wide = css.indexOf("@media(min-width:1280px){.sessions:has(>.workspace-job)");
+	const split = css.indexOf("@media(min-width:900px){.workspace-jobs{inset"), wide = css.indexOf("@media(min-width:1280px){.sessions:has(>.workspace-job)");
 	assert.ok(split > 0 && wide > split, "the 900 px switch, then 1280 px");
 	const [phone, desktop, beside] = [css.slice(0, split), css.slice(split, wide), css.slice(wide)];
 	assert.match(rule(phone, ".workspace-jobs"), /border-radius:18px 18px 0 0/, "phone: a bottom sheet with the design's 18 px radius");

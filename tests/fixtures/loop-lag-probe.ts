@@ -1,5 +1,5 @@
 /** Fixture: from session start, writes the parent's worst event-loop lag so far to `CP_TEST_LAG_FILE` every tick. */
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const TICK_MS = 20;
@@ -18,7 +18,9 @@ export default function (pi: ExtensionAPI) {
 			max = Math.max(max, now - last - TICK_MS);
 			last = now;
 			ticks += 1;
-			writeFileSync(file, JSON.stringify({ max_lag_ms: max, ticks }));
+			// Rename over the file: a reader in another process never sees writeFileSync's truncated, empty file.
+			writeFileSync(`${file}.tmp`, JSON.stringify({ max_lag_ms: max, ticks }));
+			renameSync(`${file}.tmp`, file);
 		}, TICK_MS);
 		timer.unref();
 	});

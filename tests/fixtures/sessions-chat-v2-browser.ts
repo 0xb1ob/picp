@@ -437,6 +437,8 @@ try {
 	/** Opens the context with `open`, then its "Asked you" disclosure (collapsed on every mount) once it renders. */
 	const openAsks = (open: string) => `(async () => { ${open}; const t = () => document.querySelector(".workspace-context .workspace-context-asked-toggle[aria-expanded=false]");
 		for (let i = 0; i < 100 && !t(); i++) await new Promise(r => setTimeout(r, 20)); t()?.click(); })()`;
+	// The chat's Jobs drawer has no header button: Ctrl+J on the window is its entry point.
+	const JOBS_CHORD = `window.dispatchEvent(new KeyboardEvent("keydown", { key: "j", ctrlKey: true, bubbles: true, cancelable: true }))`;
 	const capture = async (name: string, hash: string, width: number, height: number, theme: "light" | "dark", ready: string, scroll?: "top" | "bottom", steps: Step[] = []) => {
 		await cdp("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 900 });
 		await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
@@ -613,11 +615,11 @@ try {
 		// Real clicks and a CDP Ctrl+J (modifiers 2) on the chat; each capture fails on a target under 44 px or off screen.
 		const listed = `document.querySelectorAll(".workspace-jobs[open] .workspace-jobs-row").length === 4`;
 		const key: Step = [{ cdp: "Input.dispatchKeyEvent", params: { type: "rawKeyDown", key: "j", code: "KeyJ", windowsVirtualKeyCode: 74, modifiers: 2 } }, listed];
-		const open: Step = [`document.querySelector(".workspace-jobs-open").click()`, listed];
+		const open: Step = [`(() => { document.querySelector(".operator-composer textarea").focus(); ${JOBS_CHORD}; })()`, listed];
 		const pick: Step = [`[...document.querySelectorAll(".workspace-jobs-row")].find(b => b.textContent.includes("${JOB}")).click()`,
 			`!document.querySelector(".workspace-jobs") && !!document.querySelector(".workspace-job .job-detail-embedded .job-badges")`];
 		const escape: Step = [{ cdp: "Input.dispatchKeyEvent", params: { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 } },
-			`!document.querySelector(".workspace-job") && document.activeElement === document.querySelector(".workspace-jobs-open")`];
+			`!document.querySelector(".workspace-job") && document.activeElement === document.querySelector(".operator-composer textarea")`];
 		// The last step waits until no surface target is under 44 px or off screen; a clipped one times the capture out.
 		const fits: Step = ["true", `[...document.querySelectorAll(".workspace-close, .workspace-full, .workspace-jobs-row, .workspace-jobs .jobs-segments button, .workspace-jobs select")]
 			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return (innerWidth >= 900 || r.height >= 44) && r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
@@ -784,7 +786,7 @@ try {
 		// Negative control: without the reply callback the click leaves for the job route and the log steps time out.
 		const log: Step[] = [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-link")`],
 			[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".sessions > .workspace-job .job-detail-embedded[data-tab=transcript] .job-transcript") && location.hash === ${JSON.stringify(transcript)}`]];
-		const jobs: Step = [`document.querySelector(".workspace-jobs-open").click()`, `document.querySelectorAll(".workspace-jobs[open] .workspace-jobs-row").length === 4`];
+		const jobs: Step = [JOBS_CHORD, `document.querySelectorAll(".workspace-jobs[open] .workspace-jobs-row").length === 4`];
 		const context: Step = [openAsks(`document.querySelector(".workspace-context-open").click()`),`!!document.querySelector("dialog.workspace-context-sheet[open] .workspace-context-ask")`];
 		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .session-choice")`];
 		const box = (selector: string) => `(() => { const e = document.querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect();
@@ -846,17 +848,14 @@ try {
 					const inner = b.clientWidth - parseFloat(p.paddingLeft) - parseFloat(p.paddingRight);
 					return [p.borderTopLeftRadius, t.bottom <= f.top + 0.5 ? "field over footer" : "one row", t.width >= inner - 32 ? "full width" : "narrow"].join(" "); })() : null,
 				strip: innerWidth < 900 ? shown(".session-strip-count, .session-strip-job").map(e => e.textContent).join(" ") : null,
-				jobs: shown(".session-heading .workspace-jobs-open kbd").length ? q(".workspace-jobs-open").textContent + " " + q(".workspace-jobs-open").title : null,
+				jobs: shown(".session-heading .workspace-jobs-open").length,
 				drawer_width: Math.round(q(".workspace-sessions[open]")?.getBoundingClientRect().width ?? 0),
-				small: shown(".workspace-jobs-open, .workspace-context-open, .session-bar-icon, .workspace-sessions .shell-icon-nav > a, .workspace-sessions .shell-rail-search")
+				small: shown(".workspace-context-open, .session-bar-icon, .workspace-sessions .shell-icon-nav > a, .workspace-sessions .shell-rail-search")
 					.filter(e => { const r = e.getBoundingClientRect(); return (innerWidth < 900 && r.height < 44) || r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className).join() }; })()`;
 		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .shell-icon-nav")`];
-		const header: Step = [`(() => { document.querySelector(".workspace-context-open").click(); document.querySelector(".workspace-jobs-open").focus(); })()`,
-			`!document.querySelector("aside.workspace-context") && document.activeElement === document.querySelector(".workspace-jobs-open")`];
-		// The committed six are desktop, phone, 899, 900, drawer and header-jobs; 1279 stays in the artifacts.
+		// The committed five are desktop, phone, 899, 900 and drawer; 1279 stays in the artifacts.
 		const shotsS: [string, number, number, Step[], object][] = [
-			["desktop", 1440, 1000, [], { inspector: true, sheet: false, heading: 48, rail: "Chat,Jobs,More", jobs: "Jobs⌘J Jobs (Ctrl/⌘ J)", small: "" }],
-			["header-jobs", 1440, 1000, [header], { inspector: false, sheet: false, heading: 48, jobs: "Jobs⌘J Jobs (Ctrl/⌘ J)", small: "" }],
+			["desktop", 1440, 1000, [], { inspector: true, sheet: false, heading: 48, rail: "Chat,Jobs,More", jobs: 0, small: "" }],
 			["1279", 1279, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
 			["900", 900, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
 			["phone", 390, 844, [], { inspector: false, sheet: false, heading: 45, bar: 53, sides: "10px 14px", field: "18px field over footer full width",
@@ -951,7 +950,7 @@ try {
 					.filter(e => e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent).join() : "",
 				outside: all(".workspace-jobs button, .workspace-jobs a, .workspace-jobs summary, .workspace-jobs input, .pr-chip").filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className || e.textContent).join() }; })()`;
 		// Resting captures: the modal's initial focus ring on the pill is dropped before the shot.
-		const open: Step = [`(() => { document.querySelector(".workspace-jobs-open").click(); setTimeout(() => document.activeElement?.blur(), 0); })()`,
+		const open: Step = [`(() => { ${JOBS_CHORD}; setTimeout(() => document.activeElement?.blur(), 0); })()`,
 			`!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row") && document.activeElement === document.body`];
 		const query: Step = [`(() => { const i = document.querySelector(".workspace-jobs-find input"); i.value = "toolbar"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
 			`document.querySelectorAll(".workspace-jobs-row").length === 1`];
@@ -1041,7 +1040,7 @@ try {
 				ring: !!document.activeElement?.matches(":focus-visible") }; })()`;
 		const rest: Step = ["document.activeElement?.blur()", "true"];
 		const footer: Step = ["true", `!!document.querySelector(".workspace-status progress") || innerWidth < 900`];
-		const open: Step = [`(() => { document.querySelector(".workspace-jobs-open").click(); setTimeout(() => document.activeElement?.blur(), 0); })()`,
+		const open: Step = [`(() => { ${JOBS_CHORD}; setTimeout(() => document.activeElement?.blur(), 0); })()`,
 			`!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row") && document.activeElement === document.body`];
 		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-link")`];
 		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".workspace-job .job-detail-embedded[data-tab=transcript] .job-transcript")`];
@@ -1167,7 +1166,7 @@ try {
 		const submit: Step = [`document.querySelector(".operator-composer-send").click()`, `!!document.querySelector(".operator-composer-command [role=alert]")`];
 		const rest: Step = [`document.activeElement?.blur()`, `document.activeElement === document.body`];
 		const focus: Step = [`document.querySelector(".operator-composer textarea").focus()`, `document.activeElement === document.querySelector(".operator-composer textarea")`];
-		const open: Step = [`(() => { document.querySelector(".workspace-jobs-open").click(); setTimeout(() => document.activeElement?.blur(), 0); })()`,
+		const open: Step = [`(() => { ${JOBS_CHORD}; setTimeout(() => document.activeElement?.blur(), 0); })()`,
 			`!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row") && document.activeElement === document.body`];
 		const commands = "/status,/jobs,/stop", green = "rgb(95, 211, 154)", live = "@cp-transcript-steps-t7ah Working · 9m,@cp-held-review-k2pq Held · 1h 2m";
 		const rowsD = `${live},@cp-sessions-v2-m4xq Done 15:47`;

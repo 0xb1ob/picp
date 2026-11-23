@@ -402,7 +402,7 @@ test("M3-context-css: phone sheet and 317 px drawer; inspector over the chat fro
 	const d = await start(t);
 	const css = (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
 	const rule = (sheet: string, selector: string) => [...sheet.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
-	const split = css.indexOf("@media(min-width:900px){.workspace-jobs-open>kbd"), wide = css.indexOf("@media(min-width:1280px){.sessions:has(>.workspace-job)");
+	const split = css.indexOf("@media(min-width:900px){.workspace-jobs{inset"), wide = css.indexOf("@media(min-width:1280px){.sessions:has(>.workspace-job)");
 	assert.ok(split > 0 && wide > split, "the 900 px switch, then 1280 px");
 	const [phone, desktop, beside] = [css.slice(0, split), css.slice(split, wide), css.slice(wide)];
 	assert.match(rule(phone, ".workspace-context"), /display:none/, "phone: no inspector");

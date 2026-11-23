@@ -2,8 +2,6 @@
  * M3 chat Jobs surfaces (WorkspaceSurfaces): the operator chat's Jobs drawer (a bottom sheet on a phone, an 861 px
  * right drawer from 900 px) and the picked job (full screen on a phone, beside the chat from 1280 px, over it between).
  */
-.workspace-jobs-open { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
-.workspace-jobs-open > kbd { display: none; font-family: var(--font-mono); font-size: 11px; color: var(--dim); }
 .workspace-close { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; background: none; border: 0; border-radius: 10px; color: var(--text); cursor: pointer; }
 .workspace-full { display: flex; align-items: center; flex-shrink: 0; min-height: 44px; padding: 0 8px; font-size: 13px; color: var(--blue); text-decoration: none; white-space: nowrap; }
 
@@ -163,7 +161,6 @@
 .workspace-sessions > .shell-sidebar-nav.shell-icon-nav > a { min-height: 44px; }
 
 @media (min-width: 900px) {
- .workspace-jobs-open > kbd { display: inline; }
  /* Frame 3: an 861 px drawer (its left border at x579); its height leaves `--workspace-status` (S5's footer) clear. */
  .workspace-jobs { inset: 0 0 auto auto; width: min(861px, 100%); height: calc(100% - var(--workspace-status, 0px)); background: var(--surface); border: 0; border-left: 1px solid var(--border); border-radius: 0; box-shadow: -24px 0 60px var(--page); }
  /* Frame 3: Jobs, the pill, Today and In flight, then "Open full page ↗" and close; the query on its own full row. */
