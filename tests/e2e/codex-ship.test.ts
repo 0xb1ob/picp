@@ -243,6 +243,9 @@ test("CX-7d: a patch is refused naming the shell remedy; an unasked apply is a b
 	await h.run([hooked.dispatch({ task: "Patch." }), h.waitEvent(hooked.id, RUN, 1)]);
 	assert.equal(existsSync(join(h.worktree(hooked.id), "p1.txt")), false);
 	assert.match(transcript(h, hooked.id), /never applies a patch[^"]*Write files with the shell \(a quoted heredoc/);
+	// The parent's settle nudge is a second turn on this worker; it reads the shared cursor.json, so it must be gone.
+	await h.b.closeParents();
+	await workerGone(h, hooked.id);
 	for (const [job, script, file] of [
 		[unasked, { knobs: { patchApply: "unasked" }, turns: [[{ kind: "patch" as const, path: "p2.txt", hook: "skip" as const }, { kind: "message" as const, text: "x" }]] }, "p2.txt"],
 		[dead, { knobs: { modelMs: 500 }, turns: [[{ kind: "patch" as const, path: "p3.txt", hook: "kill" as const }, { kind: "message" as const, text: "x" }]] }, "p3.txt"],
