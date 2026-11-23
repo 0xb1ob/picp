@@ -259,6 +259,8 @@ export interface BoundedRecoveryOptions {
 	sleep?: (ms: number) => Promise<void>;
 	/** P3: the job's pending quota continuation id; while one owns the job's next turn, recovery stands down unspent. */
 	quotaPending?: (jobId: string) => string | undefined;
+	/** cp-912x R4: queue a native revive whose CLI is full; it revives on that CLI when a slot frees (NativeWaitQueue). */
+	wait?: (jobId: string, driver: NativeDriver, text: string) => { position: number };
 }
 
 /** One decided outcome, for a caller (and a test) to inspect without re-reading disk. */
@@ -432,6 +434,14 @@ export class BoundedRecovery {
 		// J7: a native job is never redispatched; its plain revive runs the native admission and revive prompt.
 		const reviver = decision.action === "redispatch" && !native ? undefined : this.#options.reviver();
 		const plan = await reviver?.plan(jobId, native ? undefined : { recovering: true });
+		// A full CLI waits on that same CLI: queued, no attempt spent, never another CLI.
+		if (plan && !plan.ok && plan.code === "native_waiting" && plan.driver && this.#options.wait) {
+			const text = `waiting for ${nativeDriverSpec(plan.driver).label} capacity`;
+			const { position } = this.#options.wait(jobId, plan.driver, text);
+			const reason = `automatic recovery of ${jobId} is queued (position ${position}), ${text}; it revives on that CLI when a slot frees`;
+			runs.open(jobId).cp("recovery_failed", { class: failure.class, stage: "native_waiting", error: reason });
+			return { action: "revive_refused", reason, attempted: false, attemptsLeft: Math.max(RECOVERY_ATTEMPT_BOUND - attempts, 0) };
+		}
 		if (plan && !plan.ok && plan.code === "tool_child_alive") {
 			const reason = `automatic recovery could not revive ${jobId} (${plan.code}): ${plan.message}`;
 			await this.#escalate(jobId, failure, reason);

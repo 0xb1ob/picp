@@ -20,6 +20,8 @@ import {
 } from "../../src/status-block.ts";
 import { resolveAwaitingRows } from "../../src/awaiting-rows.ts";
 import { formatRevivePlan, formatReviveResult } from "../../src/revive.ts";
+import { nativeDriverSpec } from "../../src/drivers/registry.ts";
+import { NativeWaitQueuedError, queuedToolResult } from "../../src/native-wait-queue.ts";
 import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 
 export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
@@ -138,6 +140,13 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			const reviver = commandPost(tc.registry).reviver();
 			const options = params.continue_failed ? { continueFailed: true } : {};
 			const plan = await reviver.plan(params.job_id, options);
+			// cp-912x R4: a full CLI keeps a confirmed revive waiting for that same CLI, never another one.
+			if (!plan.ok && plan.code === "native_waiting" && plan.driver && params.confirm) {
+				const post = commandPost(tc.registry);
+				const text = `waiting for ${nativeDriverSpec(plan.driver).label} capacity`;
+				const { entry, position } = post.nativeWait.enqueue({ kind: "revive", job_id: params.job_id, driver: plan.driver, text });
+				return queuedToolResult(new NativeWaitQueuedError(entry, position));
+			}
 			if (!plan.ok || !params.confirm) {
 				return {
 					content: [{ type: "text", text: formatRevivePlan(plan) }],

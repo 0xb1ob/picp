@@ -221,7 +221,7 @@ test(
 			model: LIVE_MODEL,
 		});
 		const { research_id: researchId, ship_id: shipId } = started;
-		assert.equal(started.dispatch.receipt, "accepted");
+		assert.equal(started.dispatch?.receipt, "accepted");
 		// The ledger cannot offer the ship job while the research is open.
 		assert.ok(
 			(await post.ledger().blockersOf(shipId)).includes(researchId),

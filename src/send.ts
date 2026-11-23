@@ -34,11 +34,15 @@
  * needs this, because it already resolves to `prompt` for an idle worker.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { assertNoAuthorityHold } from "./authority-hold.ts";
 import { isScriptFleetRecord, type Risk, type SendReceipt } from "./contracts.ts";
 import { assertNativeResume, NATIVE_ACK, nativeDoorRefusal } from "./drivers/claude-followup.ts";
+import { NativeDriverError } from "./drivers/claude.ts";
 import { CODEX_ACK } from "./drivers/codex.ts";
+import { waitingLabel } from "./dispatch-queue.ts";
+import type { NativeWaitInput } from "./native-wait-queue.ts";
 import { borrowerOf, nativeDriverSpec } from "./drivers/registry.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 import { readTask, type ResolvedTask } from "./dispatch.ts";
@@ -107,6 +111,8 @@ export interface SendRequest {
 	purpose?: "repair";
 	/** A quota continuation resumes its interrupted round: delivery never restarts the hard wall-clock bound. */
 	keepRound?: boolean;
+	/** Internal (the wait queue's replay): a full CLI rethrows its refusal instead of queueing again. */
+	nativeReplay?: boolean;
 }
 
 export interface SendResult {
@@ -129,6 +135,8 @@ export interface SendResult {
 	risk_warning?: string;
 	/** N3c: what a native send actually did (resumed, queued until the turn ends, or a Codex turn/steer acked, C2b). */
 	native?: string;
+	/** cp-912x R5: the message waits for this CLI's capacity (`state/native-wait.json`), delivered on it when a slot frees. */
+	waiting?: string;
 }
 
 export interface SenderOptions {
@@ -159,6 +167,8 @@ export interface SenderOptions {
 	released?: (jobId: string) => boolean;
 	/** awaiting_merge: resume a parked job on a fresh lease (AwaitingMergeResume#resume); its note leads the message. */
 	resume?: (jobId: string) => Promise<{ note: string }>;
+	/** cp-912x R5: keep a send whose CLI is full waiting for that CLI (NativeWaitQueue.enqueue). */
+	wait?: (input: NativeWaitInput) => { entry: { request: { message_file?: string } }; position: number };
 }
 
 const MARKER_FOR_MODE: Readonly<Record<DeliveryMode, "prompt_sent" | "steer_sent" | "follow_up_sent">> = Object.freeze({
@@ -318,6 +328,7 @@ export class Sender {
 			try {
 				await this.#options.revive(request.jobId);
 			} catch (error) {
+				if (waitingLabel(error) !== undefined) return this.#wait(request, error);
 				throw new SendError(`${noLiveWorker()} Restoring the released worker failed: ${(error as Error).message}`);
 			}
 			managed = manager.get(request.jobId);
@@ -456,9 +467,18 @@ export class Sender {
 		}
 		// cp-912x ruling: while its reviewer runs in this author's slot, waking the author would overfill its CLI.
 		const borrower = native ? borrowerOf(manager, request.jobId) : undefined;
-		if (borrower) throw new SendError(`${request.jobId} is waiting for ${spec?.label} capacity: its reviewer is using the held author's slot (${borrower}); send again after its cp-verdict wake-up. Nothing was sent.`);
+		if (borrower) {
+			const full = new NativeDriverError(`${request.jobId} cannot resume while its reviewer is using the held author's slot (${borrower})`, "occupied", record.worker.driver as NativeDriver);
+			return this.#wait(request, full, `its reviewer is using the held author's slot (${borrower})`);
+		}
 		// N3c: a native send starts or queues a claude process, so it passes the native admission before anything moves.
-		if (native) await assertNativeResume({ home, jobId: request.jobId, what: mode === "steer" ? "steer" : busy ? "queued follow-up" : "resume" }).catch((error: unknown) => { throw new SendError((error as Error).message); });
+		if (native) {
+			try {
+				await assertNativeResume({ home, jobId: request.jobId, what: mode === "steer" ? "steer" : busy ? "queued follow-up" : "resume" });
+			} catch (error) {
+				return this.#wait(request, error);
+			}
+		}
 
 		// Reopen BEFORE delivering: for the window between the two, the worker must
 		// never be holding work it cannot report (see supersede.ts for the ordering
@@ -539,6 +559,29 @@ export class Sender {
 			...(riskWarning ? { risk_warning: riskWarning } : {}),
 			...(native ? nativeAck(record.worker.driver === "codex" ? CODEX_ACK : NATIVE_ACK, outcome) : {}),
 		};
+	}
+
+	/** cp-912x R5: a full CLI keeps the message waiting for that same CLI; any other refusal names itself. */
+	#wait(request: SendRequest, error: unknown, why?: string): SendResult {
+		const label = waitingLabel(error);
+		const driver = (error as NativeDriverError).driver;
+		if (label === undefined || driver === undefined) throw new SendError((error as Error).message);
+		if (request.nativeReplay) throw error; // still full: the entry keeps its place
+		const status = why ? `${label}: ${why}` : label;
+		const plain = request.task === undefined && request.taskFile === undefined && request.model === undefined && request.mode !== "steer";
+		if (!this.#options.wait || !plain) throw new SendError(`${request.jobId} is ${status}; a steer or a task/model promotion is never queued — send again once a slot frees. Nothing was sent.`);
+		const file = join(this.#options.runs.open(request.jobId).runDir, `waiting-send-${Date.now()}.md`);
+		writeFileSync(file, request.message, { mode: 0o600 });
+		const mode = request.mode === "steer" ? undefined : request.mode;
+		const queued = this.#options.wait({ kind: "send", job_id: request.jobId, driver, text: status, request: {
+			message_file: file, ...(mode ? { mode } : {}), ...(request.purpose ? { purpose: request.purpose } : {}), ...(request.keepRound ? { keep_round: true } : {}) } });
+		if (queued.entry.request.message_file !== file) {
+			rmSync(file, { force: true });
+			throw new SendError(`${request.jobId} already has a send waiting (position ${queued.position}), ${status}; send again after its wake-up says it was delivered. Nothing was sent.`);
+		}
+		const cli = nativeDriverSpec(driver).label;
+		return { job_id: request.jobId, worker: request.jobId, mode: mode === "follow_up" ? "follow_up" : "prompt", receipt: "queued", busy_before: false, waiting: status,
+			native: `queued (position ${queued.position}), ${status}; delivered on the ${cli} when a slot frees, never on another CLI` };
 	}
 
 	#assertContinuationPermission(jobId: string): void {

@@ -64,6 +64,6 @@ export function resolveReviewerRoute(
 		const waiting = waitingLabel(error);
 		if (waiting === undefined) throw error;
 		const native = error as NativeDriverError;
-		throw new NativeDriverError(`${native.message} — the review of ${ctx.jobId} is ${waiting}: run it again once a slot frees; it never runs on another CLI`, native.category, native.driver);
+		throw new NativeDriverError(`${native.message} — the review of ${ctx.jobId} is ${waiting}; it never runs on another CLI`, native.category, native.driver);
 	});
 }

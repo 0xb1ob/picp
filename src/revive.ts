@@ -35,7 +35,7 @@ import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
 import { NATIVE_UNREVIEWED_FILE_ENV, nativeDoorRefusal, nativeReviveBase, nativeReviveRefusal, sendNativeRevive, writeNativeUnreviewed } from "./drivers/claude-followup.ts";
 import { observeNative } from "./native-availability-observer.ts";
-import { nativeBaseEnv, nativeThinkingEnv } from "./drivers/claude.ts";
+import { nativeBaseEnv, NativeDriverError, nativeThinkingEnv } from "./drivers/claude.ts";
 import { nativeDriverSpec } from "./drivers/registry.ts";
 import { projectBaseBranch } from "./forge-runtime.ts";
 import type { NativeDriver } from "./worker-driver.ts";
@@ -73,6 +73,7 @@ export const REVIVE_REFUSAL_CODES = [
 	"model_unrouted",
 	"route_refused",
 	"native_refused",
+	"native_waiting",
 	"worktree_unreadable",
 ] as const;
 export type ReviveRefusalCode = (typeof REVIVE_REFUSAL_CODES)[number];
@@ -82,6 +83,8 @@ export interface ReviveRefusal {
 	job_id: string;
 	code: ReviveRefusalCode;
 	message: string;
+	/** `native_waiting`: the CLI whose capacity the revive waits for. */
+	driver?: NativeDriver;
 }
 
 /** The interrupted tool call, read from the session leaf (spike Evidence S9). */
@@ -481,7 +484,9 @@ export class Reviver {
 		}
 		if (policyBlocked) return refuse(jobId, "session_policy_blocked", policyBlockedRefusal(jobId, record.worker.session_file));
 		const nativeRefusal = native ? await nativeReviveRefusal(this.#options.home, jobId, record.worker.session_file) : undefined;
-		if (nativeRefusal) return refuse(jobId, "native_refused", nativeRefusal);
+		// cp-912x R4: a full CLI is a wait on that same CLI (the caller queues it), never a refusal into another one.
+		if (nativeRefusal?.full) return { ...refuse(jobId, "native_waiting", nativeRefusal.why), driver: nativeRefusal.full };
+		if (nativeRefusal) return refuse(jobId, "native_refused", nativeRefusal.why);
 
 		// cp-mub7: a failed job's registered worker is stale, not live work — the
 		// job is already failed, and cp_send refuses it for that reason and points
@@ -602,7 +607,8 @@ export class Reviver {
 	async revive(jobId: string, options?: RevivePlanOptions): Promise<ReviveResult> {
 		const plan = await this.plan(jobId, options);
 		if (!plan.ok) {
-			throw new ReviveError(`cannot revive ${jobId} (${plan.code}): ${plan.message}`);
+			const message = `cannot revive ${jobId} (${plan.code}): ${plan.message}`;
+			throw plan.driver ? new NativeDriverError(message, "occupied", plan.driver) : new ReviveError(message);
 		}
 		const record = this.#options.fleet.require(jobId);
 		// R1 D2: the picked attempt is frozen before anything replaces it (a mismatched snapshot refuses here).

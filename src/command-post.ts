@@ -125,6 +125,7 @@ import { IntegrationHolds } from "./integration-hold.ts";
 import { CI_FLAKES_FILE, CiRerunStore, maybeRerunInfra, readFailingTests } from "./ci-infra-rerun.ts";
 import { HeldRelease } from "./held-release.ts";
 import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
+import { NativeWaitQueue, replayOn, reviewWaitRequest, waitAdvance } from "./native-wait-queue.ts";
 import { ArmedDispatches } from "./dependency-dispatch.ts";
 import { makeHandoff } from "./human-handoff.ts";
 import { afterMergeHook } from "./after-merge.ts";
@@ -258,6 +259,7 @@ export class CommandPost {
 	readonly continuation: HeldContinuation;
 	readonly heldRelease: HeldRelease; // 4b-1: release an idle held author's slot on demand (src/held-release.ts)
 	readonly dispatchQueue: DispatchQueue; // 4b-2: spawn-cap refusals, drained by the lock owner only (src/dispatch-queue.ts)
+	readonly nativeWait: NativeWaitQueue; // cp-912x R6: existing-job work a full CLI keeps waiting, drained before the dispatch queue
 	readonly armedDispatches: ArmedDispatches; // unload-parent PR2: blocker refusals, released by the lock owner only (src/dependency-dispatch.ts)
 	readonly drain: DrainControl; // graceful drain before a restart (src/drain.ts)
 	/** cp-uug: the per-PR, per-head merge authorization. Answered only by a human. */
@@ -384,7 +386,7 @@ export class CommandPost {
 		});
 		this.mandates = new MandateStore(options.home);
 		this.#ghLogin = memoLogin(runCommand, options.home); // k52/cp-oc0m: whose main CI runs count; resolved once, retried after a failure
-		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId), revive: (jobId) => this.revive(jobId), released: (jobId) => this.heldRelease.wasReleased(jobId), resume: (jobId) => this.awaitingMerge.resume(jobId) });
+		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId), revive: (jobId) => this.revive(jobId), released: (jobId) => this.heldRelease.wasReleased(jobId), resume: (jobId) => this.awaitingMerge.resume(jobId), wait: (input) => this.nativeWait.enqueue(input) });
 		this.quota = new QuotaContinuation({ home: options.home, fleet: this.fleet, runs: this.runs, ...(options.quotaResetAdapter ? { adapter: options.quotaResetAdapter } : {}), revive: (jobId, carriedBounds, plain) => this.revive(jobId, { ...(plain ? {} : { continueFailed: true }), ...(carriedBounds ? { carriedBounds } : {}) }), send: (request) => this.send(request), owns: () => !this.manager.closing && this.#ownsHome(), mandates: this.mandates, capacityFree: () => this.heldRelease.capacityFree(), spent: (jobId) => this.bounds.spent(jobId), notify: (wake) => this.#journalDurable({ ...wake, kind: "recovery" }) });
 		// cp-6lg7: the answer card is queued **before** anyone is told anything. It
 		// is built here, ahead of intake, because intake's `onReported` is what feeds
@@ -538,7 +540,7 @@ export class CommandPost {
 				},
 			},
 			manager: this.manager,
-			profilesDir: this.profilesDir, claims: this.#claims, quotaPending: (jobId) => this.quota.holding(jobId),
+			profilesDir: this.profilesDir, claims: this.#claims, quotaPending: (jobId) => this.quota.holding(jobId), wait: (jobId, driver, text) => this.nativeWait.enqueue({ kind: "revive", job_id: jobId, driver, text, request: { native_recovery: true } }),
 			...this.#observers(),
 		});
 		// An artifact may only be filed against a job this home actually knows —
@@ -618,7 +620,7 @@ export class CommandPost {
 		});
 		this.heldRelease = new HeldRelease({ home: options.home, fleet: this.fleet, manager: this.manager, busy: { sending: (id) => this.sender.sending(id), promoting: (id) => this.integrator.promoting(id), driving: (id) => this.continuation.driving(id) }, integration: (id) => this.integrator.get(id), journal: (id, kind, payload) => this.runs.open(id).cp(kind, payload) });
 		this.dispatchQueue = new DispatchQueue({ home: options.home, dispatch: (r) => this.dispatch(r), capacityFree: () => this.heldRelease.capacityFree(), owns: () => this.#ownsHome(), ledger: () => this.ledger(), fleet: this.fleet, journal: (w) => this.#journalDurable(w) });
-		wireSlotFree(this.manager, this.dispatchQueue);
+		wireSlotFree(this.manager, this.nativeWait = new NativeWaitQueue({ home: options.home, owns: () => this.#ownsHome(), journal: (w) => this.#journalDurable(w), replay: replayOn(this), then: () => this.dispatchQueue.drain() }));
 		this.armedDispatches = new ArmedDispatches({
 			home: options.home,
 			dispatch: (r) => this.dispatch(r),
@@ -1179,11 +1181,10 @@ export class CommandPost {
 	async send(request: SendRequest): Promise<SendResult> {
 		return this.sender.send(request);
 	}
-
 	async tearDown(jobId: string, options: TeardownCallOptions = {}): Promise<TeardownResult> {
 		const result = await this.teardown.teardown(jobId, options);
 		// The exit's slot-free drain ran while the fleet record still held its native slot; the closed record frees it.
-		if (result.torn_down) void this.dispatchQueue.drain();
+		if (result.torn_down) void this.nativeWait.drain();
 		return result;
 	}
 
@@ -1235,7 +1236,6 @@ export class CommandPost {
 	async revive(jobId: string, options: RevivePlanOptions = {}): Promise<ReviveResult> {
 		return this.reviver().revive(jobId, options);
 	}
-
 	/**
 	 * Built per call like the dispatcher: routing config and budgets are
 	 * operator-editable, and a gate that needs a restart to see a model change is
@@ -1272,7 +1272,7 @@ export class CommandPost {
 
 	async gate(request: GateRequest): Promise<GateStart> {
 		assertNotDraining(this.home, "plan gate reviewer");
-		return this.gateModule().start(recoveryGateRequest(this, request));
+		return request.recoveryAttemptId ? this.gateModule().start(recoveryGateRequest(this, request)) : this.nativeWait.orWait("gate", request.jobId, reviewWaitRequest(request), () => this.gateModule().start(request));
 	}
 
 	/**
@@ -1303,7 +1303,7 @@ export class CommandPost {
 
 	async diffReview(request: DiffReviewRequest): Promise<DiffReviewStart> {
 		assertNotDraining(this.home, "cp_review reviewer");
-		return this.diffReviewModule().start(request);
+		return this.nativeWait.orWait("review", request.jobId, reviewWaitRequest(request), () => this.diffReviewModule().start(request));
 	}
 
 	/** The opt-in pre-gate panel (T22). Off unless a job asks for it. */
@@ -1355,7 +1355,7 @@ export class CommandPost {
 			// through it must wake the parent exactly like one granted anywhere else.
 			onAnswered: (decision) => this.#recordAnswered(decision),
 			...(defaults ? { qualityDefaults: defaults } : {}),
-			send: async (jobId, message) => this.sender.send({ jobId, message }),
+			send: async (jobId, message) => this.sender.send({ jobId, message }), enqueue: (id, request) => this.dispatchQueue.enqueue(id, request), waitNative: (id, error) => waitAdvance(this.nativeWait, id, error),
 			...(this.#options.authorizer ? { authorizer: this.#options.authorizer } : {}),
 			approvals: this.approvals,
 			mandates: this.mandates,

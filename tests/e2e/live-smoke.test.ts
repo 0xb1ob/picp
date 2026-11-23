@@ -266,7 +266,7 @@ test(
 			model: LIVE_MODEL,
 		});
 		const { research_id: researchId, ship_id: shipId } = started;
-		assert.equal(started.dispatch.receipt, "accepted");
+		assert.equal(started.dispatch?.receipt, "accepted");
 
 		await waitFor(
 			() => readFleet(home.path).jobs.find((job) => job.job_id === researchId),

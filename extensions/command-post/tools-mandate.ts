@@ -335,6 +335,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 						return { active: active.length, cap: cmdPost.manager.spawnCap, held: [...new Set(active.map((w) => w.jobId))].filter((id) => held.has(id)), releasable: cmdPost.heldRelease.releasable().length, reserved: cmdPost.manager.reserved };
 					},
 					queued: () => cmdPost.dispatchQueue.ids(),
+					waiting: () => cmdPost.nativeWait.list(),
 				},
 				params.project,
 			);

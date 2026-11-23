@@ -132,8 +132,8 @@ export function registerScheduleTools(
 			.catch((error: Error) => sendParent(`[${event.project}] schedule ${event.name} (${event.schedule_id}) could not start its pipeline on ${event.job_id} (${event.run_id}): ${error.message}`, { ...event }));
 	};
 	const tick = async (): Promise<void> => {
-		// 4b-2 backstop: the queue's own owns() decides; a scheduler fault never stops it.
-		try { await deps.commandPost().dispatchQueue.drain(); } catch (error) { log(`dispatch queue drain failed: ${(error as Error).message}`); }
+		// 4b-2 backstop: the queues' own owns() decide; existing-job waits drain first, then new jobs.
+		try { await deps.commandPost().nativeWait.drain(); } catch (error) { log(`native wait or dispatch queue drain failed: ${(error as Error).message}`); }
 		// unload-parent PR2 backstop: a blocker closed by hand (no landing) releases its armed dependents here; release() never throws.
 		try { await deps.commandPost().armedDispatches.release(); } catch (error) { log(`armed dispatch release failed: ${(error as Error).message}`); }
 		// PR1: queue and post run result cards, apart from firing; the session-start catch-up tick is the startup recovery.

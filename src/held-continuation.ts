@@ -40,6 +40,7 @@ import type { RunRegistry } from "./runs.ts";
 import { boundedWakeupId } from "./wakeup-outbox.ts";
 import type { ReviewMergeWindow } from "./review-merge-window.ts";
 import { operatorNotify } from "./parent-session.ts";
+import { NativeWaitQueuedError } from "./native-wait-queue.ts";
 
 /** How many handled keys a process remembers before it forgets them all (at worst, one repeat pass). */
 const CONTINUATION_KEY_MEMORY = 512;
@@ -376,6 +377,8 @@ export class HeldContinuation {
 				try {
 					started = await this.#deps.review(jobId);
 				} catch (error) {
+					// A full CLI queued it (cp-912x R3): its verdict resumes this, like an in-flight review.
+					if (error instanceof NativeWaitQueuedError) return out("review_pending", step, error.message, "review");
 					const reason = `${jobId}: cp_review could not start — ${(error as Error).message.split("\n")[0]}`;
 					this.#notice(jobId, `${tag}:review`, "surface", reason, result.pr_url);
 					return out("stopped", step, reason, "surface");

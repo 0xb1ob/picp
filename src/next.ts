@@ -57,7 +57,11 @@ export interface NextPorts {
 	capacity?: () => { active: number; cap: number; held: string[]; releasable?: number; reserved?: number };
 	/** 4b-2: job ids in the persisted dispatch queue (`DispatchQueue.ids`). */
 	queued?: () => string[];
+	/** cp-912x R7: existing-job work a full CLI keeps waiting (`NativeWaitQueue.list`). */
+	waiting?: () => NativeWaitView[];
 }
+
+export interface NativeWaitView { job_id: string; kind: string; driver: string; text: string }
 
 export type NextActionKind = "dispatch" | "pipeline" | "wait" | "no_mandate" | "paused" | "mission_end" | "draining";
 
@@ -99,8 +103,13 @@ export interface NextResult {
 	/** The other covering mandates' own results, each with its own action and mission-end escalation. */
 	others?: NextResult[];
 	/** Readiness behind the answer (every ledger-ready job, the spawn queue), for the snapshot only. */
-	lined_up?: { jobs: Job[]; queued: string[] };
+	lined_up?: { jobs: Job[]; queued: string[]; waiting?: NativeWaitView[] };
 }
+
+const waitingOf = (ports: NextPorts): { waiting?: NativeWaitView[] } => {
+	const waiting = ports.waiting?.() ?? [];
+	return waiting.length > 0 ? { waiting } : {};
+};
 
 function jobProject(job: Job): string | undefined {
 	return parseJobLabels(job.labels).project;
@@ -201,7 +210,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	}
 	const confirmation = continuationProblems.length ? undefined : ports.escalations.open().find((item) => item.kind === "product_ambiguity" && item.continuity_scope_digest && item.job_ids.some((id) => readyJobs.some((job) => job.id === id)));
 	if (candidates.length === 0 && runResults.length === 0) {
-		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, lined_up: { jobs: readyJobs, queued: ports.queued?.() ?? [] }, ...(confirmation ? { escalation_id: confirmation.id } : {}), action: { kind: confirmation ? "wait" : "no_mandate", reason: confirmation ? `Confirm original admission with cp_decide ${confirmation.id}, then retry cp_mandate continue` : continuationProblems.join("; ") || `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
+		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, lined_up: { jobs: readyJobs, queued: ports.queued?.() ?? [], ...waitingOf(ports) }, ...(confirmation ? { escalation_id: confirmation.id } : {}), action: { kind: confirmation ? "wait" : "no_mandate", reason: confirmation ? `Confirm original admission with cp_decide ${confirmation.id}, then retry cp_mandate continue` : continuationProblems.join("; ") || `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
 	}
 	const selected = new Map(readyAll.map((job) => {
 		const subject = { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) };
@@ -238,7 +247,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	}
 	primary.blocked = [...(primary.blocked ?? []), ...uncovered];
 	const others = results.filter((result) => result !== primary);
-	return { ...primary, ...warning, fleet_live_workers: fleetLive, ...(others.length > 0 ? { others } : {}), lined_up: { jobs: readyJobs, queued: [...queued] } };
+	return { ...primary, ...warning, fleet_live_workers: fleetLive, ...(others.length > 0 ? { others } : {}), lined_up: { jobs: readyJobs, queued: [...queued], ...waitingOf(ports) } };
 }
 
 async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: readonly Job[], fleetJobs: readonly FleetRecord[], selected: ReadonlyMap<string, ReturnType<typeof selectGrant>>, queued: ReadonlySet<string>, expanded: ReadonlySet<string>): Promise<NextResult> {
@@ -377,6 +386,7 @@ export function formatNext(result: NextResult): string {
 		lines.push(`blocked: ${row.job.id}: waiting on ${row.waiting_on}${row.escalation_ids?.length ? `; cp_decide ${row.escalation_ids.join(", ")}` : ""}`);
 	}
 	if ((result.blocked?.length ?? 0) > 10) lines.push(`blocked: +${result.blocked!.length - 10} more jobs`);
+	for (const row of result.lined_up?.waiting ?? []) lines.push(`waiting: ${row.job_id} ${row.kind}, ${row.text} (starts on that CLI when a slot frees)`);
 	lines.push(`action: ${result.action.kind}${result.action.job_id ? ` ${result.action.job_id}` : ""} \u2014 ${operatorPaused(result) ? "no new dispatch; in-flight continues" : result.action.reason}`);
 	if (result.escalation_id) lines.push(`escalation: ${result.escalation_id}`);
 	// Operator pauses are the human's own: one count line, never an id for the parent to repeat.
