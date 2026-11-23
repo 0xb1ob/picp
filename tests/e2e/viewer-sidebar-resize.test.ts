@@ -29,6 +29,9 @@ test("sidebar-resize: drag, reload, clamp, keyboard and double-click reset throu
 	assert.deepEqual(["role", "aria-orientation", "tabindex", "aria-valuemin", "aria-valuemax", "aria-valuenow"].map((a) => handle.getAttribute(a)),
 		["separator", "vertical", "0", "180", "480", "208"], "a focusable vertical separator at the 208 px default");
 	assert.deepEqual([width(tab)[0], storage.has(KEY)], ["", false], "no width is set or stored before the operator resizes");
+	drag(tab, 208, 208);
+	await new Promise((done) => setTimeout(done, 50));
+	assert.deepEqual([width(tab)[0], storage.has(KEY)], ["", false], "a plain click on Jobs stores no 208 for Chats to inherit");
 
 	drag(tab, 208, 300);
 	await until(() => width(tab), ([style, now]) => /--sidebar-width:\s*300px/.test(style) && now === "300", "the dragged width");
@@ -81,4 +84,13 @@ test("sidebar-resize-chats: the Chats column draws its own handle on the shared 
 	handle.dispatchEvent(new tab.window.Event("dblclick", { bubbles: true }));
 	await until(() => tab.$(".sessions > .sidebar-resizer")?.getAttribute("aria-valuenow"), (now) => now === "261", "the Chats default");
 	assert.equal(storage.has(KEY), false);
+
+	// Regression: a plain click (down, a 2 px jitter, up) stored the column's fallback, pinning every column to it.
+	const chats = tab.$(".sessions > .sidebar-resizer")!;
+	pointer(tab, chats, "pointerdown", 261);
+	pointer(tab, tab.window, "pointermove", 263);
+	pointer(tab, tab.window, "pointerup", 263);
+	await new Promise((done) => setTimeout(done, 50));
+	assert.deepEqual([tab.$(".sessions > .sidebar-resizer")?.getAttribute("aria-valuenow"), storage.has(KEY)], ["261", false],
+		"a plain click keeps the 261 default and persists nothing");
 });

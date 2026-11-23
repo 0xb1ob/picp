@@ -1,8 +1,9 @@
 import type { JSX } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
 export const SIDEBAR_WIDTH_KEY = "cp-sidebar-width";
 export const SIDEBAR_MIN = 180, SIDEBAR_MAX = 480, SIDEBAR_STEP = 16;
+const DRAG_THRESHOLD = 3;
 const clamp = (px:number) => Math.round(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, px)));
 
 /** The stored width, clamped; null (each column's own default) when absent, unreadable or not a number. */
@@ -24,18 +25,24 @@ function persist(px:number | null) {
 export function useSidebarWidth() {
  const [width,setWidth] = useState<number | null>(stored);
  const commit = (px:number | null) => { setWidth(px); persist(px); };
+ const drag = useRef<(() => void) | null>(null);
+ useEffect(() => () => drag.current?.(), []);
  const handle = (fallback:number) => {
   const now = width ?? fallback;
   const down = (event:JSX.TargetedPointerEvent<HTMLDivElement>) => {
    if (event.button !== 0) return;
    event.preventDefault();
+   drag.current?.();
    const startX = event.clientX;
-   let last = now;
-   const move = (e:PointerEvent) => { last = clamp(now + e.clientX - startX); setWidth(last); };
-   const up = () => { window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); window.removeEventListener("pointercancel",up); commit(last); };
+   let last: number | null = null;
+   // A plain click must store nothing, or a column's fallback would become every column's width.
+   const move = (e:PointerEvent) => { if (last === null && Math.abs(e.clientX - startX) < DRAG_THRESHOLD) return; last = clamp(now + e.clientX - startX); setWidth(last); };
+   const detach = () => { window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); window.removeEventListener("pointercancel",up); drag.current = null; };
+   const up = () => { detach(); if (last !== null) commit(last); };
    window.addEventListener("pointermove",move);
    window.addEventListener("pointerup",up);
    window.addEventListener("pointercancel",up);
+   drag.current = detach;
   };
   const key = (event:JSX.TargetedKeyboardEvent<HTMLDivElement>) => {
    const next = event.key === "ArrowLeft" ? now - SIDEBAR_STEP : event.key === "ArrowRight" ? now + SIDEBAR_STEP
