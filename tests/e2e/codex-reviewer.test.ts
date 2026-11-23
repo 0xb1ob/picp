@@ -46,8 +46,8 @@ function nextTurn(h: H, steps: FakeCodexStep[], knobs?: Record<string, unknown>)
 
 // Scenario: Given the reviews row on codex with a pi fallback and codex_review on, When cp_review runs on held job A,
 // Then the Codex reviewer reads the packet, files pi's verdict.json once (a wrong-job verdict refused) and its thread
-// is deleted; And with codex_review off the same review of B runs on pi and decides the same.
-test("CX-6a: cp_review on a codex reviews row files pi's verdict.json through report_verdict; codex_review off runs pi", { skip, timeout: 300_000 }, async (t) => {
+// is deleted; And on a pi reviews row the same review of B decides the same (cp-qmry: a codex row never runs pi).
+test("CX-6a: cp_review on a codex reviews row files pi's verdict.json through report_verdict, as a pi reviews row does", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_review: true } });
 	const [a, b] = ["cp-cx6a-a", "cp-cx6a-b"];
 	await h.heldShipJob(a);
@@ -88,7 +88,9 @@ test("CX-6a: cp_review on a codex reviews row files pi's verdict.json through re
 	await allScopesKilled(h);
 	assert.equal(h.record(a)?.worker.driver, undefined, "the subject's record names no driver");
 
-	writeFileSync(h.nativeFile, "{}");
+	const routingFile = join(h.b.home, LAYOUT.routingFile);
+	const config = JSON.parse(readFileSync(routingFile, "utf8")) as { rubric: Array<{ id: string }> };
+	writeFileSync(routingFile, JSON.stringify({ ...config, rubric: [...config.rubric.filter((row) => row.id !== "reviews"), { id: "reviews", role: "gate-reviewer", model: piModel }] }));
 	await h.b.closeParents();
 	await h.run([h.review(b)]);
 	const pi = await h.reviewRun(b);
@@ -224,7 +226,7 @@ test("CX-6d: switches off, a codex reviews row refuses by name (never pi) and no
 	const [refused] = (await h.run([h.review(id)])).filter((end) => end.toolName === "cp_review");
 	assert.equal(refused?.isError, true, JSON.stringify(refused?.result.content));
 	assert.match(JSON.stringify(refused?.result.content), /cannot run on the Codex CLI driver: the switch codex_review is off/);
-	assert.equal(existsSync(join(h.b.home, paths.reviewRunDir(id, 1))), false, "a reviewer ran on another CLI");
+	assert.equal(h.b.provider.requests("cx6d-pi").length, 0, "a reviewer ran on another CLI");
 	assert.equal(existsSync(codexAvailabilityFile(h.b.home)), false);
 	assert.equal(existsSync(h.nativeFile), false, "native.json was never written");
 	const codexValue = /"(?:requested_)?driver":"codex"|driver=codex/;
@@ -251,13 +253,12 @@ test("CX-6e: a reviewer that finds the codex slot full waits for Codex CLI capac
 	assert.equal(h.record(research.id)?.worker.driver, "codex");
 	assert.equal(occupied?.isError, true, JSON.stringify(occupied?.result.content));
 	assert.match(JSON.stringify(occupied?.result.content), new RegExp(`codex concurrency is 1 and ${research.id} is live.* is waiting for Codex CLI capacity`));
-	assert.equal(existsSync(join(h.b.home, paths.reviewRunDir(full, 1))), false, "a reviewer ran on pi");
+	assert.equal(h.b.provider.requests("cx6e-pi").length, 0, "a reviewer ran on pi");
 	await h.b.closeParents();
 	await h.run([{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: research.id } }] }, h.pause(2), h.review(free)]);
 	const codex = await h.reviewRun(free);
 	assert.match(String(codex.routed?.line), /driver=codex/, JSON.stringify(codex.routed));
 	assert.deepEqual(codex.verdict, verdict(free));
-	assert.equal(h.b.provider.requests("cx6e-pi").length, 0, "the pi reviewer model was never called");
 	await allScopesKilled(h);
 	assertClean(h);
 });
@@ -333,7 +334,7 @@ test("CX-8i: a signed-out codex refuses a codex-row review by name, never pi; th
 	const [refused] = (await h.run([h.review(id)])).filter((end) => end.toolName === "cp_review");
 	assert.equal(refused?.isError, true, JSON.stringify(refused?.result.content));
 	assert.match(JSON.stringify(refused?.result.content), /cannot run on the Codex CLI driver: codex is not signed in/);
-	assert.equal(existsSync(join(h.b.home, paths.reviewRunDir(id, 1))), false, "a reviewer ran on another CLI");
+	assert.equal(h.b.provider.requests("cx8i-pi").length, 0, "a reviewer ran on another CLI");
 	assert.deepEqual(fakeSpawns(h.state).filter((each) => each.argv[0] === "app-server"), [], "no app-server started");
 	assertClean(h);
 });

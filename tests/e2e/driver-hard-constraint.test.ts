@@ -4,12 +4,13 @@
  * (mock model) with fake-codex and the fake `systemd-run` at the boundary (tests/harness/codex-worker.ts).
  */
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { LAYOUT } from "../../src/contracts.ts";
+import { LAYOUT, paths } from "../../src/contracts.ts";
 import { codexWorkerHome, FAKE_CODEX_REF } from "../harness/codex-worker.ts";
-import { treehouseAvailable } from "../harness/index.ts";
+import { readRunEvents, treehouseAvailable } from "../harness/index.ts";
+import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 const skip = treehouseAvailable() ? false : "needs treehouse on PATH";
 type H = Awaited<ReturnType<typeof codexWorkerHome>>;
@@ -43,4 +44,34 @@ test("T1: a row-routed job never runs pi when the codex slot is full; it queues 
 	const record = h.record(second.id);
 	assert.equal(record?.worker.driver, "codex", JSON.stringify(record?.worker));
 	assert.equal(record?.routing?.driver, "codex");
+});
+
+// T4: on a codex row only the human's own per-job request moves a job to pi, recorded on it with its source; a parent's
+// driver, a model-only pick and a model the configured CLI cannot run are refused before any lease.
+test("T4: on a codex row a parent's driver pi, a model-only pick and a pi model refuse; the human's driver pick runs pi, recorded", { skip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t);
+	const piModel = codexRow(h);
+	const [parent, modelOnly, model, human] = await Promise.all([h.job(), h.job(), h.job(), h.job()]);
+	const v1 = seedOperatorPick(h.b.home, piModel, { jobId: modelOnly.id });
+	const v2 = seedOperatorPick(h.b.home, piModel, { jobId: human.id, driver: "pi" });
+	assert.throws(() => seedOperatorPick(h.b.home, piModel, { jobId: human.id, driver: "pi", quote: `use ${piModel} for this one` }),
+		/operator_pick_fabricated: the quote does not name the pi CLI as a whole word/);
+	const call = (id: string, args: Record<string, unknown>) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: id, task: "Report.", queue: false, when_ready: false, ...args } }] });
+	const ends = (await h.run([
+		call(parent.id, { driver: "pi" }), call(modelOnly.id, { driver: "pi", model: piModel, operator_quote: v1 }), call(model.id, { model: piModel }),
+		call(human.id, { driver: "pi", model: piModel, operator_quote: v2 }),
+	])).filter((end) => end.toolName === "cp_dispatch");
+	for (const [end, id] of [[ends[0], parent.id], [ends[1], modelOnly.id]] as const) {
+		assert.equal(end?.isError, true, text(end));
+		assert.match(text(end), /configured to run on the Codex CLI \(rule codex-research\), and a parent's driver choice is not an override/);
+		assert.equal(existsSync(join(h.b.home, paths.runDir(id))), false, `${id} has a run`);
+	}
+	assert.equal(ends[2]?.isError, true, text(ends[2]));
+	assert.match(text(ends[2]), /cannot run on the configured Codex CLI \(rule codex-research\); a model change never changes the CLI/);
+	assert.notEqual(ends[3]?.isError, true, text(ends[3]));
+	const record = h.record(human.id);
+	assert.deepEqual([record?.worker.driver, record?.worker.model, record?.routing?.driver], [undefined, piModel, "pi"]);
+	assert.match(record?.routing?.driver_reason ?? "", /^override: human terminal \S+ proof omp-[a-f0-9]{32} asked for pi$/);
+	const resolved = readRunEvents(h.b.home, human.id).find((event) => event.type === "routing_resolved")?.payload as { driver_override?: Record<string, unknown> };
+	assert.deepEqual([resolved.driver_override?.driver, resolved.driver_override?.kind, resolved.driver_override?.quote], ["pi", "terminal", v2.quote]);
 });

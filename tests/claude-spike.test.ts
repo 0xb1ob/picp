@@ -474,7 +474,8 @@ test("N4h reviewer route: off refuses, on is claude, a pi row is pi, a full CLI 
 	const subject = { job_id: "cp-subj", kind: "ship", delivery: "pr", worker: { role: "implementer" } } as never;
 	const held = (driver: string) => ({ job_id: "cp-subj", kind: "ship", delivery: "pr", phase: "held", worker: { role: "implementer", driver } }) as never;
 	const route = (row: Record<string, unknown>, live: string[] = [], record: never = subject, lendable = true) => resolveReviewerRoute({ profile, jobId: "cp-subj", project: "demo", kind: "research" },
-		config(row), ALWAYS_AVAILABLE, undefined, { home, jobId: "cp-subj", record, jobs: [record], manager: { active: live.map((key) => ({ key, driver: "claude" })), lendable: () => lendable } as never });
+		config(row), ALWAYS_AVAILABLE, undefined, { home, jobId: "cp-subj", record, jobs: [record], manager: { active: live.map((key) => ({ key, driver: "claude" })), stopping: () => false,
+			get: (key: string) => (lendable && live.includes(key) ? { worker: { alive: true, busy: false } } : undefined) } as never });
 	const refused = (promise: Promise<unknown>, pattern: RegExp, category: string) =>
 		assert.rejects(promise, (error: Error & { category?: string }) => pattern.test(error.message) && error.category === category);
 	writeFileSync(nativeConfigFile(home), JSON.stringify({ claude_review: false }));
@@ -493,7 +494,7 @@ test("N4h reviewer route: off refuses, on is claude, a pi row is pi, a full CLI 
 	// Unfixed, a review routed native held nothing until its spawn, so a racing second review also routed native and
 	// failed at WorkerManager.spawn; a reserving route now holds the slot until its start settles.
 	const reserving = (jobId: string) => resolveReviewerRoute({ profile, jobId, project: "demo", kind: "research" }, config({ driver: "claude" }),
-		ALWAYS_AVAILABLE, undefined, { home, jobId, record: subject, jobs: [subject], manager: { active: [], lendable: () => false } as never, reserve: true });
+		ALWAYS_AVAILABLE, undefined, { home, jobId, record: subject, jobs: [subject], manager: { active: [], get: () => undefined, stopping: () => false } as never, reserve: true });
 	await holdReviewerSlot(home, "cp-a", async () => {
 		assert.equal((await reserving("cp-a")).driver, "claude");
 		await refused(reserving("cp-b"), /cp-a\/review is live or being admitted/, "occupied");

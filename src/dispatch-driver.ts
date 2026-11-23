@@ -7,6 +7,7 @@ import { liveNativeJobs, nativeBaseEnv, NativeDriverError, type NativeRefusal, n
 import { nativeDriverSpec, type NativeDriverSpec } from "./drivers/registry.ts";
 import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest, RoutingError } from "./routing.ts";
 export { observeNative } from "./native-availability-observer.ts";
+export { NativeDriverError };
 import { NATIVE_DRIVERS, type NativeDriver } from "./worker-driver.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 

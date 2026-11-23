@@ -51,7 +51,7 @@ import {
 	WorkerProcess,
 	type WorkerSpawnOptions,
 } from "./worker-process.ts";
-import { nativeDriverSpec, nativeWorkerSlotRefusal } from "./drivers/registry.ts";
+import { lentSlot, nativeDriverSpec, nativeWorkerSlotRefusal } from "./drivers/registry.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 
 /** Why a spawn was refused; the message text is unchanged, the code is for callers that branch (cp_dispatch queues `spawn_cap`). */
@@ -360,8 +360,7 @@ export interface SpawnRequest {
 	/** Per-job operator-named skill dirs (`cp_dispatch skills`): absolute realpaths resolved upstream; package skills stay off. */
 	skills?: readonly string[];
 	driver?: NativeDriver; // N3b: set only after assertNativeSelection passed; absent spawns pi
-	/** A reviewer running in its idle held author's native slot (cp-912x ruling): that author is not counted. */
-	borrowsSlotOf?: string;
+	borrowsSlotOf?: string; // a reviewer in its idle held author's native slot (cp-912x ruling): that author is not counted
 }
 
 export interface WorkerManagerOptions {
@@ -411,8 +410,7 @@ export interface ManagedWorker {
 	model: string;
 	profile: string;
 	startedAt: number;
-	driver?: NativeDriver;
-	borrowsSlotOf?: string;
+	driver?: NativeDriver; borrowsSlotOf?: string;
 }
 
 /**
@@ -481,17 +479,6 @@ export class WorkerManager {
 
 	get(key: string): ManagedWorker | undefined {
 		return this.#workers.get(key);
-	}
-
-	/** The live reviewer running in `key`'s native slot, if any. */
-	borrowerOf(key: string): string | undefined {
-		return [...this.#workers.values()].find((managed) => managed.borrowsSlotOf === key)?.key;
-	}
-
-	/** Whether `key`'s slot may be lent: alive, idle, not stopping, and not already lent to another worker. */
-	lendable(key: string): boolean {
-		const managed = this.#workers.get(key);
-		return managed !== undefined && managed.worker.alive && !managed.worker.busy && !this.stopping(key) && this.borrowerOf(key) === undefined;
 	}
 
 	/**
@@ -637,8 +624,7 @@ export class WorkerManager {
 				{ code: reviewer ? "review_reserve" : "spawn_cap" },
 			);
 		}
-		const lent = request.borrowsSlotOf !== undefined && this.lendable(request.borrowsSlotOf) ? request.borrowsSlotOf : undefined;
-		const full = request.driver && nativeWorkerSlotRefusal(this.#options.home, request.driver, this.active.filter((w) => w.driver === request.driver && w.key !== lent).map((w) => w.key), key);
+		const lent = lentSlot(this, request.borrowsSlotOf), full = request.driver && nativeWorkerSlotRefusal(this.#options.home, request.driver, this.active.filter((w) => w.driver === request.driver && w.key !== lent).map((w) => w.key), key);
 		if (full) throw new SpawnSafetyError(`job ${key}: ${full.why}`);
 		request.admit?.();
 		const plan = this.plan(request);

@@ -6,6 +6,7 @@ import { type Delivery, type FleetRecord, isScriptFleetRecord, type RoutingConfi
 import { holdNativeSlot, liveNativeWorkers, reserveNativeSlot, resolveDriverRoute } from "./dispatch-driver.ts";
 import { waitingLabel } from "./dispatch-queue.ts";
 import { NativeDriverError } from "./drivers/claude.ts";
+import { lendable } from "./drivers/registry.ts";
 import type { ModelProbe, RouteRequest, resolveWithCapacity } from "./routing.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 import type { WorkerManager } from "./worker-manager.ts";
@@ -15,7 +16,7 @@ export interface ReviewerDriverContext {
 	jobId: string;
 	record?: FleetRecord | undefined;
 	jobs: readonly FleetRecord[];
-	manager: Pick<WorkerManager, "active" | "lendable">;
+	manager: Pick<WorkerManager, "active" | "get" | "stopping">;
 	/** Take the native slot until the caller's `holdReviewerSlot` settles; a caller that spawns later must not set it. */
 	reserve?: boolean;
 }
@@ -33,7 +34,7 @@ const reviewerSlot = (jobId: string): string => `${jobId}/review`;
 function lender(ctx: ReviewerDriverContext): string | undefined {
 	const record = ctx.record;
 	if (!record || record.phase !== "held" || isScriptFleetRecord(record) || record.worker.driver === undefined) return undefined;
-	return ctx.manager.lendable(record.job_id) ? record.job_id : undefined;
+	return lendable(ctx.manager, record.job_id) ? record.job_id : undefined;
 }
 
 /** The subject a decision borrowed its slot from (its `driver_reason` starts `borrowed:`), for the spawn. */

@@ -62,8 +62,7 @@ import type { RunRecorder } from "./run-artifacts.ts";
 import { RunRegistry } from "./runs.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
-import { NativeDriverError } from "./drivers/claude.ts";
-import { type DriverContext, driverFields, holdNativeSlot, liveNativeWorkers, nativeSpawn, observeNative, resolveDriverRoute } from "./dispatch-driver.ts";
+import { type DriverContext, driverFields, NativeDriverError, holdNativeSlot, liveNativeWorkers, nativeSpawn, observeNative, resolveDriverRoute } from "./dispatch-driver.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
 import { assertContinuationTask, continuityInputsBlock } from "./mandate-continuity.ts";
@@ -770,8 +769,7 @@ export class Dispatcher {
 				provenance: inputs.provenance,
 				...(inputs.reasons.length > 0 ? { reasons: inputs.reasons } : {}),
 				...(gate.warning ? { risk_warning: gate.warning } : {}), ...(gate.recorded ? { recorded_risk: gate.recorded.risk, recorded_risk_from: gate.recorded.from } : {}),
-				...(operatorPick ? { operator_pick: operatorPick } : {}), ...(request.pickSpent ? { prior_pick_attempt: request.pickSpent } : {}),
-				...(request.pick?.driver && routing.driver === request.pick.driver ? { driver_override: driverOverrideEvent(request.pick) } : {}),
+				...(operatorPick ? { operator_pick: operatorPick } : {}), ...(request.pickSpent ? { prior_pick_attempt: request.pickSpent } : {}), ...(request.pick?.driver && routing.driver === request.pick.driver ? { driver_override: driverOverrideEvent(request.pick) } : {}),
 			});
 			attachWorkerObservers({
 				recorder, worker: managed.worker, jobId: issue.id,

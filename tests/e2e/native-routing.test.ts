@@ -373,7 +373,10 @@ test("S2 availability: spent, reset, no-reset and auth evidence refuse new jobs 
 
 	// A spent window refuses the next new job by name; the failed native job is never revived, re-dispatched or
 	// rerouted onto pi (R1: an operator pick of a pi model), and bounded recovery refused it.
-	refusedBy(await runAlone(fallback.id), fallback.id, new RegExp(`five_hour rejected until ${iso(reset * 1000)}`));
+	// The refusal is instant, so this parent stays up a moment for its startup recovery of the spent job to settle.
+	await h.b.closeParents();
+	const refusedFallback = (await h.b.run([{ kind: "tool_calls", calls: [dispatch(fallback.id)] }, tool("bash", { command: "sleep 5" })], h.env)) as Tool[];
+	refusedBy(refusedFallback, fallback.id, new RegExp(`five_hour rejected until ${iso(reset * 1000)}`));
 	const quote = seedOperatorPick(h.b.home, h.piModel, { jobId: spent.id });
 	await h.b.closeParents();
 	const lock = (await h.b.run([
