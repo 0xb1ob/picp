@@ -56,6 +56,8 @@ function Clock({job}: {job: ViewerJob | undefined}) {
 
 /** The open asks and live workers, joined to `/api/jobs` by exact id; nothing the record lacks is shown as a value. */
 function Body({asks, live, selection, control, answering, jobs, jobsError, current, onClose, onJob, onJobs}: ContextProps) {
+ // Collapsed on every mount and never persisted: a new ask only moves the count.
+ const [asksOpen, setAsksOpen] = useState(false);
  return <>
   <header class="workspace-context-head">
    <h2>This conversation</h2>
@@ -64,8 +66,13 @@ function Body({asks, live, selection, control, answering, jobs, jobsError, curre
   </header>
   <div class="workspace-context-body">
    <section aria-label="Asked you">
-    <h3 class={asks.length ? "workspace-context-asked" : undefined}>Asked you · {asks.length}</h3>
-    {asks.length ? <ul>{asks.map(ask => <AskCard key={ask.id} ask={ask} control={control} answering={answering} current={current}/>)}</ul> : <p>Nothing is waiting on you.</p>}
+    <h3 class={asks.length ? "workspace-context-asked" : undefined}>
+     <button type="button" class="workspace-context-asked-toggle" aria-expanded={asksOpen}
+      onClick={() => setAsksOpen(open => !open)}><span class="workspace-context-chevron" aria-hidden="true"/>Asked you · {asks.length}</button>
+    </h3>
+    {asksOpen && (asks.length
+     ? <ul>{asks.map(ask => <AskCard key={ask.id} ask={ask} control={control} answering={answering} current={current}/>)}</ul>
+     : <p>Nothing is waiting on you.</p>)}
    </section>
    <section aria-label="In flight">
     <h3>In flight · {live.length}</h3>
