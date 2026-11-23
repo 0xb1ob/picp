@@ -165,6 +165,8 @@ export function isEnabled(config: QualityConfig): boolean {
 // ---------------------------------------------------------------------------
 
 export interface QualityOptions {
+	/** cp-912x R3: a start a full CLI refused waits for that CLI (`queueQuality`); returns the error to throw. */
+	wait?: (request: QualityRequest, error: unknown) => unknown;
 	capacity?: CapacityReader;
 	home: string;
 	profilesDir: string;
@@ -187,6 +189,8 @@ export interface QualityRequest {
 	config: QualityConfig;
 	/** The wake-up's "Next:" line. Default: "act on next". */
 	directive?: string;
+	/** Internal (the wait queue's replay): a full CLI rethrows instead of queueing again. */
+	nativeReplay?: boolean;
 }
 
 /** The panel returned before its report exists (spec 2026-09-05). */
@@ -222,7 +226,12 @@ export class QualityPass {
 	 * sequentially inside the background waiter, and one wake-up follows the
 	 * report. An existing report is returned as is.
 	 */
-	async start(request: QualityRequest): Promise<QualityStart> {
+	start(request: QualityRequest): Promise<QualityStart> {
+		const wait = request.nativeReplay ? undefined : this.#options.wait;
+		return wait ? this.#start(request).catch((error: unknown) => { throw wait(request, error); }) : this.#start(request);
+	}
+
+	async #start(request: QualityRequest): Promise<QualityStart> {
 		const config = request.config;
 		if (!isEnabled(config)) return undefined;
 		const existing = this.read(request.jobId);

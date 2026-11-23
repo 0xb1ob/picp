@@ -573,8 +573,14 @@ export class Sender {
 		const file = join(this.#options.runs.open(request.jobId).runDir, `waiting-send-${Date.now()}.md`);
 		writeFileSync(file, request.message, { mode: 0o600 });
 		const mode = request.mode === "steer" ? undefined : request.mode;
-		const queued = this.#options.wait({ kind: "send", job_id: request.jobId, driver, text: status, request: {
-			message_file: file, ...(mode ? { mode } : {}), ...(request.purpose ? { purpose: request.purpose } : {}), ...(request.keepRound ? { keep_round: true } : {}) } });
+		let queued: ReturnType<NonNullable<SenderOptions["wait"]>>;
+		try {
+			queued = this.#options.wait({ kind: "send", job_id: request.jobId, driver, text: status, request: {
+				message_file: file, ...(mode ? { mode } : {}), ...(request.purpose ? { purpose: request.purpose } : {}), ...(request.keepRound ? { keep_round: true } : {}) } });
+		} catch (failure) {
+			rmSync(file, { force: true }); // a draining home or a full queue keeps no body behind
+			throw new SendError(`${request.jobId} is ${status} and was not queued: ${(failure as Error).message}. Nothing was sent.`);
+		}
 		if (queued.entry.request.message_file !== file) {
 			rmSync(file, { force: true });
 			throw new SendError(`${request.jobId} already has a send waiting (position ${queued.position}), ${status}; send again after its wake-up says it was delivered. Nothing was sent.`);

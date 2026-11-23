@@ -5,20 +5,24 @@
 
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, validate, type ValidationResult } from "./core.ts";
+import { QualityConfigSchema } from "./reviews.ts";
 
 /** At most this many waiting entries; a full file refuses the enqueue by name (the occupied refusal stands). */
 export const NATIVE_WAIT_MAX = 32;
 
-export const NATIVE_WAIT_KINDS = ["review", "gate", "revive", "send", "pipeline-advance"] as const;
+export const NATIVE_WAIT_KINDS = ["review", "gate", "quality", "revive", "send", "pipeline-advance"] as const;
 export type NativeWaitKind = (typeof NATIVE_WAIT_KINDS)[number];
 
-/** What a replay re-runs with (snake_case, like tool parameters); the send body lives in the run dir, never here. */
+/** What a replay re-runs with (snake_case, like tool parameters); a send body or panel task lives in the run dir. */
 export const NativeWaitRequestSchema = Type.Object(
 	{
 		model: Type.Optional(Type.String({ minLength: 1 })),
 		deliver_revise: Type.Optional(Type.Boolean()),
 		directive: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+		recovery_attempt_id: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+		quality: Type.Optional(QualityConfigSchema),
 		native_recovery: Type.Optional(Type.Boolean()),
+		implementer_model: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])),
 		message_file: Type.Optional(Type.String({ minLength: 1 })),
 		mode: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("prompt"), Type.Literal("follow_up")])),
 		purpose: Type.Optional(Type.Literal("repair")),
@@ -30,7 +34,7 @@ export type NativeWaitRequest = Static<typeof NativeWaitRequestSchema>;
 
 export const NativeWaitEntrySchema = Type.Object(
 	{
-		kind: Type.Union([Type.Literal("review"), Type.Literal("gate"), Type.Literal("revive"), Type.Literal("send"), Type.Literal("pipeline-advance")]),
+		kind: Type.Union([Type.Literal("review"), Type.Literal("gate"), Type.Literal("quality"), Type.Literal("revive"), Type.Literal("send"), Type.Literal("pipeline-advance")]),
 		job_id: JobIdSchema,
 		driver: Type.Union([Type.Literal("claude"), Type.Literal("codex")]),
 		/** The visible status, e.g. `waiting for Codex CLI capacity`. */

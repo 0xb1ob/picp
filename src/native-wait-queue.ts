@@ -3,7 +3,7 @@
  * replayed FIFO per CLI on that same CLI, never another, before the dispatch queue's new jobs. Only the lock owner
  * drains, never during a home drain; every outcome but "still full" wakes the parent.
  */
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	type FleetRecord,
@@ -23,6 +23,8 @@ import type { NativeDriverError } from "./drivers/claude.ts";
 import { nativeDriverSpec } from "./drivers/registry.ts";
 import { assertNotDraining, readDrain } from "./drain.ts";
 import { isGateWait } from "./gate.ts";
+import { recoveryGateRequest } from "./gate-recovery-authority.ts";
+import { isQualityWait, type QualityRequest } from "./quality.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { ReviewRuns } from "./review-runs.ts";
 import { boundedWakeupId, type DurableWakeupInput } from "./wakeup-outbox.ts";
@@ -192,15 +194,24 @@ export class NativeWaitQueue {
 
 const sameEntry = (a: NativeWaitEntry, b: NativeWaitEntry): boolean => a.kind === b.kind && a.job_id === b.job_id && a.queued_at === b.queued_at;
 
-type ReplayPost = Pick<CommandPost, "diffReviewModule" | "gateModule" | "reviewRuns" | "revive" | "sender" | "pipeline"> & { fleet: { get(id: string): FleetRecord | undefined } };
+type ReplayPost = Pick<CommandPost, "diffReviewModule" | "gateModule" | "qualityPass" | "reviewRuns" | "revive" | "sender" | "pipeline">
+	& Parameters<typeof recoveryGateRequest>[0] & { fleet: { get(id: string): FleetRecord | undefined } };
 
 /** Each kind's full entry point, re-run without queueing again: a still-full CLI throws `occupied` (head kept). */
 export function replayOn(post: ReplayPost): (entry: NativeWaitEntry) => Promise<string> {
 	return async (entry) => {
 		const r = entry.request;
 		const review = { jobId: entry.job_id, ...(r.model ? { model: r.model } : {}), ...(r.deliver_revise === undefined ? {} : { deliverRevise: r.deliver_revise }), ...(r.directive ? { directive: r.directive } : {}) };
+		if (entry.kind === "quality") {
+			const task = readFileSync(r.message_file ?? "", "utf8");
+			const started = await post.qualityPass().start({ ...review, task, config: r.quality ?? {}, nativeReplay: true });
+			if (!isQualityWait(started)) return "quality panel already decided on disk";
+			post.reviewRuns.handBack(started.key);
+			return `quality panel attempt ${started.attempt} started`;
+		}
 		if (entry.kind === "review" || entry.kind === "gate") {
-			const started = entry.kind === "review" ? await post.diffReviewModule().start(review) : await post.gateModule().start(review);
+			const gate = { ...review, ...(r.recovery_attempt_id ? { recoveryAttemptId: r.recovery_attempt_id } : {}) };
+			const started = entry.kind === "review" ? await post.diffReviewModule().start(review) : await post.gateModule().start(recoveryGateRequest(post, gate));
 			const wait = entry.kind === "review" ? isDiffReviewWait(started as never) : isGateWait(started as never);
 			if (!wait) return `${entry.kind} already decided on disk`;
 			const { key, attempt } = started as unknown as { key: string; attempt: number };
@@ -218,20 +229,37 @@ export function replayOn(post: ReplayPost): (entry: NativeWaitEntry) => Promise<
 			if (sent.receipt === "failed") throw new NativeWaitError(sent.error ?? "the worker refused the message");
 			return `send ${sent.receipt}`;
 		}
-		const advanced = await post.pipeline().advance(entry.job_id, { nativeReplay: true });
+		const advanced = await post.pipeline().advance(entry.job_id, { nativeReplay: true, ...(r.implementer_model === undefined ? {} : { implementerModel: r.implementer_model }) });
 		if (advanced.pending) post.reviewRuns.handBack(ReviewRuns.key(advanced.pending.surface === "review" ? advanced.ship_id : advanced.research_id, advanced.pending.surface, advanced.pending.attempt));
 		return `advance ${advanced.state}/${advanced.next}`;
 	};
 }
 
-/** The review/gate request fields a replay re-runs with. */
-export const reviewWaitRequest = (request: { model?: string; deliverRevise?: boolean; directive?: string }): NativeWaitRequest => ({
+/** The review/gate request fields a replay re-runs with (a recovery gate re-reads its attempt at replay). */
+export const reviewWaitRequest = (request: { model?: string; deliverRevise?: boolean; directive?: string; recoveryAttemptId?: string }): NativeWaitRequest => ({
 	...(request.model ? { model: request.model } : {}), ...(request.deliverRevise === undefined ? {} : { deliver_revise: request.deliverRevise }),
 	...(request.directive ? { directive: request.directive.slice(0, 500) } : {}),
+	...(request.recoveryAttemptId ? { recovery_attempt_id: request.recoveryAttemptId } : {}),
 });
 
-/** A pipeline advance a full CLI refused: its queue position, or undefined for any other error. */
-export function waitAdvance(queue: Pick<NativeWaitQueue, "queue">, researchId: string, error: unknown): number | undefined {
-	const queued = queue.queue("pipeline-advance", researchId, {}, error);
-	return queued instanceof NativeWaitQueuedError ? queued.position : undefined;
+/** A pipeline advance a full CLI refused (or whose panel start it queued): position and status, else undefined. */
+export function waitAdvance(queue: Pick<NativeWaitQueue, "queue">, researchId: string, error: unknown, implementerModel?: string | null): { position: number; text: string } | undefined {
+	const queued = error instanceof NativeWaitQueuedError ? error
+		: queue.queue("pipeline-advance", researchId, implementerModel === undefined ? {} : { implementer_model: implementerModel }, error);
+	return queued instanceof NativeWaitQueuedError ? { position: queued.position, text: queued.entry.text } : undefined;
+}
+
+/** A standalone panel start a full CLI refused: its task goes to the run dir only once the entry is queued. */
+export function queueQuality(queue: Pick<NativeWaitQueue, "queue">, runDir: string, request: QualityRequest, error: unknown): unknown {
+	if (waitingLabel(error) === undefined) return error;
+	const file = join(runDir, `waiting-quality-${Date.now()}.md`);
+	writeFileSync(file, request.task, { mode: 0o600 });
+	try {
+		const queued = queue.queue("quality", request.jobId, { message_file: file, quality: request.config, ...(request.directive ? { directive: request.directive.slice(0, 500) } : {}) }, error);
+		if (!(queued instanceof NativeWaitQueuedError) || queued.entry.request.message_file !== file) rmSync(file, { force: true });
+		return queued;
+	} catch (failure) {
+		rmSync(file, { force: true });
+		throw failure;
+	}
 }

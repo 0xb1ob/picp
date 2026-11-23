@@ -698,7 +698,7 @@ export interface PipelineOptions {
 	/** Gate escalate/policy writes here so the parent relays rather than composes. */
 	escalations?: EscalationStore;
 	/** cp-912x R1: an advance a full CLI refused waits for that CLI (NativeWaitQueue); returns its position. */
-	waitNative?: (researchId: string, error: unknown) => number | undefined;
+	waitNative?: (researchId: string, error: unknown, implementerModel?: string | null) => { position: number; text: string } | undefined;
 	/** cp-912x R2: a planner a full CLI refused waits in the dispatch queue (DispatchQueue.enqueue). */
 	enqueue?: (jobId: string, request: QueuedDispatchRequest) => number;
 }
@@ -945,7 +945,8 @@ export class PipelineRunner {
 			const waiting = waitingLabel(error);
 			if (waiting === undefined || !this.#options.enqueue) throw error;
 			// A full CLI never moves the planner: it waits as a new job in the dispatch queue, on the same CLI.
-			const position = this.#options.enqueue(research.id, { ...planner, ...(request.wallClockSeconds !== undefined ? { wall_clock_seconds: request.wallClockSeconds } : {}) });
+			const position = this.#options.enqueue(research.id, { ...planner, ...(request.fetch === false ? { fetch: false as const } : {}),
+				...(request.wallClockSeconds !== undefined ? { wall_clock_seconds: request.wallClockSeconds } : {}) });
 			return { research_id: research.id, ship_id: ship.id, record, queued: { position, waiting } };
 		}
 		return { research_id: research.id, ship_id: ship.id, record, dispatch };
@@ -960,10 +961,10 @@ export class PipelineRunner {
 			return await this.#advance(researchId, options);
 		} catch (error) {
 			// cp-912x R1: an implementer, gate or panel start a full CLI refused waits for that CLI; state is unchanged.
-			const position = options.nativeReplay ? undefined : this.#options.waitNative?.(researchId, error);
-			if (position === undefined) throw error;
+			const queued = options.nativeReplay ? undefined : this.#options.waitNative?.(researchId, error, options.implementerModel);
+			if (queued === undefined) throw error;
 			const record = this.store.require(researchId);
-			return this.#step(record, record.state, "wait", `${record.ship_id}: ${waitingLabel(error)} — this advance is queued (position ${position}) and re-runs on that CLI when a slot frees, never on another; do not re-issue.`);
+			return this.#step(record, record.state, "wait", `${record.ship_id}: ${queued.text} — queued (position ${queued.position}); it re-runs on that CLI when a slot frees, never on another; do not re-issue.`);
 		}
 	}
 

@@ -30,6 +30,8 @@ export const QueuedDispatchRequestSchema = Type.Object(
 		operator_quote: Type.Optional(OperatorModelPickReferenceSchema),
 		/** N3b: replayed so the release re-runs driver selection; a pi pin replays as pi, never a native run. */
 		driver: Type.Optional(Type.Union([Type.Literal("pi"), Type.Literal("claude"), Type.Literal("codex")])),
+		/** A queued pipeline planner that skipped the fetch (cp-912x R2) replays without it. */
+		fetch: Type.Optional(Type.Literal(false)),
 	},
 	{ additionalProperties: false },
 );

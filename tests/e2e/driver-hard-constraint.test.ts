@@ -147,6 +147,9 @@ test("T5a: a dead codex job's revive waits for Codex CLI capacity (no attempt sp
 	await killer;
 	const failure = ofType(h, dead.id, "failure")[0]?.payload as { class?: FailureClass } | undefined;
 	assert.equal(readRecoveryAttempts(h.b.home, dead.id, failure?.class ?? "crash"), 0, "a queued revive spends no recovery attempt");
+	const escalations = existsSync(join(h.b.home, LAYOUT.escalationsFile)) ? readFileSync(join(h.b.home, LAYOUT.escalationsFile), "utf8") : "";
+	assert.equal(escalations.includes(dead.id), false, "a queued revive (revive_refused, not attempted) escalates nothing");
+	assert.deepEqual(ofType(h, dead.id, "recovery_escalated"), []);
 	const revive = ends.find((end) => end.toolName === "cp_revive");
 	assert.notEqual(revive?.isError, true, text(revive));
 	assert.deepEqual([revive?.result.details?.state, revive?.result.details?.kind, revive?.result.details?.position], ["queued", "revive", 1], text(revive));
@@ -231,19 +234,23 @@ test("T6: a pipeline advance whose codex implementer finds the slot full waits f
 	mkdirSync(dirname(join(h.b.home, paths.envelopeFile(id))), { recursive: true });
 	writeFileSync(join(h.b.home, paths.envelopeFile(id)), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: id, received_at: isoTimestamp(), attempt: 1, envelope }));
 	gate.push({ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["concrete"] } }] });
-	let result = await post.advancePipeline(id);
+	// The implementer pin rides on every advance, so the queued one must carry it into its replay.
+	const pin = { implementerModel: FAKE_CODEX_REF };
+	let result = await post.advancePipeline(id, pin);
 	for (let guard = 0; result.pending && guard < 10; guard += 1) {
 		const key = ReviewRuns.key(result.pending.surface === "review" ? result.ship_id : id, result.pending.surface, result.pending.attempt);
 		post.reviewRuns.handBack(key);
 		await post.reviewRuns.settled(key);
-		result = await post.advancePipeline(id);
+		result = await post.advancePipeline(id, pin);
 	}
 	assert.equal(result.next, "wait", result.message);
-	assert.match(result.message, new RegExp(`^${started.ship_id}: waiting for Codex CLI capacity — this advance is queued \\(position 1\\)`));
+	assert.match(result.message, new RegExp(`^${started.ship_id}: waiting for Codex CLI capacity — queued \\(position 1\\)`));
 	assert.equal(h.record(started.ship_id), undefined, "no implementer ran on another CLI");
 	assert.deepEqual(post.nativeWait.list().map((row) => [row.job_id, row.kind, row.driver]), [[id, "pipeline-advance", "codex"]]);
+	assert.equal(post.nativeWait.read().entries[0]?.request.implementer_model, FAKE_CODEX_REF, "the queued advance keeps its pin");
 	await post.tearDown(holder.id);
 	const ship = await waitFor(() => h.record(started.ship_id), (record) => record?.worker.driver === "codex", { timeoutMs: 120_000, what: "the implementer on codex" });
-	assert.deepEqual([ship?.worker.role, ship?.routing?.driver], ["implementer", "codex"]);
+	assert.deepEqual([ship?.worker.role, ship?.worker.model, ship?.routing?.driver], ["implementer", FAKE_CODEX_REF, "codex"]);
+	assert.match(ship?.routing?.driver_reason ?? "", new RegExp(`override ${FAKE_CODEX_REF}`), "the replay ran with the pin");
 	assert.deepEqual(post.nativeWait.list(), []);
 });

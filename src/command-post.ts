@@ -125,7 +125,7 @@ import { IntegrationHolds } from "./integration-hold.ts";
 import { CI_FLAKES_FILE, CiRerunStore, maybeRerunInfra, readFailingTests } from "./ci-infra-rerun.ts";
 import { HeldRelease } from "./held-release.ts";
 import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
-import { NativeWaitQueue, replayOn, reviewWaitRequest, waitAdvance } from "./native-wait-queue.ts";
+import { NativeWaitQueue, queueQuality, replayOn, reviewWaitRequest, waitAdvance } from "./native-wait-queue.ts";
 import { ArmedDispatches } from "./dependency-dispatch.ts";
 import { makeHandoff } from "./human-handoff.ts";
 import { afterMergeHook } from "./after-merge.ts";
@@ -1272,7 +1272,7 @@ export class CommandPost {
 
 	async gate(request: GateRequest): Promise<GateStart> {
 		assertNotDraining(this.home, "plan gate reviewer");
-		return request.recoveryAttemptId ? this.gateModule().start(recoveryGateRequest(this, request)) : this.nativeWait.orWait("gate", request.jobId, reviewWaitRequest(request), () => this.gateModule().start(request));
+		return this.nativeWait.orWait("gate", request.jobId, reviewWaitRequest(request), () => this.gateModule().start(recoveryGateRequest(this, request)));
 	}
 
 	/**
@@ -1318,7 +1318,7 @@ export class CommandPost {
 			routing: loadRoutingConfig(this.home),
 			probe: this.probe(),
 			fleet: this.fleet,
-			reviews: this.reviewRuns,
+			reviews: this.reviewRuns, wait: (request, error) => queueQuality(this.nativeWait, this.runs.open(request.jobId).runDir, request, error),
 		});
 	}
 
@@ -1355,7 +1355,7 @@ export class CommandPost {
 			// through it must wake the parent exactly like one granted anywhere else.
 			onAnswered: (decision) => this.#recordAnswered(decision),
 			...(defaults ? { qualityDefaults: defaults } : {}),
-			send: async (jobId, message) => this.sender.send({ jobId, message }), enqueue: (id, request) => this.dispatchQueue.enqueue(id, request), waitNative: (id, error) => waitAdvance(this.nativeWait, id, error),
+			send: async (jobId, message) => this.sender.send({ jobId, message }), enqueue: (id, request) => this.dispatchQueue.enqueue(id, request), waitNative: (id, error, model) => waitAdvance(this.nativeWait, id, error, model),
 			...(this.#options.authorizer ? { authorizer: this.#options.authorizer } : {}),
 			approvals: this.approvals,
 			mandates: this.mandates,
