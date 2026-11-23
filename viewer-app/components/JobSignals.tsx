@@ -1,6 +1,5 @@
 import type { ViewerJob } from "../../src/viewer/api-types.ts";
 import { shortSha } from "../format.ts";
-import "./driver.css";
 
 export function PhaseDot({phase}:{phase:string}) { return <span aria-hidden="true" class={`job-dot job-dot-${phase}`}/>; }
 
