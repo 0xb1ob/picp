@@ -12,6 +12,7 @@ import { diffReviewStatusOf, formatDiffReviewStatus, formatReviewWait, isDiffRev
 import { classifyIntake, formatAdvance } from "../../src/pipeline.ts";
 import { formatDispatchResult } from "../../src/dispatch.ts";
 import { formatGate, formatGateStatus, formatGateWait, isGateWait } from "../../src/gate.ts";
+import { queuedToolResult } from "../../src/native-wait-queue.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
 import { currentRuntime, diffReviewToolPayload, awaitingListText } from "./helpers.ts";
 import { type ExtensionDeps, toolContextOf } from "./shared.ts";
@@ -193,10 +194,11 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					content: [
 						{
 							type: "text",
-							text: `${result.research_id} (research) -> ${result.ship_id} (ship, blocked)\n${formatDispatchResult(result.dispatch)}`,
+							text: `${result.research_id} (research) -> ${result.ship_id} (ship, blocked)\n${result.dispatch ? formatDispatchResult(result.dispatch)
+								: `${result.research_id} queued (position ${result.queued?.position}), ${result.queued?.waiting} — the planner starts on that CLI when a slot frees, never on another; do not re-issue`}`,
 						},
 					],
-					details: result as unknown as Record<string, unknown>,
+					details: { ...(result.queued ? { state: "queued", waiting: result.queued.waiting } : {}), ...result } as unknown as Record<string, unknown>,
 				};
 			}
 			if (!params.research_id) throw new Error(`cp_pipeline ${params.action} needs \`research_id\``);
@@ -331,12 +333,17 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					details: result,
 				};
 			}
-			const result = await post.gate({
-				jobId: params.job_id,
-				...(params.recovery_attempt_id ? { recoveryAttemptId: params.recovery_attempt_id } : {}),
-				...(params.model ? { model: params.model } : {}),
-				...(params.deliver_revise === undefined ? {} : { deliverRevise: params.deliver_revise }),
-			});
+			let result: Awaited<ReturnType<typeof post.gate>>;
+			try {
+				result = await post.gate({
+					jobId: params.job_id,
+					...(params.recovery_attempt_id ? { recoveryAttemptId: params.recovery_attempt_id } : {}),
+					...(params.model ? { model: params.model } : {}),
+					...(params.deliver_revise === undefined ? {} : { deliverRevise: params.deliver_revise }),
+				});
+			} catch (error) {
+				return queuedToolResult(error); // a full CLI queued the gate (cp-912x R3); anything else rethrows
+			}
 			tc.refresh();
 			if (isGateWait(result)) {
 				const payload = {
@@ -412,11 +419,16 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					details: status as unknown as Record<string, unknown>,
 				};
 			}
-			const result = await post.diffReview({
-				jobId: params.job_id,
-				...(params.model ? { model: params.model } : {}),
-				...(params.deliver_revise === undefined ? {} : { deliverRevise: params.deliver_revise }),
-			});
+			let result: Awaited<ReturnType<typeof post.diffReview>>;
+			try {
+				result = await post.diffReview({
+					jobId: params.job_id,
+					...(params.model ? { model: params.model } : {}),
+					...(params.deliver_revise === undefined ? {} : { deliverRevise: params.deliver_revise }),
+				});
+			} catch (error) {
+				return queuedToolResult(error); // a full CLI queued the review (cp-912x R3); anything else rethrows
+			}
 			tc.refresh();
 			if (isDiffReviewWait(result)) {
 				const payload = {

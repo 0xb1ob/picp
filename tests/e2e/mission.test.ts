@@ -298,7 +298,7 @@ test(
 			slug: "mission",
 			fetch: false,
 		});
-		assert.equal(started.dispatch.receipt, "accepted");
+		assert.equal(started.dispatch?.receipt, "accepted");
 		const { research_id: researchId, ship_id: shipId } = started;
 		// CI is green for whatever origin holds (scripted `gh`, real `git`) before the implementer ever reports.
 		const bin = join(home.path, "bin");

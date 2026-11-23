@@ -360,7 +360,7 @@ export interface SpawnRequest {
 	/** Per-job operator-named skill dirs (`cp_dispatch skills`): absolute realpaths resolved upstream; package skills stay off. */
 	skills?: readonly string[];
 	driver?: NativeDriver; // N3b: set only after assertNativeSelection passed; absent spawns pi
-	borrowsSlotOf?: string; // a reviewer in its idle held author's native slot (cp-912x ruling): that author is not counted
+	borrowsSlotOf?: string; // a reviewer in its idle held author's slot (cp-912x ruling): that author is not counted
 }
 
 export interface WorkerManagerOptions {

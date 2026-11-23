@@ -491,6 +491,11 @@ test("N4h reviewer route: off refuses, on is claude, a pi row is pi, a full CLI 
 	assert.match(own.driver_reason ?? "", /^borrowed: reviewer using held author's slot \(cp-subj\)/);
 	await refused(route({ driver: "claude" }, ["cp-subj"], held("claude"), false), /cp-subj is live/, "occupied");
 	await refused(route({ driver: "claude" }, ["cp-subj", "cp-other"], held("claude")), /cp-other is live/, "occupied");
+	// C1 (cp-912x T11): a held idle codex author never lends to a claude reviewer; the full claude slot stays full.
+	const mixed = { active: [{ key: "cp-subj", driver: "codex" }, { key: "cp-other", driver: "claude" }], stopping: () => false,
+		get: (key: string) => (key === "cp-subj" ? { worker: { alive: true, busy: false } } : undefined) } as never;
+	await refused(resolveReviewerRoute({ profile, jobId: "cp-subj", project: "demo", kind: "research" }, config({ driver: "claude" }), ALWAYS_AVAILABLE, undefined,
+		{ home, jobId: "cp-subj", record: held("codex"), jobs: [held("codex")], manager: mixed }), /cp-other is live/, "occupied");
 	// Unfixed, a review routed native held nothing until its spawn, so a racing second review also routed native and
 	// failed at WorkerManager.spawn; a reserving route now holds the slot until its start settles.
 	const reserving = (jobId: string) => resolveReviewerRoute({ profile, jobId, project: "demo", kind: "research" }, config({ driver: "claude" }),

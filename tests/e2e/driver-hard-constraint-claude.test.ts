@@ -13,17 +13,20 @@ import { FleetStore } from "../../src/fleet.ts";
 import { nativeAvailabilityFile } from "../../src/native-availability.ts";
 import { readSettings } from "../../src/settings.ts";
 import { applySettings } from "../../src/settings-write.ts";
-import { FAKE_NATIVE_MODEL } from "../harness/claude-mock-provider.ts";
+import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
+import { VERDICT_TOOL } from "../../src/drivers/claude-verdict.ts";
+import { type ClaudeStep, FAKE_NATIVE_MODEL } from "../harness/claude-mock-provider.ts";
 import { FAKE_CODEX_REF } from "../harness/codex-worker.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { readFleet, readRunEvents, treehouseAvailable } from "../harness/index.ts";
+import { readFleet, readRunEvents, routeDriver, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { nativeWorkerHome } from "../harness/native-worker.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 type Tool = { toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } };
 const text = (end: Tool | undefined) => JSON.stringify(end?.result.content ?? "");
 const call = (id: string, args: Record<string, unknown> = {}) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", ...args } }] });
 
-/** PATH without any real `claude`: the shim dir (if any), `tools` (links to every other tool of a dir holding claude), the rest. */
+/** PATH without any real `claude`: the shim dir (if any), `tools` (links to a claude dir's other tools), the rest. */
 function pathWith(tools: string, shim?: string): string {
 	const dirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
 	for (const dir of dirs.filter((each) => existsSync(join(each, "claude")))) {
@@ -35,7 +38,7 @@ function pathWith(tools: string, shim?: string): string {
 	return [...(shim ? [shim] : []), tools, ...dirs.filter((dir) => !existsSync(join(dir, "claude")))].join(delimiter);
 }
 
-/** A home whose planner row names a Claude model with a pi fallback, then Workers CLI = claude through the settings writer. */
+/** A home whose planner row names a Claude model with a pi fallback, then Workers CLI = claude (settings writer). */
 async function claudeHome(t: TestContext) {
 	const b = await dispatchS29(t);
 	const script = `hard-claude-pi-${Math.random().toString(36).slice(2, 8)}`;
@@ -52,9 +55,9 @@ async function claudeHome(t: TestContext) {
 	chmodSync(join(shim, "bin", "claude"), 0o755);
 	const job = async () => (await b.ledger.create({ title: `hard claude ${Math.random()}`, project: "demo", delivery: "local", kind: "research" })).id;
 	const fleet = (id: string) => (existsSync(join(b.home, LAYOUT.fleetFile)) ? readFleet(b.home).jobs.find((record) => record.job_id === id) : undefined);
-	const run = async (steps: Parameters<typeof b.run>[0], shimmed = true) => {
+	const run = async (steps: Parameters<typeof b.run>[0], shimmed = true, tool = "cp_dispatch") => {
 		await b.closeParents();
-		return ((await b.run(steps, { PATH: pathWith(join(shim, "tools"), shimmed ? join(shim, "bin") : undefined) })) as Tool[]).filter((end) => end.toolName === "cp_dispatch");
+		return ((await b.run(steps, { PATH: pathWith(join(shim, "tools"), shimmed ? join(shim, "bin") : undefined) })) as Tool[]).filter((end) => end.toolName === tool);
 	};
 	const piUntouched = () => assert.equal(b.provider.requests(script).length, 0, "a job reached the pi model");
 	return { b, piModel, job, fleet, run, piUntouched };
@@ -82,6 +85,28 @@ test("claude saturation: with Workers CLI claude and max_concurrent 1 full, a se
 	assert.equal(h.fleet(second), undefined, "the queued job has no fleet record");
 	assert.equal(existsSync(join(h.b.home, paths.runDir(second))), false, "the queued job has a run");
 	assert.match(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8"), new RegExp(second));
+	h.piUntouched();
+});
+
+// T7 (R2): a pipeline whose planner row is on the full Claude CLI never starts that planner on pi: cp_pipeline start
+// returns queued "waiting for Claude CLI capacity"; the research job waits in the dispatch queue (replay: T1).
+test("T7: cp_pipeline start on a full Claude CLI queues its planner waiting for Claude CLI capacity, never pi", { timeout: 300_000 }, async (t) => {
+	const h = await claudeHome(t);
+	const holder = await h.job();
+	const now = isoTimestamp();
+	await new FleetStore({ home: h.b.home }).add({
+		job_id: holder, project: "demo", kind: "research", delivery: "local", origin: DEFAULT_ORIGIN, phase: "held", reported_at: now, dispatched_at: now, usage: EMPTY_USAGE, branch: holder,
+		worker: { pid: process.pid, session_id: "native", session_file: join(h.b.home, "native.jsonl"), profile: "planner", role: "planner", model: FAKE_NATIVE_MODEL, started_at: now, driver: "claude" },
+		worktree: join(h.b.home, "recycled", holder),
+	});
+	const [end] = await h.run([{ kind: "tool_calls", calls: [{ name: "cp_pipeline", args: { action: "start", title: "t7 pipeline", task: "Add a line to README.md.", project: "demo" } }] }], true, "cp_pipeline");
+	assert.notEqual(end?.isError, true, text(end));
+	const details = end?.result.details as { state?: string; waiting?: string; research_id?: string; queued?: { position: number } } | undefined;
+	assert.deepEqual([details?.state, details?.waiting, details?.queued?.position], ["queued", "waiting for Claude CLI capacity", 1], text(end));
+	assert.match(text(end), /queued \(position 1\), waiting for Claude CLI capacity — the planner starts on that CLI when a slot frees, never on another/);
+	const research = details?.research_id ?? "";
+	assert.equal(h.fleet(research), undefined, "the planner has no fleet record");
+	assert.match(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8"), new RegExp(research));
 	h.piUntouched();
 });
 
@@ -171,4 +196,68 @@ test("P3: an explicit claude on a pi or codex row refuses; the human's claude pi
 		assert.match(decision?.driver_reason ?? "", /^override: human terminal \S+ proof omp-[a-f0-9]{32} asked for claude; effort /);
 	}
 	h.piUntouched();
+});
+
+// T9-T11 (ruling ps-20261123080922): at the default claude max_concurrent 1, a held idle ship job X lends its slot to
+// its own reviewer (routing line names it; a verdict lands, no deadlock). Meanwhile a cp_send to X queues (its reviewer
+// uses the held author's slot) and an unrelated claude job queues with no borrow and no pi; after the verdict the send
+// reaches X on claude and X reports again, while the unrelated job still waits.
+test("T9/T10/T11: a held claude author lends its slot to its own reviewer; a send waits for the verdict, an unrelated job keeps waiting", { skip, timeout: 300_000 }, async (t) => {
+	let id = "";
+	const release = { file: "" };
+	const blocked = () => ({ job_id: id, kind: "ship", status: "blocked", summary: "T9 change pushed.", blockers: ["the e2e case ends here"] });
+	const verdict = () => ({ job_id: id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["reviewed the packet"] });
+	const calls = (...uses: Array<{ name: string; input: unknown }>): ClaudeStep => ({ kind: "tool_use", calls: uses as never });
+	const h = await nativeWorkerHome(t, [
+		calls({ name: "Write", input: () => ({ file_path: join(h.worktree(id), "src", "t9.ts"), content: "export const t9 = true;\n" }) }),
+		calls({ name: "Bash", input: { command: "git add -A && git commit -q -m t9" } }),
+		calls({ name: "mcp__picp__git_push", input: {} }),
+		calls({ name: REPORT_TOOL, input: blocked }),
+		{ kind: "text", text: "Reported." },
+		// The reviewer holds its verdict until the parent has sent to X and dispatched the unrelated job.
+		{ kind: "tool_use", calls: [{ name: VERDICT_TOOL, input: verdict }] as never, beforeAnswer: () => waitFor(() => existsSync(release.file), Boolean, { timeoutMs: 120_000, what: "the release marker" }).then(() => undefined) },
+		{ kind: "text", text: "Reviewed." },
+		calls({ name: REPORT_TOOL, input: blocked }),
+		{ kind: "text", text: "Reported again." },
+	]);
+	release.file = join(h.fakeHome, "t9-release");
+	writeFileSync(join(h.b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true, claude_ship: true, claude_review: true }));
+	routeDriver(h.b.home, "claude", FAKE_NATIVE_MODEL, { roles: ["planner", "implementer", "gate-reviewer"] });
+	const author = await h.job("ship", "pr");
+	id = author.id;
+	const other = await h.job("research");
+	const events = join(h.b.home, paths.eventsFile(id));
+	const waitEvents = (pattern: string, count: number) => ({ kind: "tool_calls" as const, calls: [{ name: "bash", args: {
+		command: `for i in $(seq 600); do [ "$(grep -c '${pattern}' "${events}" 2>/dev/null)" -ge ${count} ] && break; sleep 0.2; done; sleep 1` } }] });
+	const step = (name: string, args: Record<string, unknown>) => ({ kind: "tool_calls" as const, calls: [{ name, args }] });
+	const message = "T10 follow-up: report once more.";
+	const ends = await h.run([
+		author.dispatch("Add src/t9.ts, commit, push and report."), h.awaitEnvelope(id), waitEvents('"type":"native_run"', 1),
+		step("cp_review", { job_id: id }), step("cp_send", { job_id: id, message }),
+		step("cp_dispatch", { job_id: other.id, task: "Report what README.md says.", model: FAKE_NATIVE_MODEL, driver: "claude" }),
+		step("bash", { command: `touch '${release.file}'` }),
+		h.awaitEnvelope(id), waitEvents('"type":"envelope_received"', 2), waitEvents('"type":"native_run"', 2),
+	]);
+	const review = ends.find((end) => end.toolName === "cp_review");
+	assert.notEqual(review?.isError, true, text(review));
+	const reviewEvents = readFileSync(join(h.b.home, paths.reviewRunDir(id, 1), "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; payload: Record<string, unknown> });
+	const routed = reviewEvents.find((event) => event.type === "routing_resolved")?.payload;
+	assert.match(String(routed?.line), new RegExp(`driver=claude slot="reviewer using held author's slot ${id}"`), JSON.stringify(routed));
+	assert.match(String(routed?.driver_reason), new RegExp(`^borrowed: reviewer using held author's slot \\(${id}\\)`));
+	await waitFor(() => existsSync(join(h.b.home, paths.reviewFile(id, 1))), Boolean, { timeoutMs: 60_000, what: "the verdict" });
+	assert.equal((JSON.parse(readFileSync(join(h.b.home, paths.reviewFile(id, 1)), "utf8")) as { verdict: string }).verdict, "pass");
+	const sent = ends.find((end) => end.toolName === "cp_send");
+	assert.notEqual(sent?.isError, true, text(sent));
+	assert.equal(sent?.result.details?.receipt, "queued", text(sent));
+	assert.match(String(sent?.result.details?.waiting), /^waiting for Claude CLI capacity: its reviewer is using the held author's slot \(/);
+	const unrelated = ends.find((end) => end.toolName === "cp_dispatch" && JSON.stringify(end.result.details ?? {}).includes(other.id));
+	assert.deepEqual([unrelated?.result.details?.state, unrelated?.result.details?.waiting], ["queued", "waiting for Claude CLI capacity"], text(unrelated));
+	// After the verdict: the send was delivered to X on claude (its second report), and the unrelated job still waits.
+	const prompts = readRunEvents(h.b.home, id).filter((event) => event.type === "prompt_sent").map((event) => event.payload as { receipt?: string });
+	assert.ok(prompts.some((each) => each.receipt === "delivered"), JSON.stringify(prompts));
+	assert.equal(readRunEvents(h.b.home, id).filter((event) => event.type === "envelope_received").length, 2);
+	assert.equal(h.record(id)?.worker.driver, "claude");
+	assert.equal(h.record(other.id), undefined, "the unrelated job never borrowed and never ran on another CLI");
+	assert.match(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8"), new RegExp(other.id));
+	assert.equal(h.claude.requests.some((request) => JSON.stringify(request.body).includes(message)), true, "the follow-up reached claude");
 });

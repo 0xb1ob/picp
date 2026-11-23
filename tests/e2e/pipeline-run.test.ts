@@ -369,7 +369,7 @@ test(
 		assert.ok(ship.labels?.includes("kind:ship"));
 		assert.ok(ship.labels?.includes("delivery:local"));
 		assert.deepEqual(await ledger.blockersOf(shipId), [researchId], "the ship job must be blocked by the research");
-		assert.equal(started.dispatch.receipt, "accepted");
+		assert.equal(started.dispatch?.receipt, "accepted");
 		assert.equal(b.post.pipeline().store.require(researchId).state, "researching");
 
 		// --- the planner writes its artifact and hangs (no envelope) -------
@@ -626,7 +626,7 @@ test("P11d-bounds-request: pipeline: requested wall-clock bound survives start a
 	const { research_id: researchId, ship_id: shipId } = started;
 	steps.push(verdict(researchId, {}));
 	assert.equal(b.post.fleet.require(researchId).bounds?.wall_clock_seconds, 10800);
-	assert.equal(started.dispatch.wall_clock_seconds, 10800);
+	assert.equal(started.dispatch?.wall_clock_seconds, 10800);
 	assert.equal(JSON.parse(readFileSync(b.post.pipeline().store.file(researchId), "utf8")).wall_clock_seconds, 10800);
 
 	await artifactWritten(b, researchId);

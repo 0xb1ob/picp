@@ -61,6 +61,7 @@ import {
 	type PipelineState,
 	type QualityConfig,
 	type QualityReport,
+	type QueuedDispatchRequest,
 	REVIEW_MAX_ATTEMPTS,
 	type ReviewSurface,
 	expectsPlannerBlockers,
@@ -82,6 +83,7 @@ import { raisePlanApproval } from "./escalation.ts";
 import { authorityHold } from "./authority-hold.ts";
 import type { Dispatcher, DispatchResult } from "./dispatch.ts";
 import { UpdateHoldError } from "./update-hold.ts";
+import { waitingLabel } from "./dispatch-queue.ts";
 import type { QuestionStore } from "./questions.ts";
 import { ReviewApprovalStore } from "./review-approval.ts";
 import { resolveFinalFix } from "./final-fix.ts";
@@ -695,6 +697,10 @@ export interface PipelineOptions {
 	mandates?: MandateStore;
 	/** Gate escalate/policy writes here so the parent relays rather than composes. */
 	escalations?: EscalationStore;
+	/** cp-912x R1: an advance a full CLI refused waits for that CLI (NativeWaitQueue); returns its position. */
+	waitNative?: (researchId: string, error: unknown, implementerModel?: string | null) => { position: number; text: string } | undefined;
+	/** cp-912x R2: a planner a full CLI refused waits in the dispatch queue (DispatchQueue.enqueue). */
+	enqueue?: (jobId: string, request: QueuedDispatchRequest) => number;
 }
 
 export interface StartRequest {
@@ -726,13 +732,17 @@ export interface StartRequest {
 export interface AdvanceOptions {
 	/** A model pins the implementer; `null` deletes a stored pin so routing decides. */
 	implementerModel?: string | null;
+	/** Internal (the wait queue's replay): a full CLI rethrows instead of queueing the advance again. */
+	nativeReplay?: boolean;
 }
 
 export interface StartResult {
 	research_id: string;
 	ship_id: string;
 	record: PipelineRecord;
-	dispatch: DispatchResult;
+	/** Absent when the planner's CLI is full: `queued` says where it waits (cp-912x R2). */
+	dispatch?: DispatchResult;
+	queued?: { position: number; waiting: string };
 }
 
 export interface AdvanceResult {
@@ -920,16 +930,25 @@ export class PipelineRunner {
 			}),
 		});
 
-		const dispatch = await this.#options.dispatcher().dispatch({
-			jobId: research.id,
+		const planner = {
 			task: request.task,
-			...(request.wallClockSeconds !== undefined ? { wallClockSeconds: request.wallClockSeconds } : {}),
 			...(request.scope ? { scope: request.scope } : {}),
 			...(request.risk ? { risk: request.risk } : {}),
 			...(request.model ? { model: request.model } : {}),
 			...(request.base ? { base: request.base } : {}),
-			...(request.fetch === false ? { fetch: false } : {}),
-		});
+		};
+		let dispatch: DispatchResult;
+		try {
+			dispatch = await this.#options.dispatcher().dispatch({ jobId: research.id, ...planner,
+				...(request.wallClockSeconds !== undefined ? { wallClockSeconds: request.wallClockSeconds } : {}), ...(request.fetch === false ? { fetch: false } : {}) });
+		} catch (error) {
+			const waiting = waitingLabel(error);
+			if (waiting === undefined || !this.#options.enqueue) throw error;
+			// A full CLI never moves the planner: it waits as a new job in the dispatch queue, on the same CLI.
+			const position = this.#options.enqueue(research.id, { ...planner, ...(request.fetch === false ? { fetch: false as const } : {}),
+				...(request.wallClockSeconds !== undefined ? { wall_clock_seconds: request.wallClockSeconds } : {}) });
+			return { research_id: research.id, ship_id: ship.id, record, queued: { position, waiting } };
+		}
 		return { research_id: research.id, ship_id: ship.id, record, dispatch };
 	}
 
@@ -938,6 +957,18 @@ export class PipelineRunner {
 	 * repeatedly: every transition is guarded by the fact that produces it.
 	 */
 	async advance(researchId: string, options: AdvanceOptions = {}): Promise<AdvanceResult> {
+		try {
+			return await this.#advance(researchId, options);
+		} catch (error) {
+			// cp-912x R1: an implementer, gate or panel start a full CLI refused waits for that CLI; state is unchanged.
+			const queued = options.nativeReplay ? undefined : this.#options.waitNative?.(researchId, error, options.implementerModel);
+			if (queued === undefined) throw error;
+			const record = this.store.require(researchId);
+			return this.#step(record, record.state, "wait", `${record.ship_id}: ${queued.text} — queued (position ${queued.position}); it re-runs on that CLI when a slot frees, never on another; do not re-issue.`);
+		}
+	}
+
+	async #advance(researchId: string, options: AdvanceOptions): Promise<AdvanceResult> {
 		const stored = this.store.require(researchId);
 		assertPipelineProjectionReady(this.#options.home, stored.ship_id);
 		const recovery = recoveryTarget(this.#options.home, researchId);

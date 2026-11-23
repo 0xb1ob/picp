@@ -221,15 +221,15 @@ export async function assertNativeResume(input: { home: string; jobId: string; w
 		home: input.home, jobId: input.jobId, driver: record.worker.driver as NativeDriver, kind: record.kind, role: record.worker.role, delivery: record.delivery, jobs,
 		...(input.env ? { env: input.env } : {}),
 	});
-	if (refusal) throw new NativeDriverError(`refused: ${input.jobId} cannot run on the ${spec.label} driver: ${refusal.why}`, refusal.category);
+	if (refusal) throw new NativeDriverError(`refused: ${input.jobId} cannot run on the ${spec.label} driver: ${refusal.why}`, refusal.category, record.worker.driver as NativeDriver);
 	if (!spec.availability) return;
 	// S2: a rejected window refuses the resume; queued sends stay queued and never move to pi.
 	const window = (await spec.availability(input.home, record.worker.model, { windowsOnly: true, ...(input.env ? { env: input.env } : {}) })).blocked;
 	if (window) refuse(`the subscription window is spent (${window.why})`);
 }
 
-/** cp_revive's native admission: a recorded session (Codex: thread) id to resume, then `assertNativeResume`. */
-export async function nativeReviveRefusal(home: string, jobId: string, sessionFile: string): Promise<string | undefined> {
+/** cp_revive's native admission: a recorded session (Codex: thread) id, then `assertNativeResume`; `full` if full. */
+export async function nativeReviveRefusal(home: string, jobId: string, sessionFile: string): Promise<{ why: string; full?: NativeDriver } | undefined> {
 	try {
 		const session = readNativeSession(sessionFile);
 		if (session.driver === "codex" && session.thread_id === undefined) throw new Error(`${sessionFile} holds no thread id`);
@@ -237,7 +237,8 @@ export async function nativeReviveRefusal(home: string, jobId: string, sessionFi
 		await assertNativeResume({ home, jobId, what: "revive" });
 		return undefined;
 	} catch (error) {
-		return `${(error as Error).message}. Nothing was spawned.`;
+		const full = error instanceof NativeDriverError && error.category === "occupied" ? error.driver : undefined;
+		return { why: `${(error as Error).message}. Nothing was spawned.`, ...(full ? { full } : {}) };
 	}
 }
 

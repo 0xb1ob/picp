@@ -343,7 +343,7 @@ async function pipeline(t: { after(fn: () => void | Promise<void>): void }): Pro
 				...(options.risk ? { risk: options.risk } : {}),
 				...(options.scope ? { scope: options.scope } : {}),
 			});
-			assert.equal(started.dispatch.receipt, "accepted");
+			assert.equal(started.dispatch?.receipt, "accepted");
 			return { research_id: started.research_id, ship_id: started.ship_id };
 		},
 		async artifact(researchId) {

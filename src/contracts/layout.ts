@@ -43,6 +43,8 @@ export interface Layout {
 	stackFollowupsFile: string;
 	/** `cp_dispatch` requests refused only by the spawn cap, drained FIFO by the lock owner (cp-itl4 4b-2). */
 	dispatchQueueFile: string;
+	/** Reviews, revives, sends and pipeline advances a full CLI keeps waiting, FIFO per CLI (cp-912x R6). */
+	nativeWaitFile: string;
 	/** The one infra-only CI rerun claimed per job + head (unload-parent PR2, src/ci-infra-rerun.ts). */
 	ciRerunsFile: string;
 	/** `cp_dispatch` requests refused only by open blockers, released by the lock owner (src/dependency-dispatch.ts). */
@@ -145,6 +147,7 @@ export function layoutFor(mode: Mode, runtimeDir: string = RUNTIME_DIR): Layout 
 		awaitingMergeWatchFile: `${state}/awaiting-merge-watch.json`,
 		stackFollowupsFile: `${state}/stack-followups.json`,
 		dispatchQueueFile: `${state}/dispatch-queue.json`,
+		nativeWaitFile: `${state}/native-wait.json`,
 		ciRerunsFile: `${state}/ci-reruns.json`,
 		armedDispatchFile: `${state}/armed-dispatches.json`,
 		shippedSeenFile: `${state}/status-block-shipped.json`,

@@ -11,6 +11,7 @@ import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { CommandPost } from "../../src/command-post.ts";
 import { LAYOUT, type OperatorModelPickReference, THINKING_LEVELS } from "../../src/contracts.ts";
 import { modelPicksDir } from "../../src/operator-model-pick.ts";
+import { OperatorRelayOutbox, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
 import { acquireParentLock } from "../../src/parent-lock.ts";
 import { controlJournalFile, readControlRecord } from "../../src/viewer/control-files.ts";
 import { renderEvents } from "../../src/watch.ts";
@@ -197,6 +198,48 @@ test("D2-pick-tools: cp_ask and an armed cp_dispatch carry the quote, verify it 
 	const started = await waitFor(() => post.fleet.get(armed), Boolean, { timeoutMs: 60_000, what: "the armed release" });
 	assert.deepEqual([started?.worker.model, started?.routing?.operator_pick?.proof_id], [picked, armRef.proof_id]);
 	assert.equal(readFileSync(join(b.home, LAYOUT.routingFile), "utf8"), routingBytes, "no pick was written to routing.json");
+});
+
+// cp-qmry review: a driver pick is the human's alone. Through the real `cp_parent model_pick` with `driver`, a quote
+// only the parent relayed (a `[cp-bridge send]` message) and one the operator's own model wrote are both refused
+// before any proof exists; the human's own words naming the driver issue one.
+test("D2-driver-pick: cp_parent model_pick with driver refuses the parent's relayed words and the operator model's own", { timeout: 300_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const picked = b.provider.addScript("d2-driver-picked", [{ kind: "text", text: "working" }], { onExhausted: "repeat" });
+	const relayed = `use ${picked} on pi for the relayed job`;
+	const human = `use ${picked} on pi for this one`;
+	const pick = (id: string, quote: string) => ({ id, name: "cp_parent", args: { action: "model_pick", model: picked, quote, driver: "pi" } });
+	const operatorModel = b.provider.addScript("d2-driver-operator", [
+		{ kind: "tool_calls", calls: [pick("parent", relayed)] },
+		{ kind: "text", text: "refused" },
+		{ kind: "text", text: `I suggest ${picked} on pi for the assistant job.` },
+		{ kind: "tool_calls", calls: [pick("assistant", `${picked} on pi for the assistant job`)] },
+		{ kind: "text", text: "refused" },
+		{ kind: "tool_calls", calls: [pick("human", human)] },
+		{ kind: "text", text: "issued" },
+	]);
+	b.agent.writeModels(b.provider);
+	// The parent's words reach the operator as a relayed send (the outbox is the boundary the parent host writes).
+	new OperatorRelayOutbox(operatorRelayOutboxFile(join(b.home, LAYOUT.state))).enqueue({ kind: "send", sendId: "ps-20261123000000-0a1b2c3d", stale: false,
+		text: `Please ${relayed}.`, receipt: { level: null, reached: [] }, paths: [] }, "d2-driver-seed");
+	saveOperatorTarget({ home: b.home, mode: "multi", hostPid: 0, parentPid: 0 }, { PI_HOME: b.home });
+	const op = startPiChild({ cwd: b.home, model: operatorModel, extensions: [CP_BRIDGE_EXTENSION], sessionDir: join(b.home, "operator-sessions"), env: { ...b.agent.env, PI_HOME: b.home, CP_HOME: b.home } });
+	t.after(() => op.close());
+	await waitFor(() => op.eventsOfType("agent_settled").length, (count) => count > 0, { timeoutMs: 60_000, what: "the relayed send's turn" });
+	for (const [n, message] of ["hello", "pick it", `Please ${human}.`].entries()) {
+		await op.prompt(message);
+		await waitFor(() => op.eventsOfType("agent_settled").length, (count) => count > n + 1, { timeoutMs: 60_000, what: `operator turn ${n + 1}` });
+	}
+	const ends = op.eventsOfType("tool_execution_end") as unknown as End[];
+	const end = (id: string) => ends.find((each) => each.toolCallId === id);
+	assert.equal(end("parent")?.isError, true, textOf(end("parent")));
+	assert.match(textOf(end("parent")), /operator_pick_parent_authored/);
+	assert.equal(end("assistant")?.isError, true, textOf(end("assistant")));
+	assert.match(textOf(end("assistant")), /operator_pick_main_session_authored/);
+	assert.notEqual(end("human")?.isError, true, textOf(end("human")));
+	assert.equal(end("human")?.result.details?.operator_quote?.version, 2, "the human's driver pick is a v2 proof");
+	const proofs = readdirSync(modelPicksDir(b.home)).filter((name) => name.endsWith(".json"));
+	assert.equal(proofs.length, 1, `only the human's pick wrote a proof: ${proofs.join(", ")}`);
 });
 
 /** One request on the bridge's dashboard control socket, as the viewer sends it. */

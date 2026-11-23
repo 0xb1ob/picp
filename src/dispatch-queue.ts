@@ -84,6 +84,7 @@ export function toDispatchRequest(entry: Pick<DispatchQueueEntry, "job_id" | "re
 		...(r.pr ? { pr: r.pr } : {}),
 		...(r.operator_quote ? { operatorQuote: { ...r.operator_quote } } : {}),
 		...(r.driver ? { driver: r.driver } : {}),
+		...(r.fetch === false ? { fetch: false } : {}),
 	};
 }
 

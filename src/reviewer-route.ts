@@ -30,7 +30,7 @@ export const reserveReviewerSlot = (home: string, jobId: string, driver: NativeD
 
 const reviewerSlot = (jobId: string): string => `${jobId}/review`;
 
-/** cp-912x ruling: a held, idle author's slot, lent to its own reviewer only (same CLI: the resolver counts per CLI). */
+/** cp-912x ruling: a held, idle author's slot, lent to its own reviewer only (same CLI: the resolver counts per CLI) */
 function lender(ctx: ReviewerDriverContext): string | undefined {
 	const record = ctx.record;
 	if (!record || record.phase !== "held" || isScriptFleetRecord(record) || record.worker.driver === undefined) return undefined;
@@ -64,6 +64,6 @@ export function resolveReviewerRoute(
 		const waiting = waitingLabel(error);
 		if (waiting === undefined) throw error;
 		const native = error as NativeDriverError;
-		throw new NativeDriverError(`${native.message} — the review of ${ctx.jobId} is ${waiting}: run it again once a slot frees; it never runs on another CLI`, native.category, native.driver);
+		throw new NativeDriverError(`${native.message} — the review of ${ctx.jobId} is ${waiting}; it never runs on another CLI`, native.category, native.driver);
 	});
 }
