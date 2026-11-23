@@ -11,7 +11,7 @@ import { LAYOUT } from "../../src/contracts.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import type { Context } from "../harness/conversations.ts";
-import { browserShims, dashboard, openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
+import { browserShims, dashboard, expandAsks, openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
 
 process.env.TZ = "UTC";
 const NOON = Date.parse(`${new Date().toISOString().slice(0, 10)}T12:00:00Z`);
@@ -81,6 +81,7 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	assert.equal(toggle.querySelector(".workspace-badge.workspace-badge-ask")?.textContent, "1", "an open ask paints the count");
 	assert.equal(tab.$("dialog.workspace-context"), null, "desktop: a panel beside the chat, not a modal");
 	assert.deepEqual(texts(tab, "aside.workspace-context h3"), ["Asked you · 1", "In flight · 2"]);
+	await expandAsks(tab);
 	// Full match S2 (frame 1): the recorded context, the exact options with consequences, the suggested one marked.
 	const ask = tab.$(".workspace-context-ask")!;
 	const context = [...ask.querySelectorAll("details.workspace-context-why[open] li")].map((li) => li.textContent).join("\n");
@@ -141,6 +142,7 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	// M3 fidelity D: the design's ask fill (frames 1/7) is the open-ask card's own role, painted on nothing else.
 	const css = (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
 	const askFill = [...css.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => /var\(--ask-card\)/.test(m[2]!)).map((m) => m[1]!);
+	await expandAsks(tab);
 	assert.deepEqual([askFill, tab.$$(".workspace-context-ask").length], [[".workspace-context-ask"], 1], "one open ask: one ask-filled card");
 	// Negative control: with no open ask left, nothing amber remains (no badge, no asked class, no ask card).
 	const asks = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl"));
@@ -152,6 +154,31 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	assert.equal(askFill.flatMap((selector) => tab.$$(selector)).length, 0, "the inspector stays open and nothing wears the ask fill");
 });
 
+// Scenario: "Asked you" starts collapsed to its count; a new ask moves the count, never the disclosure
+//   Given an open ask in the desktop inspector   Then one amber "Asked you · 1" disclosure, collapsed, no card
+//   When a second ask opens   Then "Asked you · 2" and still collapsed (negative control: auto-expanding on a new ask)
+//   When the disclosure is clicked   Then both cards show and an option answers
+test("M3-context-asks-collapsed: Asked you is collapsed by default with its count; a new ask only updates the count; expanding answers", { timeout: 180_000 }, async (t) => {
+	const d = await start(t);
+	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
+	browserShims(t, tab);
+	const toggle = await tab.find("aside.workspace-context .workspace-context-asked-toggle");
+	const state = () => [toggle.textContent, toggle.getAttribute("aria-expanded"), !!toggle.closest("h3.workspace-context-asked"), tab.$$(".workspace-context-ask").length];
+	assert.deepEqual(state(), ["Asked you · 1", "false", true, 0], "collapsed by default: the amber count, no card");
+	new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl")).open({ project: "picp", question: "Second?", recommendation: "Yes",
+		options: [{ label: "Yes", consequence: "Goes ahead" }] });
+	tab.refresh();
+	await until(() => toggle.textContent, (text) => text === "Asked you · 2", "the second ask's count");
+	assert.deepEqual(state(), ["Asked you · 2", "false", true, 0], "a new ask updates the count and stays collapsed");
+	tab.click(toggle);
+	await until(() => tab.$$(".workspace-context-ask").length, (n) => n === 2, "the expanded cards");
+	assert.equal(toggle.getAttribute("aria-expanded"), "true");
+	tab.click(await tab.find(".workspace-context-option", (o) => o.textContent!.startsWith("Hold") && !o.hasAttribute("disabled")));
+	const answers = () => tab.requests.filter((r) => r.method === "POST" && r.path === "/api/operator/message" && /"kind":"answer"/.test(r.body ?? ""));
+	await until(() => answers().length, (n) => n > 0, "the answer request");
+	assert.deepEqual(answers().map((r) => JSON.parse(r.body!).label), ["Hold"], "an expanded card's option answers");
+});
+
 // Scenario: the context card sends one answer, never two
 //   Given an open ask in the desktop inspector   When two of its options are clicked before a re-render
 //   Then one answer request posts, every option is held and the card says the answer is on its way
@@ -159,6 +186,7 @@ test("M3-context-answer: two clicks on the context card's options before a re-re
 	const d = await start(t);
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	browserShims(t, tab);
+	await expandAsks(tab);
 	const option = (label: string) => tab.find(".workspace-context-option", (o) => o.textContent!.startsWith(label) && !o.hasAttribute("disabled"));
 	const [merge, hold] = [await option("Merge now"), await option("Hold")];
 	// Both clicks land before a re-render (linkedom fires a disabled button's listener too): only the shared
@@ -192,6 +220,7 @@ test("M3-context-sole-answer: an open ask renders no decisions panel or option c
 	browserShims(t, tab);
 	await tab.waitText(/REPLY-CARD/);
 	assert.deepEqual(panel(tab), [0, false, 0, 1], "desktop: the one-line ask bubble, no decisions panel, no option chips");
+	await expandAsks(tab);
 	const card = await tab.find("aside.workspace-context .workspace-context-ask");
 	assert.deepEqual([card.querySelector("b")!.textContent, texts(tab, ".workspace-context-option > b"), !!card.querySelector("details.workspace-context-why[open]")],
 		[QUESTION, ["Merge now · suggested", "Hold"], true], "the sidebar card: the question, its options with the suggested one, the context");
@@ -218,6 +247,7 @@ test("M3-context-other: Other answer opens a modal; blanks never send, Escape co
 	const [ask] = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl")).open();
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	const focused = browserShims(t, tab);
+	await expandAsks(tab);
 	tab.click(await tab.find("aside.workspace-context .workspace-context-other", (b) => !b.hasAttribute("disabled")));
 	const modal = await tab.find("dialog.ask-other[open]");
 	const field = modal.querySelector("textarea")!, send = () => modal.querySelector(".ask-other-send")!;
@@ -256,6 +286,7 @@ test("M3-context-other-failed: over the phone sheet the modal stacks; a failed r
 	const tab = await openTab(t, d.port, CHAT);
 	const focused = browserShims(t, tab);
 	tab.click(await tab.find(".workspace-context-open"));
+	await expandAsks(tab, "dialog.workspace-context-sheet[open]");
 	const other = await tab.find("dialog.workspace-context-sheet[open] .workspace-context-other", (b) => !b.hasAttribute("disabled")) as unknown as HTMLElement;
 	other.focus();
 	tab.click(other);
@@ -279,6 +310,7 @@ test("M3-context-history: a context-less ask reads not recorded; on an older ses
 	const d = await start(t, null);
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	browserShims(t, tab);
+	await expandAsks(tab);
 	await tab.find(".workspace-context-option", (o) => !o.hasAttribute("disabled"));
 	assert.deepEqual([tab.$(".workspace-context-ask > .workspace-context-why")?.textContent, !!tab.$(".workspace-context-ask details"), !!tab.$(".workspace-context-history")],
 		["Context not recorded", false, false], "no recorded context: said so, no disclosure; the current file answers");
@@ -288,6 +320,7 @@ test("M3-context-history: a context-less ask reads not recorded; on an older ses
 	tab.go(`${CHAT}&session=chat.jsonl`);
 	await tab.waitText(/Historical transcript/);
 	if (!tab.$("aside.workspace-context")) tab.click(await tab.find(".workspace-context-open"));
+	await expandAsks(tab);
 	const option = await tab.find(".workspace-context-option");
 	// An older file never answers the live ask. Negative control: dropping `!current`.
 	tab.click(option);
@@ -311,6 +344,7 @@ test("M3-context-phone: the context sheet and the Conversations drawer are modal
 	assert.deepEqual(await until(() => texts(tab, ".session-strip-count, .session-strip-job"), (s) => s[1] !== "· t7ah", "the elapsed join"),
 		["1 working", "· t7ah · 1h 0m"], "an idle worker is not called working");
 	tab.click(button);
+	await expandAsks(tab, "dialog.workspace-context-sheet[open]");
 	await tab.find("dialog.workspace-context-sheet[open] .workspace-context-ask");
 	assert.deepEqual([tab.$("aside.workspace-context"), texts(tab, "dialog.workspace-context h3")], [null, ["Asked you · 1", "In flight · 2"]], "phone: the same content in a sheet");
 	assert.equal(escape(tab), true);
@@ -377,5 +411,5 @@ test("M3-context-css: phone sheet and 317 px drawer; inspector over the chat fro
 	const row = css.indexOf(".session-choice{display:grid"), depth = (at: number) => css.slice(0, at).split("{").length - css.slice(0, at).split("}").length;
 	assert.deepEqual([row > 0, depth(row)], [true, 0], "chat rows styled outside the desktop sidebar's media query");
 	assert.match(rule(desktop, "aside.workspace-context"), /position:absolute;.*width:min\(340px,100%\)/, "under 1280 px the inspector covers the chat's edge");
-	assert.match(rule(beside, ".sessions:has(>aside.workspace-context)"), /grid-template-columns:261px minmax\(0,1fr\) 340px/, "from 1280 px a 340 px column");
+	assert.match(rule(beside, ".sessions:has(>aside.workspace-context)"), /grid-template-columns:var\(--sidebar-width,261px\) minmax\(0,1fr\) 340px/, "from 1280 px a 340 px column");
 });

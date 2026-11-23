@@ -64,7 +64,7 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 .shell-main { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 20px 16px 40px; overflow-wrap: anywhere; }
 .shell-header-subpage { padding: 0 8px; justify-content: flex-start; }
 .shell-header-subpage .shell-brand { flex: 1; }
-.shell-sidebar { display: none; }
+.shell-sidebar, .sidebar-resizer { display: none; }
 .shell-tabs { display: flex; padding: 6px 8px 22px; padding-bottom: max(22px,env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); background: var(--nav); flex-shrink: 0; }
 .shell-tabs a { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 48px; padding-top: 4px; text-decoration: none; font-size: 11px; font-weight: 500; color: var(--muted); }
 .shell-nav-icon { position: relative; display: flex; padding: 4px 14px; border-radius: 999px; }
@@ -113,7 +113,7 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 @media (min-width: 900px) {
  .shell { flex-direction: row; }
  .shell-header, .shell-tabs { display: none; }
- .shell-sidebar { display: flex; flex-direction: column; gap: 20px; padding: 16px 10px; width: 208px; flex-shrink: 0; border-right: 1px solid var(--divider); background: var(--nav); overflow-y: auto; }
+ .shell-sidebar { display: flex; flex-direction: column; gap: 20px; padding: 16px 10px; width: var(--sidebar-width,208px); flex-shrink: 0; border-right: 1px solid var(--divider); background: var(--nav); overflow-y: auto; }
  .shell-sidebar .shell-brand { padding: 0 8px; height: 23px; }
  .shell-desktop-search { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); font-size: 13px; }
  .shell-desktop-search kbd { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--dim); }
@@ -124,7 +124,10 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
  .shell-sidebar-nav .shell-count { left: 106px; right: auto; }
  .shell-sidebar-status { margin-top: auto; padding: 0 10px; }
  /* Chat's rail is the 261 px combined column (Sessions draws it once loaded); other screens keep theirs. */
- .shell-sessions > .shell-sidebar { width: 261px; padding: 14px 10px; gap: 12px; }
+ .shell-sessions > .shell-sidebar { width: var(--sidebar-width,261px); padding: 14px 10px; gap: 12px; }
+ /* Straddles the rail's border: 7px to grab, the 1px divider stays the only visible line until hover or focus. */
+ .sidebar-resizer { display: block; position: relative; z-index: 3; flex-shrink: 0; width: 7px; margin: 0 -4px 0 -3px; cursor: col-resize; touch-action: none; }
+ .sidebar-resizer:hover, .sidebar-resizer:focus-visible { background: var(--divider); }
  .shell-main { min-width: 0; padding: 0 32px 48px; }
  /* One compact row on the page surface: title left, status and ⋮ right, a hairline under it. */
  .page-header { display: flex; align-items: center; gap: 10px; height: 48px; min-width: 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }

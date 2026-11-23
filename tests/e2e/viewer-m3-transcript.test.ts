@@ -244,11 +244,11 @@ test("M3-shell: desktop Chat is one 261 px column of rail head, chats, status an
 	// Combine: negative control — the old 208 px rail beside a 281 px Chats column (56 px title row) fails here.
 	const wide = css.indexOf(".sessions{position:relative;display:grid"), split = css.lastIndexOf("@media(min-width:900px)", wide);
 	assert.ok(split > 0 && wide > split, "the combined column is desktop only");
-	assert.match(rules(css.slice(split), ".sessions"), /grid-template-columns:261px minmax\(0,1fr\);grid-template-rows:minmax\(0,1fr\)/, "one 261 px column");
+	assert.match(rules(css.slice(split), ".sessions"), /grid-template-columns:var\(--sidebar-width,261px\) minmax\(0,1fr\);grid-template-rows:minmax\(0,1fr\)/, "one 261 px column");
 	assert.match(rules(css.slice(split), ".session-sidebar"), /grid-row:1 \/ -1;.*padding:14px 10px;.*background:var\(--nav\)/, "full height on the rail's surface");
 	assert.match(rules(css, ".shell .sessions>.page-header>h1"), /clip-path:inset\(50%\)/, "no title row of its own; the <h1> stays");
-	assert.match(rules(css, ".shell-sessions>.shell-sidebar"), /width:261px/, "while Chat loads the shell's rail is the same column");
-	assert.match(rules(css, ".shell-sidebar"), /width:208px/, "other screens keep the 208 px rail");
+	assert.match(rules(css, ".shell-sessions>.shell-sidebar"), /width:var\(--sidebar-width,261px\)/, "while Chat loads the shell's rail is the same column");
+	assert.match(rules(css, ".shell-sidebar"), /width:var\(--sidebar-width,208px\)/, "other screens keep the 208 px rail");
 	assert.doesNotMatch(css, /281px/, "no second Chats column anywhere, open surfaces included");
 	assert.equal(rules(css, "select"), "font-family:var(--font-sans)", "Stats selects: the family only, sizes untouched");
 	const tab = await openTab(t, d.port, "#sessions", new Map(), undefined, {}, true);
