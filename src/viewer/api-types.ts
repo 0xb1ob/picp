@@ -169,7 +169,7 @@ export interface SessionsResponse {
  transcript?: boolean; operator_sessions?: {id: string; at: string}[]; operator_session?: string | null;
  /** The operator session's context; `parent.context` and each `workers[].context` carry theirs. */
  operator_context?: ContextUsage;
- /** The newest operator session file's recorded CLI (`pi`, `claude`); null when no readable file records it. */
+ /** The shown operator session file's recorded CLI (the newest outside Full transcript); null when none records it. */
  operator_driver?: string | null;
  /** Full transcript only: every open ask, oldest first, for the block pinned above the composer — never windowed. */
  open_asks?: AwaitingDetail[];

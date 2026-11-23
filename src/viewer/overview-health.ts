@@ -35,7 +35,7 @@ export function recordedEvents(state: ViewerState, id: string): Json[] {
  if (!isSafeId(id)) return [];
  try { return cachedEvents(join(state.stateDir, "runs", id, "events.jsonl")); } catch { return []; }
 }
-/** The routed CLI of the job's newest review (else gate) attempt; an event with no `driver` is pi (dispatch-driver.ts). */
+/** The newest review (else gate) run's routed CLI; an event with no `driver` is pi (dispatch-driver.ts). */
 export function reviewerDriver(state: ViewerState, id: string): string | null {
  if (!isSafeId(id)) return null;
  let names: string[]; try { names = readdirSync(join(state.stateDir, "runs", id)); } catch { return null; }

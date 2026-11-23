@@ -322,6 +322,7 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
   generated_at: new Date(now).toISOString(), selected: "you", session_id: selected?.id ?? null,
   parent: rows.parent, workers, entries, title: "Operator ↔ you", subtitle: "Full transcript", warnings, truncated,
   transcript: true, operator_session: selected?.id ?? null, operator_sessions: files.map((file) => ({id:file.id,at:file.at})),
+  operator_driver: selected ? recordedDriver(selected.file) ?? null : null,
   open_asks: askDetails(state,d.awaiting.items,now,d), pr_chips, projects: sessionProjects(state,entries),
  };
 }
@@ -339,8 +340,8 @@ export function sessionsView(state: ViewerState, tier: SessionTier, workerId: st
  const workers=[...rows.active,...rows.recent].filter(w=>w.phase !== "done").map(w=>{const context=workerContext(state,w.id,w.model,windows), thinking=context?.thinking ?? w.thinking; return {...w,...(thinking ? {thinking} : {}),...(context ? {context} : {})};});
  const selected=tier === "workers" ? workers.find(w=>w.id===(workerId ?? workers[0]?.id)) : null;
  if (tier === "workers" && workerId && !selected) return undefined;
+ if (tier === "you" && options.transcript === true) { const view=operatorTranscript(state,options.session ?? null,now,rows,workers); return view && {...view,operator_context:operatorContext(state,windows)}; }
  const operatorFile=readOperatorSessions(sessionRoots(state)[0]!)[0]?.file, operator_driver=operatorFile ? recordedDriver(operatorFile) ?? null : null;
- if (tier === "you" && options.transcript === true) { const view=operatorTranscript(state,options.session ?? null,now,rows,workers); return view && {...view,operator_context:operatorContext(state,windows),operator_driver}; }
  const d=decisions(state,now), warnings:string[]=[];
  for (const [name,availability] of [["escalations",d.escalations.availability],["asks",d.askSource.availability]]) if (availability === "unavailable") warnings.push(`${name} unavailable`);
  const bySend=new Map<string,Json[]>();

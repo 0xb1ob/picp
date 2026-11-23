@@ -224,13 +224,15 @@ function nativeRecord(file: string): boolean {
 	return recordedDriver(file) === "claude";
 }
 
-/** The CLI a recorded session file ran on: a native `record` line is `claude`, any other file pi; unreadable is unknown. */
+/** A session file's CLI: a native `record` line is `claude`, other content pi; empty or unreadable is unknown. */
 export function recordedDriver(file: string): "pi" | "claude" | undefined {
 	const head = Buffer.alloc(64);
 	let fd: number | undefined;
 	try {
 		fd = openSync(file, "r");
-		return /^\{"type":"record","driver":"claude"/.test(head.toString("utf8", 0, readSync(fd, head, 0, head.length, 0))) ? "claude" : "pi";
+		const read = readSync(fd, head, 0, head.length, 0);
+		if (read === 0) return undefined;
+		return /^\{"type":"record","driver":"claude"/.test(head.toString("utf8", 0, read)) ? "claude" : "pi";
 	} catch {
 		return undefined;
 	} finally {

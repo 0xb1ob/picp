@@ -14,15 +14,15 @@ const RECORD = jsonl([{ type: "record", driver: "claude", created_at: AT }]);
 const PI = jsonl([{ type: "session", id: "pi" }]);
 const routed = (payload: object) => jsonl([{ source: "cp", type: "routing_resolved", ts: AT, payload: { surface: "review", attempt: 1, ...payload } }]);
 
-// Scenario: Given held workers whose fleet records say pi (no driver), claude and codex, and one with no worker record,
-//   When the Jobs list and each Job detail open, Then each row shows pi, Claude CLI, Codex CLI or unknown and each Model
-//   fact the same (no worker: not recorded); the Review fact shows the reviewer's routed CLI, unknown with no run log.
+// Scenario: Given held workers recorded on pi (no driver), claude (a research planner) and codex, and one with no
+//   worker record, When the Jobs list and each Job detail open, Then each row shows pi, Claude CLI, Codex CLI or
+//   unknown and each Model fact the same (no worker: not recorded); the Review fact shows the reviewer's routed CLI.
 test("CLI-driver jobs: the Jobs list and Job detail show each worker's and reviewer's recorded CLI", { timeout: 120_000 }, async (t) => {
 	const d = await viewer(t, { seed: (stateDir) => {
-		const worker = (driver?: string) => ({ model: driver === "codex" ? "openai/gpt-x" : "anthropic/claude-x", ...(driver ? { driver } : {}) });
+		const worker = (driver?: string, role = "implementer") => ({ role, model: driver === "codex" ? "openai/gpt-x" : "anthropic/claude-x", ...(driver ? { driver } : {}) });
 		write(join(stateDir, "fleet.json"), { jobs: [
 			{ job_id: "cp-pi", project: "demo", kind: "ship", phase: "held", worker: worker() },
-			{ job_id: "cp-claude", project: "demo", kind: "research", phase: "held", worker: worker("claude") },
+			{ job_id: "cp-claude", project: "demo", kind: "research", phase: "held", worker: worker("claude", "planner") },
 			{ job_id: "cp-codex", project: "demo", kind: "ship", phase: "held", worker: worker("codex") },
 			{ job_id: "cp-none", project: "demo", kind: "ship", phase: "held" },
 		] });
@@ -45,9 +45,9 @@ test("CLI-driver jobs: the Jobs list and Job detail show each worker's and revie
 	}
 });
 
-// Scenario: Given a pi operator session, a Claude CLI parent record and a codex worker, When each Sessions header opens,
-//   Then it shows pi, Claude CLI and Codex CLI; And once the operator's newest file is a Claude CLI record and the parent
-//   control names no session file, the operator shows Claude CLI and the parent unknown, never a guess.
+// Scenario: Given a pi operator session, a Claude CLI parent record and a codex worker, When each header opens, Then it
+//   shows pi, Claude CLI and Codex CLI; once a newer operator file is a Claude CLI record and the parent control names
+//   no file, the operator shows Claude CLI (the older ?session= file still pi) and the parent unknown, never a guess.
 test("CLI-driver sessions: the operator, parent and worker headers show the recorded CLI", { timeout: 120_000 }, async (t) => {
 	let sessions = "", home = "";
 	const d = await viewer(t, { seed: (stateDir, at) => {
@@ -62,7 +62,13 @@ test("CLI-driver sessions: the operator, parent and worker headers show the reco
 	assert.deepEqual([await badge("#sessions?view=you"), await badge("#sessions?view=parent"), await badge("#sessions?view=workers&id=cp-codex")],
 		["pi", "Claude CLI", "Codex CLI"]);
 	write(join(sessions, "native-operator-1.jsonl"), RECORD);
-	write(operatorSessionsFile(sessions), jsonl([{ at: AT, session_file: join(sessions, "native-operator-1.jsonl") }]));
+	const older = { at: AT, session_file: join(home, "operator.jsonl") };
+	write(operatorSessionsFile(sessions), jsonl([older, { at: "2026-09-27T09:00:00.000Z", session_file: join(sessions, "native-operator-1.jsonl") }]));
 	write(join(sessions, "cp-parent-control.json"), { model: "anthropic/claude-x" });
 	assert.deepEqual([await badge("#sessions?view=you"), await badge("#sessions?view=parent")], ["Claude CLI", "unknown"]);
+	assert.deepEqual([await badge("#sessions?view=you&transcript=1"), await badge("#sessions?view=you&transcript=1&session=operator.jsonl")],
+		["Claude CLI", "pi"], "the shown file's CLI, not the newest's");
+	write(join(sessions, "empty.jsonl"), "");
+	write(operatorSessionsFile(sessions), jsonl([older, { at: "2026-09-27T10:00:00.000Z", session_file: join(sessions, "empty.jsonl") }]));
+	assert.deepEqual([await badge("#sessions?view=you"), await badge("#sessions?view=you&transcript=1")], ["unknown", "unknown"], "an empty file is unknown, never pi");
 });
