@@ -33,3 +33,17 @@ export function routeNamed(home: string, models: readonly string[], options: { s
 	// Atomic: concurrent child processes (gate-recovery races) read this file while another writes it.
 	atomicWriteJson(file, config);
 }
+
+/**
+ * cp-qmry: the configured CLI binds, so a native harness configures it the way Settings → Workers CLI does: `project`'s
+ * rows for `roles` run `driver` on `model`, ahead of every other row. Re-running replaces this helper's earlier rows.
+ */
+export function routeDriver(home: string, driver: "claude" | "codex", model: string, options: { project?: string; roles?: readonly string[] } = {}): void {
+	const file = join(home, LAYOUT.routingFile);
+	const config = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : structuredClone(DEFAULT_ROUTING_CONFIG);
+	const project = options.project ?? "demo";
+	const rows = (options.roles ?? ["planner", "implementer"]).map((role) => ({ id: `harness-${driver}-${role}`, role, project, model, driver }));
+	config.rubric = [...rows, ...(config.rubric as Row[]).filter((row) => !row.id.startsWith("harness-"))];
+	config.allow = [...new Set([...(config.allow ?? []), model])];
+	atomicWriteJson(file, config);
+}

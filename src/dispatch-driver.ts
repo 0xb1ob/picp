@@ -66,11 +66,14 @@ export async function resolveDriverRoute(
 	const configuredRow = overrideRow(route, config);
 	const configured = configuredRow?.driver === undefined || configuredRow.driver === "pi" ? undefined : (configuredRow.driver as NativeDriver);
 	const override = ctx.driverOverride !== undefined && ctx.driverOverride.driver === ctx.explicit ? ctx.driverOverride : undefined;
+	// P3: an explicit driver other than the configured CLI is a parent's choice unless the human's v2 pick names it.
+	if (ctx.explicit !== undefined && locked === undefined && ctx.explicit !== (configured ?? "pi") && !override) {
+		const where = configured ? `the ${nativeDriverSpec(configured).label}` : "pi";
+		const rule = configuredRow ? `rule ${configuredRow.id}` : "no row names a CLI";
+		throw new NativeDriverError(`refused: ${ctx.jobId} is configured to run on ${where} (${rule}), and a parent's driver choice is not an override; only the operator's own per-job request (cp_parent model_pick with driver) switches the CLI`, "switch", configured);
+	}
 	if (ctx.explicit === "pi") {
 		if (locked !== undefined && locked !== "pi") throw new NativeDriverError(`refused: ${ctx.jobId} started on ${locked} and a started job keeps its driver; dispatch a new job to run pi`);
-		if (locked === undefined && configured !== undefined && !override) {
-			throw new NativeDriverError(`refused: ${ctx.jobId} is configured to run on the ${nativeDriverSpec(configured).label} (rule ${configuredRow!.id}), and a parent's driver choice is not an override; only the operator's own per-job request (cp_parent model_pick with driver) switches the CLI`, "switch", configured);
-		}
 		const pi = await resolveWithCapacity(route, config, probe, capacity);
 		return { ...pi, requested_driver: "pi", driver: "pi", driver_reason: bounded(override?.reason ?? "explicit: cp_dispatch driver pi") };
 	}

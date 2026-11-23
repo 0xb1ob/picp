@@ -14,6 +14,7 @@ import { nativeAvailabilityFile } from "../../src/native-availability.ts";
 import { readSettings } from "../../src/settings.ts";
 import { applySettings } from "../../src/settings-write.ts";
 import { FAKE_NATIVE_MODEL } from "../harness/claude-mock-provider.ts";
+import { FAKE_CODEX_REF } from "../harness/codex-worker.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { readFleet, readRunEvents, treehouseAvailable } from "../harness/index.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
@@ -138,4 +139,36 @@ test("claude override: a dashboard-sourced driver pick runs only that job on pi,
 	// The override is that job's alone: the next job on the same row still routes to the Claude CLI.
 	const decision = (preview?.result.details as { decision?: { driver?: string } } | undefined)?.decision;
 	assert.equal(decision?.driver, "claude", text(preview));
+});
+
+// P3, the other direction: an explicit claude on a pi row or a codex row is a parent's choice and refuses; the human's
+// own v2 claude pick for that job allows it (previewed: the route resolves claude with the override recorded).
+test("P3: an explicit claude on a pi or codex row refuses; the human's claude pick allows it", { timeout: 300_000 }, async (t) => {
+	const h = await claudeHome(t);
+	const file = join(h.b.home, LAYOUT.routingFile);
+	const config = JSON.parse(readFileSync(file, "utf8")) as { allow: string[]; rubric: Array<Record<string, unknown>> };
+	writeFileSync(file, JSON.stringify({ ...config, allow: [...config.allow, FAKE_CODEX_REF], rubric: [
+		{ ...config.rubric.find((row) => row.id === "research"), scope: ["S"] },
+		{ id: "codex-research", role: "planner", scope: ["M"], model: FAKE_CODEX_REF, driver: "codex" },
+		{ id: "pi-research", role: "planner", scope: ["L"], model: h.piModel },
+	] }));
+	const [onPi, onCodex, pickedPi, pickedCodex] = await Promise.all([h.job(), h.job(), h.job(), h.job()]);
+	const claude = { driver: "claude", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false };
+	const pick = (id: string) => seedOperatorPick(h.b.home, FAKE_NATIVE_MODEL, { jobId: id, driver: "claude" });
+	const ends = await h.run([
+		call(onPi, { ...claude, scope: "L" }), call(onCodex, { ...claude, scope: "M" }),
+		call(pickedPi, { ...claude, scope: "L", operator_quote: pick(pickedPi), dry_run: true }),
+		call(pickedCodex, { ...claude, scope: "M", operator_quote: pick(pickedCodex), dry_run: true }),
+	]);
+	for (const [end, id, where] of [[ends[0], onPi, "pi \\(rule pi-research\\)"], [ends[1], onCodex, "the Codex CLI \\(rule codex-research\\)"]] as const) {
+		assert.equal(end?.isError, true, text(end));
+		assert.match(text(end), new RegExp(`configured to run on ${where}, and a parent's driver choice is not an override`));
+		assert.equal(existsSync(join(h.b.home, paths.runDir(id))), false, `${id} has a run`);
+	}
+	for (const end of ends.slice(2)) {
+		const decision = (end?.result.details as { decision?: { driver?: string; driver_reason?: string } } | undefined)?.decision;
+		assert.equal(decision?.driver, "claude", text(end));
+		assert.match(decision?.driver_reason ?? "", /^override: human terminal \S+ proof omp-[a-f0-9]{32} asked for claude; effort /);
+	}
+	h.piUntouched();
 });

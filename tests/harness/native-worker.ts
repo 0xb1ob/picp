@@ -15,7 +15,7 @@ import { SCAFFOLD_MANDATE_DEFAULTS } from "../../src/mandate-defaults.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, installClaudeStub, routeNativeModel, startClaudeMockProvider } from "./claude-mock-provider.ts";
 import { dispatchS29 } from "./dispatch-s29.ts";
 import { installGhStub } from "./gh-stub.ts";
-import { readFleet, readRunEvents, type ScriptStep, waitFor } from "./index.ts";
+import { readFleet, readRunEvents, routeDriver, type ScriptStep, waitFor } from "./index.ts";
 import { REAL_CLAUDE } from "./native-parent.ts";
 
 export { NATIVE } from "./native-parent.ts";
@@ -43,6 +43,8 @@ export async function nativeWorkerHome(t: TestContext, script: readonly ClaudeSt
 	writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS }));
 	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true, claude_ship: true }));
 	routeNativeModel(b.home);
+	// The CLI is configured, not chosen per job (cp-qmry P3): the demo planner and implementer rows run claude.
+	routeDriver(b.home, "claude", FAKE_NATIVE_MODEL);
 	const claude = await startClaudeMockProvider(script);
 	const fakeHome = mkdtempSync(join(tmpdir(), "cp-native-worker-home-"));
 	const gh = installGhStub();

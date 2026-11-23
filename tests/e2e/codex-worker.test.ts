@@ -362,7 +362,8 @@ test("C1b T-row: with every codex switch off nothing persisted takes a codex val
 		armed.dispatch({ when_ready: true }),
 		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: plain.id, task: "Report.", model: piModel, driver: "pi", queue: false, when_ready: false } }] },
 	])).filter((end) => end.toolName === "cp_dispatch");
-	assert.match(text(ends[0]), /the switch codex_research is off/);
+	// cp-qmry P3: with no codex row the explicit codex request is the parent's choice and refuses before any lease.
+	assert.match(text(ends[0]), /configured to run on pi \(rule planner-default\), and a parent's driver choice is not an override/);
 	assert.match(text(ends[1]), /not armed: the armed dispatch of \S+ names the codex driver while every codex switch is off/);
 	assert.notEqual(ends[2]?.isError, true, text(ends[2]));
 	await waitFor(() => h.record(plain.id), Boolean, { timeoutMs: 30_000, what: "the pi job's fleet record" });

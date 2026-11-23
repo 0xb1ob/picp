@@ -23,7 +23,8 @@ import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { VERDICT_TOOL } from "../../src/drivers/claude-verdict.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, type RecordedClaudeRequest, routeNativeModel, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
-import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, REPO_ROOT, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { seedOperatorPick } from "../harness/operator-pick.ts";
+import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, REPO_ROOT, routeDriver, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -42,6 +43,8 @@ async function nativeHome(t: TestContext, script: readonly ClaudeStep[]) {
 	const b = await dispatchS29(t);
 	const claude = await startClaudeMockProvider(script);
 	routeNativeModel(b.home);
+	// cp-qmry P3: the CLI is configured, not chosen per job; the demo planner and implementer rows run claude.
+	routeDriver(b.home, "claude", FAKE_NATIVE_MODEL);
 	const fakeHome = mkdtempSync(join(tmpdir(), "cp-n3c-home-"));
 	t.after(async () => { await claude.close(); rmSync(fakeHome, { recursive: true, force: true }); });
 	const settings = join(fakeHome, ".claude", "settings.json");
@@ -393,7 +396,8 @@ test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_r
 		...Array.from({ length: 4 }, () => ({ kind: "text" as const, text: "pi follow-up noted" })),
 	]);
 	await h.b.run([
-		tool("cp_dispatch", { job_id: ids.pi, task: "Report.", model: piModel, queue: false, when_ready: false }),
+		// The pi job is the human's own per-job pick on this claude-configured home (cp-qmry P3).
+		tool("cp_dispatch", { job_id: ids.pi, task: "Report.", model: piModel, driver: "pi", operator_quote: seedOperatorPick(h.b.home, piModel, { jobId: ids.pi, driver: "pi" }), queue: false, when_ready: false }),
 		h.wait(ids.pi, "envelope_received", 1),
 		h.dispatch(ids.native),
 	], h.env);
@@ -577,6 +581,7 @@ test("native live follow-up smoke: a research dispatch, then one idle cp_send re
 	// S1: a native dispatch names an explicit model; the live account's own id, from the env, routed here.
 	const model = process.env.CP_LIVE_NATIVE_MODEL!;
 	routeNativeModel(b.home, [model]);
+	routeDriver(b.home, "claude", model);
 	const events = join(b.home, paths.eventsFile(id));
 	const sessionFile = join(b.home, paths.runDir(id), NATIVE_SESSION_FILE);
 	const settled = (count: number) => tool("bash", { command: `for i in $(seq 1500); do [ "$(grep -c '"agent_settled"\\|"process_exit"' "${events}" 2>/dev/null)" -ge ${count} ] && break; sleep 0.2; done; sleep 2` });
@@ -628,7 +633,7 @@ test("F9: a queued driver:claude dispatch releases native, and an armed one is r
 	const armedFile = join(h.b.home, LAYOUT.armedDispatchFile);
 	const native = (id: string) => tool("cp_dispatch", { job_id: id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, driver: "claude" });
 	const ends = (await h.b.run([
-		tool("cp_dispatch", { job_id: pi, task: "Report.", model: piModel, queue: false, when_ready: false }),
+		tool("cp_dispatch", { job_id: pi, task: "Report.", model: piModel, driver: "pi", operator_quote: seedOperatorPick(h.b.home, piModel, { jobId: pi, driver: "pi" }), queue: false, when_ready: false }),
 		h.wait(pi, "envelope_received", 1),
 		native(ids.queued),
 		native(ids.armed),
@@ -659,8 +664,8 @@ test("F9: a queued driver:claude dispatch releases native, and an armed one is r
 
 // Scenario: Given max_concurrent 1 held by a live native job, When an explicit driver claude dispatch arrives,
 // Then it is queued (position 1) and starts natively when the holder tears down,
-// And a quality voter that loses the slot runs on pi instead of abstaining (main refused, then abstained).
-test("J8: a full native slot queues a driver:claude dispatch until teardown, and a voter that lost it votes on pi", { skip, timeout: 420_000 }, async (t) => {
+// And a quality voter that loses the slot abstains by name; it never votes on pi (cp-qmry).
+test("J8: a full native slot queues a driver:claude dispatch until teardown, and a voter that lost it abstains, never pi", { skip, timeout: 420_000 }, async (t) => {
 	const ids: Record<string, string> = {};
 	const switchFile = join(LAYOUT.data, "native.json");
 	const research = (key: string): ClaudeStep[] => [
@@ -693,7 +698,7 @@ test("J8: a full native slot queues a driver:claude dispatch until teardown, and
 	assert.match(readFileSync(join(h.b.home, LAYOUT.wakeupsFile), "utf8"), new RegExp(`dispatch-queue:started:${ids.queued}`));
 	await h.b.closeParents();
 
-	// A claude voter row with a pi fallback; pi's lane cannot serve the native model, so pi walks to the fallback.
+	// A claude voter row with a pi fallback model: the fallback never runs (cp-qmry).
 	const piVoter = h.b.provider.addScript("j8-pi-voter", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: verdict }] }]);
 	h.b.agent.writeModels(h.b.provider);
 	const routing = JSON.parse(readFileSync(join(h.b.home, LAYOUT.routingFile), "utf8")) as { rubric: unknown[] };
@@ -708,8 +713,9 @@ test("J8: a full native slot queues a driver:claude dispatch until teardown, and
 	await waitFor(() => readRunEvents(h.b.home, ids.subject!).some((event) => event.type === "agent_settled"), Boolean, { timeoutMs: 120_000, what: "the subject's settled turn" });
 	const panel = await post.qualityPass().runAndWait({ jobId: ids.subject!, task: "Report the repo's package name.", config: { verify: true, voters: 2, threshold: 1 } });
 	const votes = panel?.verify?.votes ?? [];
-	assert.deepEqual(votes.map((vote) => [vote.model, vote.sound, vote.abstained ?? false]), [[FAKE_NATIVE_MODEL, true, false], [piVoter, true, false]], JSON.stringify(votes));
-	assert.equal(panel?.passed, true);
+	assert.deepEqual(votes.map((vote) => [vote.model, vote.abstained ?? false]), [[FAKE_NATIVE_MODEL, false], [FAKE_NATIVE_MODEL, true]], JSON.stringify(votes));
+	assert.match(JSON.stringify(votes[1]), /native concurrency is 1/);
+	assert.equal(h.b.provider.requests("j8-pi-voter").length, 0, "a voter ran on pi");
 	assert.equal(h.claude.overrun(), 0);
 });
 

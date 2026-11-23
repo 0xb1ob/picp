@@ -8,6 +8,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT, paths } from "../../src/contracts.ts";
+import { FAKE_NATIVE_MODEL } from "../harness/claude-mock-provider.ts";
 import { codexWorkerHome, FAKE_CODEX_REF } from "../harness/codex-worker.ts";
 import { readRunEvents, treehouseAvailable } from "../harness/index.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
@@ -74,4 +75,38 @@ test("T4: on a codex row a parent's driver pi, a model-only pick and a pi model 
 	assert.match(record?.routing?.driver_reason ?? "", /^override: human terminal \S+ proof omp-[a-f0-9]{32} asked for pi$/);
 	const resolved = readRunEvents(h.b.home, human.id).find((event) => event.type === "routing_resolved")?.payload as { driver_override?: Record<string, unknown> };
 	assert.deepEqual([resolved.driver_override?.driver, resolved.driver_override?.kind, resolved.driver_override?.quote], ["pi", "terminal", v2.quote]);
+});
+
+// P3: an explicit driver is the parent's choice, so it must match the row's CLI (absent = pi) in every direction
+// (native→another native, pi→native) unless the human's v2 pick names that CLI for that one job.
+test("P3: an explicit codex on a claude or pi row and an explicit claude on a codex row refuse; the human's codex pick allows it", { skip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t);
+	const piModel = h.b.provider.addScript(`p3-pi-${Math.random().toString(36).slice(2, 8)}`, [{ kind: "text", text: "idle" }]);
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*", FAKE_CODEX_REF, FAKE_NATIVE_MODEL], rubric: [
+		{ id: "codex-research", role: "planner", scope: ["S"], model: FAKE_CODEX_REF, driver: "codex" },
+		{ id: "claude-research", role: "planner", scope: ["M"], model: FAKE_NATIVE_MODEL, driver: "claude" },
+		{ id: "pi-research", role: "planner", scope: ["L"], model: piModel },
+	] }));
+	const [onClaude, onPi, claudeOnCodex, picked, pickedPi] = await Promise.all([h.job(), h.job(), h.job(), h.job(), h.job()]);
+	const codexPick = seedOperatorPick(h.b.home, FAKE_CODEX_REF, { jobId: picked.id, driver: "codex" });
+	const piRowPick = seedOperatorPick(h.b.home, FAKE_CODEX_REF, { jobId: pickedPi.id, driver: "codex" });
+	h.setScript({ turns: [h.reporting(picked.id)] });
+	const ends = (await h.run([
+		onClaude.dispatch({ scope: "M" }), onPi.dispatch({ scope: "L" }), claudeOnCodex.dispatch({ scope: "S", driver: "claude", model: FAKE_NATIVE_MODEL }),
+		picked.dispatch({ scope: "M", operator_quote: codexPick }), h.awaitEnvelope(picked.id),
+		pickedPi.dispatch({ scope: "L", operator_quote: piRowPick, dry_run: true }),
+	])).filter((end) => end.toolName === "cp_dispatch");
+	const refusals = [[onClaude, /configured to run on the Claude CLI \(rule claude-research\)/], [onPi, /configured to run on pi \(rule pi-research\)/],
+		[claudeOnCodex, /configured to run on the Codex CLI \(rule codex-research\)/]] as const;
+	for (const [[job, pattern], end] of refusals.map((each, at) => [each, ends[at]] as const)) {
+		assert.equal(end?.isError, true, text(end));
+		assert.match(text(end), new RegExp(`${pattern.source}, and a parent's driver choice is not an override`));
+		assert.equal(existsSync(join(h.b.home, paths.runDir(job.id))), false, `${job.id} has a run`);
+	}
+	assert.notEqual(ends[3]?.isError, true, text(ends[3]));
+	const record = h.record(picked.id);
+	assert.deepEqual([record?.worker.driver, record?.routing?.driver], ["codex", "codex"]);
+	assert.match(record?.routing?.driver_reason ?? "", /^override: human terminal \S+ proof omp-[a-f0-9]{32} asked for codex; effort /);
+	const preview = (ends[4]?.result.details as { decision?: { driver?: string; driver_reason?: string } } | undefined)?.decision;
+	assert.deepEqual([preview?.driver, /^override: human terminal \S+ proof omp-/.test(preview?.driver_reason ?? "")], ["codex", true], text(ends[4]));
 });

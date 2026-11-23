@@ -421,16 +421,16 @@ on that same CLI when a slot frees. Every other refusal (`switch`, `ineligible`,
 The one exception is a human's own per-job request: `cp_parent model_pick` with `driver` issues a version-2 proof whose
 quote names the model and the CLI; relayed with `cp_dispatch driver`, it is recorded on the job as
 `routing.driver_reason` `override: human <terminal|dashboard> <entry or control id> proof <omp-…> asked for <cli>` and
-as `driver_override` (driver, quote, kind, entry id, control id) on the `routing_resolved` run event. A parent's own
-`driver: "pi"` on a native row is refused ("a parent's driver choice is not an override"), and a model-only override
-the configured CLI cannot run is refused, never routed to pi. An explicit native `driver` still needs that CLI's
-switch, which the dashboard's Workers CLI setting turns on together with the rows. A reviewer refused `occupied` is
+as `driver_override` (driver, quote, kind, entry id, control id) on the `routing_resolved` run event. An explicit
+`cp_dispatch driver` that differs from the job's row (absent = pi) is the parent's choice and is refused in every
+direction (pi ↔ claude ↔ codex: "a parent's driver choice is not an override"); one that matches the row is allowed and
+still needs that CLI's switch. A model-only override the configured CLI cannot run is refused, never routed to pi. A reviewer refused `occupied` is
 refused by name with the same waiting status; it may instead run in its own idle, held author's slot on the same CLI
 (`driver_reason` `borrowed: reviewer using held author's slot (<job>)`, routing line `slot="reviewer using held
 author's slot <job>"`), at most one reviewer per author; a `cp_send` to that author meanwhile is refused as waiting for
 the CLI's capacity until the verdict lands. Jobs that started on pi under the old fallback keep pi (D1).
 
-Until the follow-up wait queue lands (R6 `state/native-wait.json`, T5–T11, the full explicit-driver rule P3), these
+Until the follow-up wait queue lands (R6 `state/native-wait.json`, T5–T11), these
 paths refuse by name on a full CLI instead of waiting:
 - reviews (`cp_review`, `cp_gate`, quality panels);
 - `cp_revive` and bounded recovery;
@@ -454,8 +454,8 @@ They never switch the CLI. The checks that prove the binding (cp-qmry):
 
 | Request | Driver | On a failed condition |
 |---|---|---|
-| explicit `driver: "claude"` | claude | refused by name, today's semantics; no lease |
-| explicit `driver: "pi"` on a native row | pi only with the human's v2 driver pick for this job | refused: a parent's choice is not an override |
+| explicit `driver` that differs from the row's CLI (absent = pi), any direction | that CLI only with the human's v2 driver pick for this job | refused: a parent's choice is not an override; no lease |
+| explicit `driver: "claude"` matching a claude row | claude | refused by name, today's semantics; no lease |
 | explicit `anthropic/claude-…` `model` override (cp_dispatch `model`, pipeline `implementer_model`), no `driver`, and the role's row (picked as if no override) is `driver: "claude"` | claude on the override model; `driver_reason` `rule: <row> prefers claude; override <model>` | refused by name; `occupied` queues |
 | any other explicit `model` override on a `driver: "claude"` row | — | refused `model`: a model change never changes the CLI |
 | explicit `model` override on a pi row | pi | (the row's driver is pi) |

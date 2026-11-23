@@ -206,6 +206,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					...(params.model ? { model: params.model } : {}),
 					...(params.thinking ? { thinking: params.thinking as ThinkingLevel } : {}),
 					...(params.profile ? { profile: params.profile } : {}),
+					...(params.driver ? { driver: params.driver as "pi" | "claude" | "codex" } : {}),
 					...(params.base ? { base: params.base } : {}),
 					...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
 					...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),
