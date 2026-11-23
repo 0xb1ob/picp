@@ -12,11 +12,13 @@ import { type TestContext, test } from "node:test";
 import { LAYOUT, paths } from "../../src/contracts.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { type ClaudeStep, type ClaudeToolUse, toolResults } from "../harness/claude-mock-provider.ts";
-import { readRunEvents } from "../harness/index.ts";
-import { isModelCall } from "../harness/native-parent.ts";
+import { readRunEvents, waitFor } from "../harness/index.ts";
+import { isModelCall, REAL_CLAUDE } from "../harness/native-parent.ts";
 import { NATIVE, nativeWorkerHome } from "../harness/native-worker.ts";
 
 type Home = Awaited<ReturnType<typeof nativeWorkerHome>>;
+// Off CI a laptop without treehouse skips by name; under CI (Actions and Dagger set CI=true) a missing tool fails.
+const skip = process.env.CI === "true" ? false : NATIVE;
 const calls = (...uses: ClaudeToolUse[]): ClaudeStep => ({ kind: "tool_use", calls: uses });
 const picp = (name: string, input: ClaudeToolUse["input"]): ClaudeToolUse => ({ name: `mcp__picp__${name}`, input });
 const ghRead = (input: Record<string, unknown>) => picp("gh_read", input);
@@ -35,7 +37,7 @@ const THREAD = '{"thread_id":"PRRT_a","isResolved":false,"isOutdated":false,"pat
 const CLOSING = '{"body":"Fixes the parser.\\n\\nCloses #13","closingIssuesReferences":[{"number":13,"url":"https://github.com/o/r/issues/13",' +
 	'"repository":{"name":"r","owner":{"login":"o"}}},{"number":15,"url":"https://github.com/other/x/issues/15","repository":{"name":"x","owner":{"login":"other"}}}]}';
 
-/** A scripted forge `gh` first on the workers' PATH: logs each call (`repos`: its GH_REPO) and answers G1–G4's shapes. */
+/** A scripted `gh` first on the workers' PATH: logs each call (`repos`: its GH_REPO) and answers G1–G4's shapes. */
 function forgeGh(t: TestContext, h: Home): (() => string[]) & { repos: () => string[] } {
 	const dir = mkdtempSync(join(tmpdir(), "cp-nf-gh-"));
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -81,17 +83,24 @@ function githubOrigin(worktree: string): void {
 	git(worktree, "remote", "set-url", "--push", "origin", bare);
 }
 
-/** Asserts the CLI child's env carried no GH_* key, ssh agent or CP_HOME though the worker held a GH token. */
+/** The worker's synthetic credentials: they reach the worker process, never the CLI child. */
+const workerCredentials = (tag: string) => ({ GH_TOKEN: `${tag}-synthetic-gh-token`, SSH_AUTH_SOCK: `/tmp/${tag}-agent.sock` });
+
+/** Asserts the CLI child's env carried no GH_* key, ssh agent or CP_HOME though the worker held them. */
 function noCredentialInChild(h: Home, id: string): void {
 	const keys = h.spawnedEnvKeys(id);
-	if (keys !== undefined) assert.deepEqual(keys.filter((key) => key.startsWith("GH_") || ["SSH_AUTH_SOCK", "CP_HOME"].includes(key)), [], JSON.stringify(keys));
+	// Only the real CLI (CP_E2E_REAL_CLAUDE=1) records no keys; under fake-claude a missing log is a failure.
+	assert.ok(keys !== undefined || REAL_CLAUDE, "fake-claude recorded no spawned env keys");
+	if (keys === undefined) return;
+	assert.ok(keys.includes("PATH"), JSON.stringify(keys));
+	assert.deepEqual(keys.filter((key) => key.startsWith("GH_") || ["SSH_AUTH_SOCK", "CP_HOME"].includes(key)), [], JSON.stringify(keys));
 }
 
 // Scenario: Given data/gh-read.json granting owner acme, When a native planner searches org:acme, views an acme issue
 //   with -R and GETs an acme api path, Then each reaches gh; other owners, an unscoped search, -X POST and graphql are
 //   refused before gh runs. Controls: the same org:acme search by an implementer, or by a planner with no grant file,
 //   is refused (the grant is planner-only and opt-in).
-test("NF-1: a granted planner reads its owners' repos; other owners, writes and unscoped searches stay refused", { skip: NATIVE, timeout: 300_000 }, async (t) => {
+test("NF-1: a granted planner reads its owners' repos; other owners, writes and unscoped searches stay refused", { skip, timeout: 300_000 }, async (t) => {
 	const reach = [
 		{ verb: "search prs", args: ["org:acme", "author:alice", "--json", "number,url"] },
 		{ verb: "issue view", number: 5, args: ["-R", "acme/x"] },
@@ -120,7 +129,7 @@ test("NF-1: a granted planner reads its owners' repos; other owners, writes and 
 		const ghCalls = forgeGh(t, h);
 		const job = await h.job(planner ? "research" : "ship");
 		id = job.id;
-		const ends = await h.run([job.dispatch("Summarise alice's acme PRs and reviews."), h.awaitEnvelope(id)], { GH_TOKEN: "nf1-synthetic-gh-token" });
+		const ends = await h.run([job.dispatch("Summarise alice's acme PRs and reviews."), h.awaitEnvelope(id)], workerCredentials("nf1"));
 		assert.notEqual(ends[0]?.isError, true, `${variant}: ${text(ends[0])}`);
 		const results = toolResults(h.claude.requests);
 		const all = `${variant}:\n${results.join("\n---\n")}`;
@@ -144,10 +153,29 @@ test("NF-1: a granted planner reads its owners' repos; other owners, writes and 
 	}
 });
 
+// Scenario: Given an invalid data/gh-read.json ("owners" not an array), When a native planner is dispatched, Then
+//   its turn fails closed: the CLI never starts, gh never runs, no report is accepted and the job fails as a crash.
+//   Negative control: NF-1's planner with a valid grant reaches gh.
+test("NF-1b: an invalid gh-read.json fails the planner's turn closed before the CLI starts", { skip, timeout: 300_000 }, async (t) => {
+	let id = "";
+	const h: Home = await nativeWorkerHome(t, [calls(ghRead({ verb: "search prs", args: ["org:acme"] })), done]);
+	writeFileSync(join(h.b.home, LAYOUT.data, "gh-read.json"), JSON.stringify({ owners: "acme" }));
+	const ghCalls = forgeGh(t, h);
+	const job = await h.job("research");
+	id = job.id;
+	const ends = await h.run([job.dispatch("Summarise alice's acme PRs."), h.awaitEnvelope(id)], workerCredentials("nf1b"));
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const record = await waitFor(() => h.record(id), (found) => found?.phase === "failed", { timeoutMs: 120_000, what: `${id} to fail` });
+	assert.equal(record?.failure?.class, "crash", JSON.stringify(record?.failure));
+	assert.equal(h.claude.requests.some(isModelCall), false, "the CLI started a model call under an invalid grant");
+	assert.deepEqual(ghCalls().filter((line) => line.startsWith("search")), [], "gh ran the search");
+	assert.equal(accepted(h.b.home, id), 0);
+});
+
 // Scenario: Given a ship job whose task names #12 and #14 and whose PR closes #13 (and other/x#15), When the worker
 //   commits, pushes, opens its PR and calls issue_comment on 12, 13, 99, 14 and 15, Then 12 and 13 post with the
 //   origin's GH_REPO; 99 (never named), 14 (a PR) and 15 (another repo) are refused, so gh logs two comments only.
-test("NF-2: issue_comment posts only on issues the brief names or the job PR closes", { skip: NATIVE, timeout: 300_000 }, async (t) => {
+test("NF-2: issue_comment posts only on issues the brief names or the job PR closes", { skip, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const comment = (issue: number) => picp("issue_comment", { issue, body: "nf2 note" });
 	const h: Home = await nativeWorkerHome(t, [
@@ -162,7 +190,7 @@ test("NF-2: issue_comment posts only on issues the brief names or the job PR clo
 	const ghCalls = forgeGh(t, h);
 	const job = await h.job("ship", "pr");
 	id = job.id;
-	const ends = await h.run([job.dispatch("Fix the parser for #12; #14 is related."), h.awaitEnvelope(id)], { GH_TOKEN: "nf2-synthetic-gh-token" });
+	const ends = await h.run([job.dispatch("Fix the parser for #12; #14 is related."), h.awaitEnvelope(id)], workerCredentials("nf2"));
 	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
 	const results = toolResults(h.claude.requests);
 	const all = results.join("\n---\n");
@@ -183,7 +211,7 @@ test("NF-2: issue_comment posts only on issues the brief names or the job PR clo
 // Scenario: Given a ship job, When it reads `pr threads`, replies and resolves before pr_create, Then all three refuse
 //   with "no PR yet"; after pr_create, threads list PRRT_a unresolved, a reply to top-level comment 101 and resolving
 //   PRRT_a post once each, and comment 202 (PR 8), reply 303, thread PRRT_b (PR 8) and a malformed id are refused.
-test("NF-3: review threads are read, replied to and resolved on the job's own PR only", { skip: NATIVE, timeout: 300_000 }, async (t) => {
+test("NF-3: review threads are read, replied to and resolved on the job's own PR only", { skip, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const reply = (comment_id: number) => picp("pr_review_reply", { comment_id, body: "nf3 fixed" });
 	const resolve = (thread_id: string) => picp("pr_thread_resolve", { thread_id });
@@ -197,7 +225,7 @@ test("NF-3: review threads are read, replied to and resolved on the job's own PR
 	const ghCalls = forgeGh(t, h);
 	const job = await h.job("ship", "pr");
 	id = job.id;
-	const ends = await h.run([job.dispatch("Answer and resolve the bot's review threads."), h.awaitEnvelope(id)], { GH_TOKEN: "nf3-synthetic-gh-token" });
+	const ends = await h.run([job.dispatch("Answer and resolve the bot's review threads."), h.awaitEnvelope(id)], workerCredentials("nf3"));
 	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
 	const results = toolResults(h.claude.requests);
 	const all = results.join("\n---\n");
@@ -223,7 +251,7 @@ test("NF-3: review threads are read, replied to and resolved on the job's own PR
 // Scenario: Given a native planner, When upstream main gains `nf4 upstream` and the planner calls git_fetch, Then its
 //   Bash `git log origin/main` shows the commit; api commits reads leave the CI snapshot unused, a `-F per_page=5`
 //   query is refused naming the path form, and research teardown still returns the lease.
-test("NF-4: a planner fetches origin and reads upstream main; commits reads skip the CI snapshot", { skip: NATIVE, timeout: 300_000 }, async (t) => {
+test("NF-4: a planner fetches origin and reads upstream main; commits reads skip the CI snapshot", { skip, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const scratch = mkdtempSync(join(tmpdir(), "cp-nf4-upstream-"));
 	t.after(() => rmSync(scratch, { recursive: true, force: true }));

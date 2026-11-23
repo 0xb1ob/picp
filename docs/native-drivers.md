@@ -976,10 +976,12 @@ Every new tool runs in the claude-worker process (the in-process picp MCP server
   emitted when nothing is skipped. `!command` values are still not run (WP5 has the env-file pattern).
 
 `tests/e2e/native-forge-parity.test.ts` NF-1 (granted reads reach gh; other owners, an unscoped search, `-X POST` and
-graphql refused; an implementer and an ungranted planner refused), NF-2 (two issue comments post; 99, a PR and another
+graphql refused; an implementer and an ungranted planner refused), NF-1b (an invalid grant fails the job before the
+CLI starts), NF-2 (two issue comments post; 99, a PR and another
 repo's issue refused), NF-3 (no PR yet; threads, one reply and one resolve post, the rest refused) and NF-4 (the
-planner's fetch shows upstream main in Bash, the `-F` remedy, teardown passes), and `tests/e2e/host-compatibility.test.ts`
-P24b (`mcp.native`) pin it; NP-1a…NP-1c still pin the origin-only reads. Recovery: delete `data/gh-read.json`, switch
+planner's fetch shows upstream main in Bash, the `-F` remedy, teardown passes), and
+`tests/e2e/host-compatibility.test.ts` P24b (`mcp.native`) pin it; NP-1a…NP-1c still pin the origin-only reads.
+Recovery: delete `data/gh-read.json`, switch
 `claude_ship` / `claude_research` off, or revert.
 
 ## Codex CLI workers (C0–C8)
