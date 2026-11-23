@@ -66,6 +66,8 @@ test("CLI-driver sessions: the operator, parent and worker headers show the reco
 	write(operatorSessionsFile(sessions), jsonl([older, { at: "2026-09-27T09:00:00.000Z", session_file: join(sessions, "native-operator-1.jsonl") }]));
 	write(join(sessions, "cp-parent-control.json"), { model: "anthropic/claude-x" });
 	assert.deepEqual([await badge("#sessions?view=you"), await badge("#sessions?view=parent")], ["Claude CLI", "unknown"]);
+	write(join(sessions, "cp-parent.jsonl"), PI);
+	assert.equal(await badge("#sessions?view=parent"), "pi", "a control with no sessionFile falls back to cp-parent.jsonl, like parentFile()");
 	assert.deepEqual([await badge("#sessions?view=you&transcript=1"), await badge("#sessions?view=you&transcript=1&session=operator.jsonl")],
 		["Claude CLI", "pi"], "the shown file's CLI, not the newest's");
 	write(join(sessions, "empty.jsonl"), "");

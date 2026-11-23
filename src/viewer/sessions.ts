@@ -262,7 +262,8 @@ export function parentRow(state: ViewerState, now = Date.now()): SessionRow {
 	let standingOrdersAt: string | undefined;
 	try { standingOrdersAt = statSync(orders).mtime.toISOString(); } catch { /* optional */ }
 	const saved = str(readObject(join(state.stateDir, "sessions", "cp-parent-control.json"))?.sessionFile);
-	const driver = saved && realInside(saved, sessionRoots(state)) ? recordedDriver(saved) : undefined;
+	const valid = saved && saved.endsWith(".jsonl") && realInside(saved, sessionRoots(state));
+	const driver = recordedDriver(valid ? saved : join(state.stateDir, "sessions", `${PARENT_ID}.jsonl`));
 	return {
 		id: PARENT_ID,
 		kind: "parent",
