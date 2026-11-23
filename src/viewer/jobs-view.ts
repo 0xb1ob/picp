@@ -8,10 +8,10 @@ import { jobRoot, listOrRead } from "./explorer.ts";
 import { overview } from "./overview-view.ts";
 import { decisions } from "./overview-decisions.ts";
 import { SHA } from "./git-read.ts";
-import { recordedEvents, routingFacts, routingText } from "./overview-health.ts";
+import { recordedEvents, reviewerDriver, routingFacts, routingText } from "./overview-health.ts";
 import { mandateDisplay, mandateEscalations } from "./mandates-map-view.ts";
 import { LEDGER_STATUSES, objectList, strings, text, timestamp, today, parseObject, source, nonnegative, readBounded, firstById } from "./overview-read.ts";
-import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
+import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, workerDriver, type Json, type ViewerState } from "./sessions.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
 import { forwardedCi, grantCandidates, headCi, parkedHead, parkedSeconds, quiescent, recordedReview } from "./overview-jobs.ts";
@@ -91,7 +91,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const ledgerStatus=str(job?.status) ?? null;
   const expected=phase==="done" ? "closed" : phase==="queued" ? "open" : "in_progress";
   return {id,project,title:str(job?.title) ?? null,phase,model:detail?.model ?? null,script_path:detail?.script_path ?? null,
-   driver:str(obj(entry?.worker)?.driver) ?? null,driver_note:driverNote(obj(entry?.routing)),usage_unavailable:status?.usage_unavailable===true,cost_unknown:status?.cost_unknown===true,
+   driver:workerDriver(entry) ?? null,driver_note:driverNote(obj(entry?.routing)),usage_unavailable:status?.usage_unavailable===true,cost_unknown:status?.cost_unknown===true,
    elapsed_seconds:live?.elapsed_seconds ?? duration,limit_seconds:live?.limit_seconds ?? nonnegative(obj(entry?.bounds)?.wall_clock_seconds),head:head ?? null,
    ci:headCi(state,id,ci,head ?? null),ci_forwarded:forwardedCi(state,id,head),review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),
    routing:live?.routing ?? (entry ? routingText(state,entry) : null),note:live?.note ?? null,ledger_status:ledgerStatus,ledger_disagrees:ledgerStatus!==null && (phase==="failed" || ledgerStatus!==expected),mandate_id:mandate,
@@ -173,6 +173,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  }
  // ci-watch.json drops a row once the job leaves the watch (merged, closed), so the CI fact falls back to the last recorded CI event for this head, the same source as the timeline.
  if(!job.ci && seenCi && job.head && seenCi.head===job.head) job.ci=seenCi.ci;
+ job.reviewer_driver=reviewerDriver(state,id);
  if(job.merge_sha && job.finished_at) timeline.push({at:job.finished_at,label:"Merge",meta:job.merge_sha,tone:"green"});
  timeline.sort((a,b)=>a.at.localeCompare(b.at));
  const root=jobRoot(state,id); const artifact=jobArtifact(state,id);

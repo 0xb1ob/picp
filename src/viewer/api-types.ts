@@ -169,6 +169,8 @@ export interface SessionsResponse {
  transcript?: boolean; operator_sessions?: {id: string; at: string}[]; operator_session?: string | null;
  /** The operator session's context; `parent.context` and each `workers[].context` carry theirs. */
  operator_context?: ContextUsage;
+ /** The newest operator session file's recorded CLI (`pi`, `claude`); null when no readable file records it. */
+ operator_driver?: string | null;
  /** Full transcript only: every open ask, oldest first, for the block pinned above the composer — never windowed. */
  open_asks?: AwaitingDetail[];
  /** Live PR and issue chips by URL (src/viewer/pr-chips.ts), from files the viewer already reads; no GitHub call. */
@@ -492,9 +494,10 @@ export interface DecisionsResponse extends AwaitingResponse { decided: DecisionD
 export interface ForwardedCi { ci: string; observed_at: string; url: string | null }
 export interface FlightJob {
  id: string; project: string; title: string | null; phase: string; model: string | null; script_path: string | null;
- /** N3b: the native driver that ran it (`claude`, `codex`); null is pi.
+ /** The recorded CLI its worker spawned on (`pi`, `claude`, `codex`); null is unknown (no worker recorded) or a script.
+  * `reviewer_driver`: the latest review or gate attempt's routed CLI, null when none is recorded.
   * `usage_unavailable`: its usage was not measured, not zero. `cost_unknown`: its USD cost is unknown, not $0 (C1b). */
- driver?: string | null; usage_unavailable?: boolean; cost_unknown?: boolean;
+ driver?: string | null; reviewer_driver?: string | null; usage_unavailable?: boolean; cost_unknown?: boolean;
  elapsed_seconds: number | null; limit_seconds: number | null;
  head: string | null; ci: string | null; review: string | null; review_attempts: number;
  /** Operator-forwarded CI for `head`: shown only where native CI is absent, unknown or unreadable; never a gate. */

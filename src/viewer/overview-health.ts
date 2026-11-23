@@ -4,7 +4,7 @@ import type { OverviewResponse, QuotaObservation, ViewerRoutingFacts } from "./a
 import { isSafeId, obj, parentRow, readObject, readStatus, str, type Json, type ViewerState } from "./sessions.ts";
 import { nonnegative, parseObject, strings, timestamp } from "./overview-read.ts";
 import { readLines } from "./tail.ts";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 /**
  * Is the pid `state/parent.lock` records still a process? The viewer re-derives this instead of
@@ -34,6 +34,16 @@ const cachedEvents = fileCache((path: string) => readLines(path, 0, 256 * 1024).
 export function recordedEvents(state: ViewerState, id: string): Json[] {
  if (!isSafeId(id)) return [];
  try { return cachedEvents(join(state.stateDir, "runs", id, "events.jsonl")); } catch { return []; }
+}
+/** The routed CLI of the job's newest review (else gate) attempt; an event with no `driver` is pi (dispatch-driver.ts). */
+export function reviewerDriver(state: ViewerState, id: string): string | null {
+ if (!isSafeId(id)) return null;
+ let names: string[]; try { names = readdirSync(join(state.stateDir, "runs", id)); } catch { return null; }
+ const newest = (kind: string) => names.filter(n => new RegExp(`^${kind}-[1-9]\\d{0,2}$`).test(n)).sort((a, b) => Number(a.slice(kind.length + 1)) - Number(b.slice(kind.length + 1))).at(-1);
+ const run = newest("review") ?? newest("gate");
+ if (!run) return null;
+ let event: Json | undefined; try { event = cachedEvents(join(state.stateDir, "runs", id, run, "events.jsonl")).findLast(e => e.type === "routing_resolved"); } catch { return null; }
+ return event ? str(obj(event.payload)?.driver) ?? "pi" : null;
 }
 export function routingEvents(state: ViewerState, id: string): Json[] {
  return recordedEvents(state,id).filter(e => e.type === "routing_resolved");

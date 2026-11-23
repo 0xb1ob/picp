@@ -33,6 +33,8 @@ export interface SessionRow {
 	model?: string | undefined;
 	/** Workers: the session's latest thinking level, else the level routing recorded at dispatch; absent when unknown. */
 	thinking?: string | undefined;
+	/** The recorded CLI driver (`pi`, `claude`, `codex`); absent when nothing records it. */
+	driver?: string | undefined;
 	context_tokens?: number | null;
 	last_turn_cost_usd?: number;
 	compact_at_tokens?: number;
@@ -149,6 +151,12 @@ export function isLiveWorker(runPhase: string | undefined, phase: string | undef
 	return (runPhase === "working" || runPhase === "starting") && phase !== "done" && phase !== "failed";
 }
 
+/** A fleet record's spawned worker: `worker.driver` names a native CLI and its absence is pi; no worker is unknown. */
+export function workerDriver(job: Json | undefined): string | undefined {
+	const worker = obj(job?.worker);
+	return worker && job?.executor !== "script" ? str(worker.driver) ?? "pi" : undefined;
+}
+
 function workerRow(job: Json, status: Json | undefined): SessionRow | undefined {
 	const id = str(job.job_id);
 	if (!id || !isSafeId(id) || job.executor === "script") return undefined;
@@ -166,6 +174,7 @@ function workerRow(job: Json, status: Json | undefined): SessionRow | undefined 
 		profile: str(status?.profile) ?? str(worker.profile),
 		model: str(status?.model) ?? str(worker.model),
 		thinking: str(obj(job.routing)?.thinking) ?? str(obj(status?.routing)?.thinking),
+		driver: workerDriver(job),
 		phase,
 		run_phase: runPhase,
 		cost_usd: cost,
@@ -212,13 +221,18 @@ export const sessionLogFile = (file: string): string => (nativeRecord(file) ? na
 
 /** Whether `file` opens with the native parent's `record` line (src/drivers/claude-parent-session.ts). */
 function nativeRecord(file: string): boolean {
+	return recordedDriver(file) === "claude";
+}
+
+/** The CLI a recorded session file ran on: a native `record` line is `claude`, any other file pi; unreadable is unknown. */
+export function recordedDriver(file: string): "pi" | "claude" | undefined {
 	const head = Buffer.alloc(64);
 	let fd: number | undefined;
 	try {
 		fd = openSync(file, "r");
-		return /^\{"type":"record","driver":"claude"/.test(head.toString("utf8", 0, readSync(fd, head, 0, head.length, 0)));
+		return /^\{"type":"record","driver":"claude"/.test(head.toString("utf8", 0, readSync(fd, head, 0, head.length, 0))) ? "claude" : "pi";
 	} catch {
-		return false;
+		return undefined;
 	} finally {
 		if (fd !== undefined) closeSync(fd);
 	}
@@ -245,10 +259,13 @@ export function parentRow(state: ViewerState, now = Date.now()): SessionRow {
 	const limit = num(readObject(join(dataDir, "parent.json"))?.compact_at_tokens);
 	let standingOrdersAt: string | undefined;
 	try { standingOrdersAt = statSync(orders).mtime.toISOString(); } catch { /* optional */ }
+	const saved = str(readObject(join(state.stateDir, "sessions", "cp-parent-control.json"))?.sessionFile);
+	const driver = saved && realInside(saved, sessionRoots(state)) ? recordedDriver(saved) : undefined;
 	return {
 		id: PARENT_ID,
 		kind: "parent",
 		role: "parent",
+		...(driver ? { driver } : {}),
 		...(context.contextTokens !== undefined ? { context_tokens: num(context.contextTokens) ?? null } : {}),
 		...(num(context.lastTurnCostUsd) !== undefined ? { last_turn_cost_usd: num(context.lastTurnCostUsd) } : {}),
 		...(limit && Number.isSafeInteger(limit) && limit > 0 ? { compact_at_tokens: limit } : {}),

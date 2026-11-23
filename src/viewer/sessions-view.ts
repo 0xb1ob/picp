@@ -16,7 +16,7 @@ import { parseObject, source, timestamp } from "./overview-read.ts";
 import { modelWindows, operatorContext, parentContext, workerContext } from "./context-usage.ts";
 import { modelText } from "./model-text.ts";
 import { parseSkillLines } from "./skill-mentions.ts";
-import { jobProjects, num, obj, resolveSessionFile, sessionLogFile, sessionRoots, sidebar, str, type Json, type ViewerState } from "./sessions.ts";
+import { jobProjects, num, obj, recordedDriver, resolveSessionFile, sessionLogFile, sessionRoots, sidebar, str, type Json, type ViewerState } from "./sessions.ts";
 import { BACKLOG_BYTES, readLines, startOffset } from "./tail.ts";
 
 const sendId = (v: unknown): v is string => typeof v === "string" && /^ps-\d{14}-[a-f0-9]{8}$/.test(v);
@@ -339,7 +339,8 @@ export function sessionsView(state: ViewerState, tier: SessionTier, workerId: st
  const workers=[...rows.active,...rows.recent].filter(w=>w.phase !== "done").map(w=>{const context=workerContext(state,w.id,w.model,windows), thinking=context?.thinking ?? w.thinking; return {...w,...(thinking ? {thinking} : {}),...(context ? {context} : {})};});
  const selected=tier === "workers" ? workers.find(w=>w.id===(workerId ?? workers[0]?.id)) : null;
  if (tier === "workers" && workerId && !selected) return undefined;
- if (tier === "you" && options.transcript === true) { const view=operatorTranscript(state,options.session ?? null,now,rows,workers); return view && {...view,operator_context:operatorContext(state,windows)}; }
+ const operatorFile=readOperatorSessions(sessionRoots(state)[0]!)[0]?.file, operator_driver=operatorFile ? recordedDriver(operatorFile) ?? null : null;
+ if (tier === "you" && options.transcript === true) { const view=operatorTranscript(state,options.session ?? null,now,rows,workers); return view && {...view,operator_context:operatorContext(state,windows),operator_driver}; }
  const d=decisions(state,now), warnings:string[]=[];
  for (const [name,availability] of [["escalations",d.escalations.availability],["asks",d.askSource.availability]]) if (availability === "unavailable") warnings.push(`${name} unavailable`);
  const bySend=new Map<string,Json[]>();
@@ -379,5 +380,5 @@ export function sessionsView(state: ViewerState, tier: SessionTier, workerId: st
   }
  }
  const shown=entries.slice(-300), pr_chips=attachPrChips(state,shown);
- return {generated_at:new Date(now).toISOString(),selected:tier,session_id:tier === "parent" ? rows.parent.id : selected?.id ?? null,parent:rows.parent,workers,entries:shown,title:tier === "you" ? "Operator ↔ you" : tier === "parent" ? "CP parent" : selected?.id ?? "Workers",subtitle:tier === "you" ? "Recorded decisions and questions" : tier === "workers" && selected ? modelText({model:selected.context?.model ?? selected.model,thinking:selected.thinking}) : "",warnings,truncated,operator_context:operatorContext(state,windows),pr_chips};
+ return {generated_at:new Date(now).toISOString(),selected:tier,session_id:tier === "parent" ? rows.parent.id : selected?.id ?? null,parent:rows.parent,workers,entries:shown,title:tier === "you" ? "Operator ↔ you" : tier === "parent" ? "CP parent" : selected?.id ?? "Workers",subtitle:tier === "you" ? "Recorded decisions and questions" : tier === "workers" && selected ? modelText({model:selected.context?.model ?? selected.model,thinking:selected.thinking}) : "",warnings,truncated,operator_context:operatorContext(state,windows),operator_driver,pr_chips};
 }

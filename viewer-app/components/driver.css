@@ -1,0 +1,3 @@
+/* The recorded CLI driver pill (pi, Claude CLI, Codex CLI, unknown): small, like the ledger pill. */
+.driver-badge { display: inline-block; flex-shrink: 0; font-size: 10px; line-height: 14px; color: var(--subtle); border: 1px solid var(--ledger-border); border-radius: 999px; padding: 0 6px; white-space: nowrap; }
+.driver-badge-unknown { border-style: dashed; }
