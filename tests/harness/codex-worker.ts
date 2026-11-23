@@ -130,7 +130,7 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 		const file = join(b.home, paths.reviewFile(id, attempt));
 		await waitFor(() => existsSync(file), Boolean, { timeoutMs: 180_000, what: `${id}'s review-${attempt}.json` });
 		const run = join(b.home, paths.reviewRunDir(id, attempt));
-		const events = readFileSync(join(run, "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; payload: Record<string, unknown> });
+		const events = readFileSync(join(run, "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; ts: string; payload: Record<string, unknown> });
 		const routed = events.find((event) => event.type === "routing_resolved")?.payload;
 		const verdictFile = join(b.home, paths.reviewVerdictFile(id, attempt));
 		const verdict = existsSync(verdictFile) ? (JSON.parse(readFileSync(verdictFile, "utf8")) as { review: unknown }).review : undefined;

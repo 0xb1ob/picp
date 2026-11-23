@@ -238,26 +238,40 @@ test("CX-6d: switches off, a codex reviews row refuses by name (never pi) and no
 	assertClean(h);
 });
 
-// Scenario: a live codex research job holds the one codex slot, so a review on a codex row waits for Codex CLI capacity
-// (cp-qmry: its pi fallback never runs); once that job tears down, the review takes the slot on codex.
-test("CX-6e: a reviewer that finds the codex slot full waits for Codex CLI capacity, never pi; a free slot runs codex", { skip, timeout: 300_000 }, async (t) => {
+// Scenario (cp-912x T8, R3): Given a live codex research job holding the one codex slot, When cp_review runs on held
+// subjects S1 then S2, Then both return state: queued "waiting for Codex CLI capacity" with no attempt claimed and no pi
+// reviewer; And once that job tears down S1's review runs on codex, then S2's (FIFO on the same CLI).
+test("CX-6e/T8: reviews that find the codex slot full queue FIFO for Codex CLI capacity and run on codex when it frees, never pi", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_review: true } });
 	const research = await h.job();
-	const [full, free] = ["cp-cx6e-full", "cp-cx6e-free"];
-	for (const id of [full, free]) await h.heldShipJob(id);
-	const piModel = h.b.provider.addScript("cx6e-pi", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: verdict(full) }] }]);
+	const [first, second] = ["cp-cx6e-first", "cp-cx6e-second"];
+	for (const id of [first, second]) await h.heldShipJob(id);
+	const piModel = h.b.provider.addScript("cx6e-pi", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: verdict(first) }] }]);
 	h.reviewsRow(piModel);
-	h.setScript({ turns: [h.reporting(research.id), [{ kind: "tool", tool: "report_verdict", arguments: verdict(free) }]] });
-	const [occupied] = (await h.run([research.dispatch(), h.awaitEnvelope(research.id), h.review(full)])).filter((end) => end.toolName === "cp_review");
-	assert.equal(h.record(research.id)?.worker.driver, "codex");
-	assert.equal(occupied?.isError, true, JSON.stringify(occupied?.result.content));
-	assert.match(JSON.stringify(occupied?.result.content), new RegExp(`codex concurrency is 1 and ${research.id} is live.* is waiting for Codex CLI capacity`));
+	const reviewing = (id: string): FakeCodexStep[] => [{ kind: "tool", tool: "report_verdict", arguments: verdict(id) }, { kind: "message", text: "Reviewed." }];
+	h.setScript({ turns: [h.reporting(research.id), reviewing(first), reviewing(second)] });
+	const ends = await h.run([
+		research.dispatch(), h.awaitEnvelope(research.id), h.review(first), h.review(second),
+		{ kind: "tool_calls", calls: [{ name: "cp_next", args: {} }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: research.id } }] },
+		h.awaitFile(join(h.b.home, paths.reviewFile(second, 1))),
+	]);
+	const queued = ends.filter((end) => end.toolName === "cp_review");
+	for (const [end, position] of [[queued[0], 1], [queued[1], 2]] as const) {
+		assert.notEqual(end?.isError, true, JSON.stringify(end?.result.content));
+		assert.deepEqual([end?.result.details?.state, end?.result.details?.position, end?.result.details?.waiting], ["queued", position, "waiting for Codex CLI capacity"]);
+	}
+	const next = ends.find((end) => end.toolName === "cp_next")?.result.details as { lined_up?: { waiting?: Array<{ job_id: string; kind: string; driver: string }> } };
+	assert.deepEqual(next.lined_up?.waiting?.map((row) => [row.job_id, row.kind, row.driver]), [[first, "review", "codex"], [second, "review", "codex"]]);
+	const runs = [await h.reviewRun(first), await h.reviewRun(second)] as const;
+	for (const [run, id] of [[runs[0], first], [runs[1], second]] as const) {
+		assert.match(String(run.routed?.line), /driver=codex/, JSON.stringify(run.routed));
+		assert.deepEqual(run.verdict, verdict(id), "attempt 1 is the queued review: nothing was claimed while it waited");
+	}
+	const started = runs.map((run) => run.events.find((event) => event.type === "routing_resolved")?.ts ?? "");
+	assert.ok(started[0]! < started[1]!, `FIFO: ${first} started ${started[0]}, ${second} ${started[1]}`);
 	assert.equal(h.b.provider.requests("cx6e-pi").length, 0, "a reviewer ran on pi");
-	await h.b.closeParents();
-	await h.run([{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: research.id } }] }, h.pause(2), h.review(free)]);
-	const codex = await h.reviewRun(free);
-	assert.match(String(codex.routed?.line), /driver=codex/, JSON.stringify(codex.routed));
-	assert.deepEqual(codex.verdict, verdict(free));
+	assert.equal(existsSync(join(h.b.home, LAYOUT.nativeWaitFile)) && JSON.parse(readFileSync(join(h.b.home, LAYOUT.nativeWaitFile), "utf8")).entries.length, 0);
 	await allScopesKilled(h);
 	assertClean(h);
 });

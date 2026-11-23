@@ -4,13 +4,15 @@
  * (mock model) with fake-codex and the fake `systemd-run` at the boundary (tests/harness/codex-worker.ts).
  */
 import assert from "node:assert/strict";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { LAYOUT, paths } from "../../src/contracts.ts";
+import { type FailureClass, LAYOUT, paths } from "../../src/contracts.ts";
+import { readRecoveryAttempts } from "../../src/recovery.ts";
+import { fakePrompts } from "../harness/codex-mock.ts";
 import { FAKE_NATIVE_MODEL } from "../harness/claude-mock-provider.ts";
 import { codexWorkerHome, FAKE_CODEX_REF } from "../harness/codex-worker.ts";
-import { readRunEvents, treehouseAvailable } from "../harness/index.ts";
+import { readRunEvents, treehouseAvailable, waitFor } from "../harness/index.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 const skip = treehouseAvailable() ? false : "needs treehouse on PATH";
@@ -110,4 +112,80 @@ test("P3: an explicit codex on a claude or pi row and an explicit claude on a co
 	assert.match(record?.routing?.driver_reason ?? "", /^override: human terminal \S+ proof omp-[a-f0-9]{32} asked for codex; effort /);
 	const preview = (ends[3]?.result.details as { decision?: { driver?: string; driver_reason?: string } } | undefined)?.decision;
 	assert.deepEqual([preview?.driver, /^override: human terminal \S+ proof omp-/.test(preview?.driver_reason ?? "")], ["codex", true], text(ends[3]));
+});
+
+const step = (name: string, args: Record<string, unknown>) => ({ kind: "tool_calls" as const, calls: [{ name, args }] });
+const ofType = (h: H, id: string, type: string) => readRunEvents(h.b.home, id).filter((event) => event.type === type);
+const waitEntries = (h: H) => (existsSync(join(h.b.home, LAYOUT.nativeWaitFile)) ? (JSON.parse(readFileSync(join(h.b.home, LAYOUT.nativeWaitFile), "utf8")) as { entries: unknown[] }).entries : []);
+/** Lowers codex to one slot once `holder` reported: two live codex jobs then fill it (CX-6f's trick, at a real boundary). */
+const lowerToOne = (h: H) => writeFileSync(h.nativeFile, JSON.stringify({ codex_research: true, codex_max_concurrent: 1 }));
+
+// Scenario (T5a, R4 respawn): Given a codex job that dies while another codex job fills the one slot, When bounded
+// recovery and then the operator's cp_revive try to revive it, Then both queue "waiting for Codex CLI capacity" (one
+// entry, no recovery attempt spent, never pi); And once the holder tears down it revives on codex and reports.
+test("T5a: a dead codex job's revive waits for Codex CLI capacity (no attempt spent) and revives on codex when the slot frees", { skip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_max_concurrent: 2 } });
+	codexRow(h);
+	const [dead, holder] = await Promise.all([h.job(), h.job()]);
+	h.setScript({ turns: [[{ kind: "hold", marker: "held" }], h.reporting(holder.id), h.reporting(dead.id)] });
+	const queued = join(h.state, "recovery-queued");
+	const killer = (async () => {
+		await waitFor(() => existsSync(join(h.b.home, paths.envelopeFile(holder.id))) && h.record(dead.id)?.worker.pid, Boolean, { timeoutMs: 120_000, what: "the holder's report" });
+		lowerToOne(h);
+		process.kill(h.record(dead.id)?.worker.pid as number, "SIGKILL");
+		await waitFor(() => ofType(h, dead.id, "recovery_failed"), (found) => found.some((event) => (event.payload as { stage?: string }).stage === "native_waiting"),
+			{ timeoutMs: 120_000, what: "bounded recovery queued the revive" });
+		writeFileSync(queued, "");
+	})();
+	const ends = await h.run([
+		dead.dispatch(), h.awaitFile(join(h.state, "held")), holder.dispatch(), h.awaitEnvelope(holder.id), h.awaitFile(queued),
+		step("cp_revive", { job_id: dead.id, confirm: true }), step("cp_next", {}), step("cp_teardown", { job_id: holder.id }),
+		h.waitEvent(dead.id, "envelope_received", 1), h.pause(2),
+	]);
+	await killer;
+	const failure = ofType(h, dead.id, "failure")[0]?.payload as { class?: FailureClass } | undefined;
+	assert.equal(readRecoveryAttempts(h.b.home, dead.id, failure?.class ?? "crash"), 0, "a queued revive spends no recovery attempt");
+	const revive = ends.find((end) => end.toolName === "cp_revive");
+	assert.notEqual(revive?.isError, true, text(revive));
+	assert.deepEqual([revive?.result.details?.state, revive?.result.details?.kind, revive?.result.details?.position], ["queued", "revive", 1], text(revive));
+	assert.match(text(revive), /waiting for Codex CLI capacity/);
+	const next = ends.find((end) => end.toolName === "cp_next")?.result.details as { lined_up?: { waiting?: Array<{ job_id: string; kind: string; driver: string }> } };
+	assert.deepEqual(next.lined_up?.waiting?.map((row) => [row.job_id, row.kind, row.driver]), [[dead.id, "revive", "codex"]]);
+	assert.equal(ofType(h, dead.id, "worker_revived").length, 1);
+	// The killed run records no native_run; the revived one ran on codex, nothing on pi.
+	assert.deepEqual([h.record(dead.id)?.worker.driver, ofType(h, dead.id, "native_run").map((event) => (event.payload as { driver?: string }).driver)], ["codex", ["codex"]]);
+	assert.deepEqual(waitEntries(h), []);
+});
+
+// Scenario (T5b, R5 continuation): Given two held codex jobs filling the one slot, When cp_send reaches one of them,
+// Then it is queued "waiting for Codex CLI capacity" (nothing sent, never pi); And once the other tears down the message
+// is delivered on codex, on the job's own thread, and it reports again.
+test("T5b: a cp_send whose codex slot is full is queued and delivered on codex when the slot frees", { skip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_max_concurrent: 2 } });
+	codexRow(h);
+	const [author, holder] = await Promise.all([h.job(), h.job()]);
+	h.setScript({ turns: [h.reporting(author.id), h.reporting(holder.id), h.reporting(author.id)] });
+	const lowered = join(h.state, "lowered");
+	const lower = (async () => {
+		await waitFor(() => ofType(h, holder.id, "agent_settled").length > 0 && ofType(h, author.id, "agent_settled").length > 0, Boolean, { timeoutMs: 120_000, what: "both turns settled" });
+		lowerToOne(h);
+		writeFileSync(lowered, "");
+	})();
+	const message = "T5b follow-up: name one more file and report again.";
+	const ends = await h.run([
+		author.dispatch(), h.awaitEnvelope(author.id), holder.dispatch(), h.awaitEnvelope(holder.id), h.awaitFile(lowered),
+		step("cp_send", { job_id: author.id, message }), step("cp_teardown", { job_id: holder.id }),
+		h.waitEvent(author.id, "envelope_received", 2), h.pause(2),
+	]);
+	await lower;
+	const sent = ends.find((end) => end.toolName === "cp_send");
+	assert.notEqual(sent?.isError, true, text(sent));
+	assert.deepEqual([sent?.result.details?.receipt, sent?.result.details?.waiting], ["queued", "waiting for Codex CLI capacity"], text(sent));
+	assert.match(String(sent?.result.details?.native), /delivered on the Codex CLI when a slot frees, never on another CLI/);
+	const delivered = fakePrompts(h.state).filter((each) => each.text.includes(message));
+	assert.equal(delivered.length, 1, "delivered once, after the slot freed");
+	assert.equal(delivered[0]?.threadId, h.session(author.id).thread_id, "on the job's own codex thread");
+	assert.equal(ofType(h, author.id, "envelope_received").length, 2);
+	assert.deepEqual(waitEntries(h), []);
+	assert.deepEqual(readdirSync(join(h.b.home, paths.runDir(author.id))).filter((name) => name.startsWith("waiting-send-")), [], "the waiting body is removed");
 });
