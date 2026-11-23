@@ -1,0 +1,1 @@
+- Dashboard: the desktop sidebar (and the Chats column) is resizable from a drag handle on its inner edge, 180–480 px; arrow keys step 16 px, Home/End jump to the bounds, a double-click resets the default; the width persists in localStorage and the phone layout is unchanged.
