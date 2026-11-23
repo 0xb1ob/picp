@@ -62,7 +62,7 @@ import type { RunRecorder } from "./run-artifacts.ts";
 import { RunRegistry } from "./runs.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
-import { type DriverContext, driverFields, holdNativeSlot, liveNativeWorkers, nativeSpawn, observeNative, resolveDriverRoute } from "./dispatch-driver.ts";
+import { type DriverContext, driverFields, NativeDriverError, holdNativeSlot, liveNativeWorkers, nativeSpawn, observeNative, resolveDriverRoute } from "./dispatch-driver.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
 import { assertContinuationTask, continuityInputsBlock } from "./mandate-continuity.ts";
@@ -78,7 +78,7 @@ import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
 import { assertBranchFree, type BindPrInput, bindFromOrigin, type BoundPrFacts, boundPrNote, checkoutBoundBranch } from "./pr-bind.ts";
 import { assertResourcesFree, OPS_PROFILE_NAME, opsRequest } from "./ops-jobs.ts";
 import { withRunExecution } from "./schedule-native.ts";
-import { admitOperatorPick, decisionFields, type PickRequest, withOperatorPick } from "./reroute.ts";
+import { admitOperatorPick, decisionFields, driverOverrideEvent, driverOverrideOf, type PickRequest, withOperatorPick } from "./reroute.ts";
 import { isQuotaContinuationEligible, type QuotaEligibility } from "./quota-continuation-policy.ts";
 import { ScheduleAuthorityError } from "./schedule-authority.ts";
 import { DispatchError } from "./dispatch-error.ts";
@@ -490,10 +490,10 @@ export class Dispatcher {
 				},
 				options.routing,
 				options.probe,
-				options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, profile: profile.frontmatter.name, jobs: options.fleet.read().jobs, ...(request.driver ? { explicit: request.driver } : {}) },
+				options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, profile: profile.frontmatter.name, jobs: options.fleet.read().jobs, ...(request.driver ? { explicit: request.driver } : {}), ...driverOverrideOf(request.pick) },
 			);
 		} catch (thrown) {
-			if (!(thrown instanceof RoutingError)) throw thrown;
+			if (!(thrown instanceof RoutingError) && !(thrown instanceof NativeDriverError)) throw thrown;
 			error = thrown.message;
 		}
 		// Absent supported_thinking means the probe cannot tell, never "unsupported".
@@ -571,7 +571,7 @@ export class Dispatcher {
 			},
 			options.routing,
 			options.probe,
-			options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, profile: profile.frontmatter.name, jobs: options.fleet.read().jobs, reserve: true, nativeLive: liveNativeWorkers(options.manager, issue.id), ...(request.driver ? { explicit: request.driver } : {}) },
+			options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, profile: profile.frontmatter.name, jobs: options.fleet.read().jobs, reserve: true, nativeLive: liveNativeWorkers(options.manager, issue.id), ...(request.driver ? { explicit: request.driver } : {}), ...driverOverrideOf(request.pick) },
 		);
 
 		// Frozen on the record below; an invalid data/worker-bounds.json refuses before any lease.
@@ -769,7 +769,7 @@ export class Dispatcher {
 				provenance: inputs.provenance,
 				...(inputs.reasons.length > 0 ? { reasons: inputs.reasons } : {}),
 				...(gate.warning ? { risk_warning: gate.warning } : {}), ...(gate.recorded ? { recorded_risk: gate.recorded.risk, recorded_risk_from: gate.recorded.from } : {}),
-				...(operatorPick ? { operator_pick: operatorPick } : {}), ...(request.pickSpent ? { prior_pick_attempt: request.pickSpent } : {}),
+				...(operatorPick ? { operator_pick: operatorPick } : {}), ...(request.pickSpent ? { prior_pick_attempt: request.pickSpent } : {}), ...(request.pick?.driver && routing.driver === request.pick.driver ? { driver_override: driverOverrideEvent(request.pick) } : {}),
 			});
 			attachWorkerObservers({
 				recorder, worker: managed.worker, jobId: issue.id,

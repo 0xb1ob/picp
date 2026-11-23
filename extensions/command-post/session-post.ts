@@ -9,6 +9,8 @@ import { Markdown } from "@earendil-works/pi-tui";
 import { type ResolvedAwaitingItem } from "../../src/awaiting.ts";
 import { CommandPost, type CommandPostOptions } from "../../src/command-post.ts";
 import { type OperatorModelPickReference, PLAN_VIEW_MAX_BYTES, type Runtime, type ThinkingLevel } from "../../src/contracts.ts";
+import { formatDispatchResult } from "../../src/dispatch.ts";
+import { waitingLabel } from "../../src/dispatch-queue.ts";
 import { checkStoredPick } from "../../src/reroute.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { formatIntake, type IntakeResult } from "../../src/intake.ts";
@@ -90,6 +92,18 @@ export function buildCommandPost(input: {
 }
 
 export type SessionPost = ReturnType<typeof createSessionPost>;
+
+/** cp_ask's outcome: dispatched, or queued waiting for its configured CLI (cp-qmry). */
+export type AskResult = { job_id: string } & (
+	| { dispatch: Awaited<ReturnType<CommandPost["dispatch"]>>; queued?: undefined }
+	| { dispatch?: undefined; queued: { position: number; waiting: string } }
+);
+
+/** The dispatch record, or the queued line naming the CLI the question waits for. */
+export function formatAskDispatch(result: AskResult): string {
+	if (result.dispatch) return formatDispatchResult(result.dispatch);
+	return `queued (position ${result.queued.position}): ${result.job_id} ${result.queued.waiting}; it starts on the same CLI when a slot frees — do not re-ask`;
+}
 
 export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: WakeupSurfaces) {
 	const { sendWakeup, surfaceAnswerCards, surfaceDurableWakeups, surfaceAnswered, recheckDeferredRows, surfaceWedged } = wakeups;
@@ -409,7 +423,7 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 		operatorQuote?: OperatorModelPickReference;
 		registry?: unknown;
 		sourceSendId?: string;
-	}): Promise<{ job_id: string; dispatch: Awaited<ReturnType<CommandPost["dispatch"]>> }> => {
+	}): Promise<AskResult> => {
 		const question = request.question.trim();
 		if (question.length === 0) throw new Error("cp_ask needs a question");
 		const project = resolveProjectArg(currentRuntime(), request.project, "cp_ask");
@@ -423,15 +437,35 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 			kind: "research",
 			description: question,
 		});
-		const dispatch = await post.dispatch({
-			jobId: issue.id,
-			task: question,
-			scope: "S",
-			risk: "low",
-			...(request.model ? { model: request.model } : {}),
-			...(request.thinking ? { thinking: request.thinking } : {}),
-			...(request.operatorQuote ? { operatorQuote: request.operatorQuote } : {}),
-		});
+		let dispatch: Awaited<ReturnType<CommandPost["dispatch"]>>;
+		try {
+			dispatch = await post.dispatch({
+				jobId: issue.id,
+				task: question,
+				scope: "S",
+				risk: "low",
+				...(request.model ? { model: request.model } : {}),
+				...(request.thinking ? { thinking: request.thinking } : {}),
+				...(request.operatorQuote ? { operatorQuote: request.operatorQuote } : {}),
+			});
+		} catch (error) {
+			// cp-qmry: a full CLI keeps the question waiting for that CLI, never another one.
+			const waiting = waitingLabel(error);
+			if (waiting === undefined) throw error;
+			let position: number;
+			try {
+				position = post.dispatchQueue.enqueue(issue.id, {
+					task: question, scope: "S", risk: "low",
+					...(request.model ? { model: request.model } : {}),
+					...(request.thinking ? { thinking: request.thinking } : {}),
+					...(request.operatorQuote ? { operator_quote: request.operatorQuote } : {}),
+				});
+			} catch (queueError) {
+				(error as Error).message += ` (not queued: ${(queueError as Error).message.split("\n")[0]})`;
+				throw error;
+			}
+			return { job_id: issue.id, queued: { position, waiting } };
+		}
 		return { job_id: issue.id, dispatch };
 	};
 

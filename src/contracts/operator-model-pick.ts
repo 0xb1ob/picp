@@ -57,6 +57,18 @@ export const OperatorModelPickProofSchema = Type.Object(
 );
 export type OperatorModelPickProof = Static<typeof OperatorModelPickProofSchema>;
 
+/** cp-qmry: a proof that also names the CLI the human asked for (the one per-job switch off the configured CLI). */
+export const OPERATOR_DRIVER_PICK_VERSION = 2;
+export const OperatorDriverPickProofSchema = Type.Object(
+	{
+		...OperatorModelPickProofSchema.properties,
+		version: Type.Literal(OPERATOR_DRIVER_PICK_VERSION),
+		driver: StringEnum(["pi", "claude", "codex"]),
+	},
+	{ additionalProperties: false },
+);
+export type OperatorDriverPickProof = Static<typeof OperatorDriverPickProofSchema>;
+
 /** `claims/proof-<id>.json` and `claims/job-<id>.json`: the one use of a proof and the one pick of a job. */
 export const OperatorModelPickClaimSchema = Type.Object(
 	{

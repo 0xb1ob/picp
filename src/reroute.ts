@@ -3,7 +3,7 @@
  * later execution of that job (retry, revive, continue_failed, recovery, pipeline recover) routes freshly.
  */
 
-import type { FleetRecord, JobRouting, OperatorModelPickReference, OperatorPickRecord, RoutingConfig, RoutingDecision, ThinkingLevel, WorkerHandle } from "./contracts.ts";
+import type { FleetRecord, JobRouting, OperatorModelPickReference, OperatorPickRecord, RoutingConfig, RoutingDecision, RoutingDriver, ThinkingLevel, WorkerHandle } from "./contracts.ts";
 import { claimOperatorPick, pickedJobClaim, snapshotPickedAttempt, type VerifiedPick, verifyOperatorPick } from "./operator-model-pick.ts";
 import { loadProfile } from "./profiles.ts";
 import { requireRouted } from "./routed-models.ts";
@@ -13,7 +13,20 @@ import type { NativeDriver } from "./worker-driver.ts";
 import { nativeDriverSpec } from "./drivers/registry.ts";
 
 /** The pick fields a dispatch request carries; `pick`/`pickSpent` are set only by `withOperatorPick`. */
-export interface PickRequest { jobId: string; model?: string; operatorQuote?: OperatorModelPickReference; pick?: VerifiedPick; pickSpent?: string }
+export interface PickRequest { jobId: string; model?: string; driver?: RoutingDriver; operatorQuote?: OperatorModelPickReference; pick?: VerifiedPick; pickSpent?: string }
+
+/** cp-qmry: a v2 pick's recorded human driver override (the only switch off the configured CLI), with its source. */
+export function driverOverrideOf(pick: VerifiedPick | undefined): { driverOverride?: { driver: RoutingDriver; reason: string } } {
+	if (!pick?.driver) return {};
+	const { source, proof_id } = pick.proof;
+	return { driverOverride: { driver: pick.driver, reason: `override: human ${source.kind} ${source.control_id ?? source.entry_id} proof ${proof_id} asked for ${pick.driver}` } };
+}
+
+/** The `driver_override` record on `routing_resolved`: the human's quote, where it was typed, and its proof. */
+export function driverOverrideEvent(pick: VerifiedPick): Record<string, unknown> {
+	const { source, proof_id, quote } = pick.proof;
+	return { driver: pick.driver, proof_id, quote, kind: source.kind, entry_id: source.entry_id, ...(source.control_id ? { control_id: source.control_id } : {}) };
+}
 
 /**
  * Verify a quote (read-only, so preview may call it), or, for an already-picked job, validate then drop the model.
@@ -24,7 +37,7 @@ export function withOperatorPick<T extends PickRequest>(home: string, raw: strin
 	const pinned = request.model !== undefined && request.model !== raw;
 	if (request.operatorQuote) {
 		if (pinned) requireRouted(config, request.model!, "the schedule run's model pin");
-		const pick = verifyOperatorPick(home, request.operatorQuote, { model: raw, jobId: request.jobId, config });
+		const pick = verifyOperatorPick(home, request.operatorQuote, { model: raw, jobId: request.jobId, config, ...(request.driver ? { driver: request.driver } : {}) });
 		return { ...clean, model: raw, pick } as T;
 	}
 	const spent = pickedJobClaim(home, request.jobId);
@@ -35,8 +48,8 @@ export function withOperatorPick<T extends PickRequest>(home: string, raw: strin
 }
 
 /** Before a queued/armed request is stored: the quote must verify now, and is verified again at admission. */
-export function checkStoredPick(home: string, jobId: string, model: string | undefined, quote: OperatorModelPickReference | undefined): void {
-	if (quote) verifyOperatorPick(home, quote, { model, jobId, config: loadRoutingConfig(home) });
+export function checkStoredPick(home: string, jobId: string, model: string | undefined, quote: OperatorModelPickReference | undefined, driver?: RoutingDriver): void {
+	if (quote) verifyOperatorPick(home, quote, { model, jobId, config: loadRoutingConfig(home), ...(driver ? { driver } : {}) });
 }
 
 /** At admission, before any side effect: freeze a picked previous attempt, then spend this request's pick. */

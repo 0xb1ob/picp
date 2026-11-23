@@ -119,7 +119,7 @@ import { incompleteSubjectReasons, isCompletePass } from "./review-subject.ts";
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
 import { ProjectRegistry } from "./projects.ts";
 import { type ModelProbe, type ReviewerRoute, reviewerRoutingEvent, reviewerRoutingInputs } from "./routing.ts";
-import { holdReviewerSlot, resolveReviewerRoute } from "./reviewer-route.ts";
+import { borrowedFrom, holdReviewerSlot, resolveReviewerRoute } from "./reviewer-route.ts";
 import { nativeSpawn } from "./dispatch-driver.ts";
 import { RunRecorder } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -700,7 +700,7 @@ export class DiffReview {
 				model,
 				// Model and effort are one decision; the spawn gets both (cp-reviewer-routing).
 				...(route.decision.thinking ? { thinking: route.decision.thinking } : {}),
-				...nativeSpawn(route.decision),
+				...nativeSpawn(route.decision), ...borrowedFrom(route.decision, jobId),
 				brief,
 				sessionDir: join(home, LAYOUT.sessions),
 				sessionName: key,

@@ -103,7 +103,7 @@ const noRun = (h: H, id: string) => assert.equal(existsSync(join(h.b.home, paths
 const failed = (h: H, id: string) => waitFor(() => h.record(id), (record) => record?.phase === "failed", { timeoutMs: 60_000, what: `${id} failed on its observed exit` });
 const preview = (end: End | undefined) => (end?.result.details as { decision?: { driver?: string; requested_driver?: string; driver_reason?: string } } | undefined)?.decision;
 
-test("CX-1b: the switch refuses an explicit codex job by name; a codex row prefers codex, falls back to pi by name, and a started job keeps its driver", { skip, timeout: 300_000 }, async (t) => {
+test("CX-1b: the switch refuses an explicit codex job by name; a codex row binds codex, refuses by name (never pi), and a started job keeps its driver", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: {} });
 	const piModel = h.b.provider.addScript(`cx1b-pi-${Math.random().toString(36).slice(2, 8)}`, [{ kind: "text", text: "idle" }]);
 	const routing = (rows: Record<string, unknown>[], extra: Record<string, unknown> = {}) =>
@@ -113,34 +113,32 @@ test("CX-1b: the switch refuses an explicit codex job by name; a codex row prefe
 	const [explicit, rowOff, rowOn, board, denied, badModel, ship, locked] = await Promise.all([
 		h.job(), h.job(), h.job(), h.job("board"), h.job(), h.job(), h.job("local", "ship"), h.job(),
 	]);
-	// Switch off: the explicit request refuses naming the switch, before any lease; the row falls back to pi.
+	// Switch off: the explicit request refuses naming the switch, before any lease; the row refuses too (cp-qmry: never pi).
 	routing([row()]);
 	const off = await h.run([explicit.dispatch(), dry(rowOff.id)]);
-	const [refused, fellBack] = off.filter((end) => end.toolName === "cp_dispatch");
+	const [refused, rowRefused] = off.filter((end) => end.toolName === "cp_dispatch");
 	assert.equal(refused?.isError, true, text(refused));
 	assert.match(text(refused), /cannot run on the Codex CLI driver: the switch codex_research is off/);
 	noRun(h, explicit.id);
-	// While codex is off the fallback names no codex value (CX-off-2 pins the persisted record).
-	assert.deepEqual([preview(fellBack)?.requested_driver, preview(fellBack)?.driver], [undefined, "pi"], text(fellBack));
-	assert.match(preview(fellBack)?.driver_reason ?? "", /^switch: /);
+	const error = (end: End | undefined) => (end?.result.details as { error?: string } | undefined)?.error ?? "";
+	assert.equal(preview(rowRefused), undefined, text(rowRefused));
+	assert.match(error(rowRefused), /cannot run on the Codex CLI driver: the switch codex_research is off/);
 	// Switch on: the row routes codex; delivery board, an implementer row with codex_ship off (C7b) and a denied model
-	// fall back to pi by name.
+	// refuse by name, never pi.
 	writeFileSync(h.nativeFile, JSON.stringify({ codex_research: true }));
 	routing([row(), row({ id: "codex-ship", role: "implementer" })]);
 	await h.b.closeParents();
 	const on = (await h.run([dry(rowOn.id), dry(board.id), dry(ship.id)])).filter((end) => end.toolName === "cp_dispatch");
 	assert.deepEqual([preview(on[0])?.driver, preview(on[0])?.requested_driver], ["codex", "codex"], text(on[0]));
 	assert.match(preview(on[0])?.driver_reason ?? "", /^rule: codex-research prefers codex; effort \w+/);
-	assert.deepEqual([preview(on[1])?.requested_driver, preview(on[1])?.driver], ["codex", "pi"], text(on[1]));
-	// C8 (h): the ship fallback's class switch codex_ship is off, so no codex value is recorded.
-	assert.deepEqual([preview(on[2])?.requested_driver, preview(on[2])?.driver], [undefined, "pi"], text(on[2]));
-	assert.match(preview(on[1])?.driver_reason ?? "", /^ineligible: only research \(role planner, delivery local or answer\), ship \(role implementer, delivery pr or local\) and gate reviews run on the Codex CLI/);
-	assert.match(preview(on[2])?.driver_reason ?? "", /^switch: the switch codex_ship is off/);
+	assert.deepEqual([preview(on[1]), preview(on[2])], [undefined, undefined], JSON.stringify(on).slice(0, 600));
+	assert.match(error(on[1]), /cannot run on the Codex CLI driver: only research \(role planner, delivery local or answer\), ship \(role implementer, delivery pr or local\) and gate reviews run on the Codex CLI/);
+	assert.match(error(on[2]), /cannot run on the Codex CLI driver: the switch codex_ship is off/);
 	routing([row()], { deny_by_role: { planner: [FAKE_CODEX_REF] } });
 	await h.b.closeParents();
 	const deny = (await h.run([dry(denied.id)])).find((end) => end.toolName === "cp_dispatch");
-	assert.equal(preview(deny)?.driver, "pi", text(deny));
-	assert.match(preview(deny)?.driver_reason ?? "", new RegExp(`^denied: deny_by_role.planner matches ${FAKE_CODEX_REF}`));
+	assert.equal(preview(deny), undefined, text(deny));
+	assert.match(error(deny), new RegExp(`cannot run on the Codex CLI driver: deny_by_role.planner matches ${FAKE_CODEX_REF}`));
 	// A codex row on an Anthropic model is a config error with no lease (programme D1: model-checked, not vendor-checked).
 	routing([row({ model: "anthropic/claude-opus-x", fallbacks: [] })], { allow: ["mock/*", "anthropic/claude-opus-x", FAKE_CODEX_REF] });
 	await h.b.closeParents();
@@ -189,7 +187,7 @@ test("CX-1c: hook-denied calls never run and each is a tool pair in the run log"
 	assertClean(h);
 });
 
-test("CX-1e: codex slots are counted per driver: a second codex job is occupied, a row-preferred one runs pi, a Claude slot is not taken", { skip, timeout: 300_000 }, async (t) => {
+test("CX-1e: codex slots are counted per driver: a second codex job is occupied, a row-routed one never previews pi, a Claude slot is not taken", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t, { native: { codex_research: true, claude_research: true } });
 	const [first, second, rowed, claude] = await Promise.all([h.job(), h.job(), h.job(), h.job()]);
 	const piModel = h.b.provider.addScript(`cx1e-pi-${Math.random().toString(36).slice(2, 8)}`, [{ kind: "text", text: "idle" }]);
@@ -210,11 +208,13 @@ test("CX-1e: codex slots are counted per driver: a second codex job is occupied,
 	assert.equal(ends[1]?.isError, true, text(ends[1]));
 	assert.match(text(ends[1]), new RegExp(`cannot run on the Codex CLI driver: codex concurrency is 1 and ${first.id} is live`));
 	noRun(h, second.id);
-	assert.deepEqual([preview(ends[2])?.requested_driver, preview(ends[2])?.driver], ["codex", "pi"], text(ends[2]));
-	assert.match(preview(ends[2])?.driver_reason ?? "", new RegExp(`^occupied: codex concurrency is 1 and ${first.id}`));
+	// cp-qmry: the row-preferred preview reports the full CLI as an error; it never previews pi.
+	const error = (end: End | undefined) => (end?.result.details as { error?: string } | undefined)?.error ?? "";
+	assert.equal(preview(ends[2]), undefined, text(ends[2]));
+	assert.match(error(ends[2]), new RegExp(`cannot run on the Codex CLI driver: codex concurrency is 1 and ${first.id}`));
 	// A live codex job takes no Claude slot: the claude row's preview is never occupied (it may lack a CLI here).
-	assert.equal(preview(ends[3])?.requested_driver, "claude", text(ends[3]));
-	assert.doesNotMatch(preview(ends[3])?.driver_reason ?? "", /^occupied/);
+	assert.notEqual(preview(ends[3])?.driver, "pi", text(ends[3]));
+	assert.doesNotMatch(`${preview(ends[3])?.driver_reason ?? ""} ${error(ends[3])}`, /occupied|concurrency/);
 	assertClean(h);
 });
 
@@ -362,7 +362,8 @@ test("C1b T-row: with every codex switch off nothing persisted takes a codex val
 		armed.dispatch({ when_ready: true }),
 		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: plain.id, task: "Report.", model: piModel, driver: "pi", queue: false, when_ready: false } }] },
 	])).filter((end) => end.toolName === "cp_dispatch");
-	assert.match(text(ends[0]), /the switch codex_research is off/);
+	// cp-qmry P3: with no codex row the explicit codex request is the parent's choice and refuses before any lease.
+	assert.match(text(ends[0]), /configured to run on pi \(rule planner-default\), and a parent's driver choice is not an override/);
 	assert.match(text(ends[1]), /not armed: the armed dispatch of \S+ names the codex driver while every codex switch is off/);
 	assert.notEqual(ends[2]?.isError, true, text(ends[2]));
 	await waitFor(() => h.record(plain.id), Boolean, { timeoutMs: 30_000, what: "the pi job's fleet record" });
@@ -375,42 +376,31 @@ test("C1b T-row: with every codex switch off nothing persisted takes a codex val
 	assertClean(h);
 });
 
-test("CX-off-2: with every codex switch off a hand-written codex row routes pi and no persisted record names a codex driver", { skip, timeout: 300_000 }, async (t) => {
-	// C1b review item 1: the row's fallback used to write requested_driver "codex" into fleet.json and the run log, a
-	// value a build before C1b cannot read. Now the decision omits it; driver pi and the switch reason stay. No session
-	// record (and so no C2 `totals`) exists for a job that never ran codex.
+test("CX-off-2: with every codex switch off a hand-written codex row refuses by name (never pi) and no persisted record names a codex driver", { skip, timeout: 300_000 }, async (t) => {
+	// C1b review item 1: no build before C1b may read a codex value. cp-qmry: the row's CLI binds, so the job is refused
+	// naming the switch rather than run on pi; nothing is spawned or persisted for it.
 	const h = await codexWorkerHome(t, { native: null });
 	const job = await h.job();
-	const piModel = h.b.provider.addScript(`cxoff2-pi-${Math.random().toString(36).slice(2, 8)}`, [
-		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "true" } }] }, { kind: "text", text: "idle" },
-	]);
+	const piModel = h.b.provider.addScript(`cxoff2-pi-${Math.random().toString(36).slice(2, 8)}`, [{ kind: "text", text: "idle" }]);
 	const row = { id: "hand-written", role: "planner", model: FAKE_CODEX_REF, fallbacks: [piModel], driver: "codex" };
 	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*", FAKE_CODEX_REF], rubric: [row] }));
 	const [end] = (await h.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Report.", queue: false, when_ready: false } }] }]))
 		.filter((each) => each.toolName === "cp_dispatch");
-	assert.notEqual(end?.isError, true, text(end));
-	const record = await waitFor(() => h.record(job.id), Boolean, { timeoutMs: 30_000, what: "the pi job's fleet record" });
-	assert.equal(record?.worker.driver, undefined, "the job runs pi");
-	assert.equal(record?.worker.model, piModel);
-	assert.equal(record?.routing?.driver, "pi");
-	assert.equal(record?.routing?.requested_driver, undefined);
-	assert.match(record?.routing?.driver_reason ?? "", /^switch: /);
-	const resolved = readRunEvents(h.b.home, job.id).filter((event) => event.type === "cp:routing_resolved" || event.type === "routing_resolved");
-	assert.ok(resolved.length > 0, "the routing decision is journaled");
+	assert.equal(end?.isError, true, text(end));
+	assert.match(text(end), /cannot run on the Codex CLI driver: the switch codex_research is off/);
+	assert.equal(existsSync(join(h.b.home, LAYOUT.fleetFile)) ? h.record(job.id) : undefined, undefined, "no fleet record: nothing ran on pi");
+	noRun(h, job.id);
 	const drivers = (value: unknown): unknown[] => (value === null || typeof value !== "object" ? [] : Object.entries(value as Record<string, unknown>)
 		.flatMap(([key, child]) => [...(key === "driver" || key === "requested_driver" ? [child] : []), ...drivers(child)]));
 	const persisted = [LAYOUT.fleetFile, LAYOUT.dispatchQueueFile, join(LAYOUT.data, "native.json"), join(LAYOUT.data, "armed-dispatches.json")]
 		.map((rel) => join(h.b.home, rel)).filter((file) => existsSync(file));
-	for (const value of [...persisted.map((file) => JSON.parse(readFileSync(file, "utf8")) as unknown), ...resolved]) {
+	for (const value of persisted.map((file) => JSON.parse(readFileSync(file, "utf8")) as unknown)) {
 		for (const driver of drivers(value)) assert.ok(driver === "pi" || driver === "claude", `a persisted driver value ${String(driver)}`);
 	}
 	assert.equal(existsSync(h.nativeFile), false, "native.json was never written");
-	assert.equal(existsSync(join(h.b.home, paths.runDir(job.id), "native-codex")), false, "no Codex session record, so no totals");
-	assert.doesNotMatch(readFileSync(join(h.b.home, paths.eventsFile(job.id)), "utf8"), /"totals"|"requested_driver":"codex"/);
-	// C3: no codex job ran, so neither availability snapshot exists and no observation was relayed.
+	// C3: no codex job ran, so neither availability snapshot exists.
 	assert.equal(existsSync(codexAvailabilityFile(h.b.home)), false, "no Codex availability snapshot");
 	assert.equal(existsSync(nativeAvailabilityFile(h.b.home)), false, "no Claude availability snapshot");
-	assert.equal(readRunEvents(h.b.home, job.id).some((event) => event.type === "native_observation"), false);
 	// The harness adds the parent's own rows; picp wrote no codex value: the hand-written row is the only one, as written.
 	const rubric = (JSON.parse(readFileSync(join(h.b.home, LAYOUT.routingFile), "utf8")) as { rubric: Array<Record<string, unknown>> }).rubric;
 	assert.deepEqual(rubric.filter((each) => each.driver === "codex"), [row]);

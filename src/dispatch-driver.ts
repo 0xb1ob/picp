@@ -1,13 +1,13 @@
 /**
- * Native routing S1: which driver a dispatch runs on. A rubric row's `driver` is a preference, an explicit request is
- * strict, and a started job keeps its driver (D1). Each driver's spec (src/drivers/registry.ts) decides eligibility.
+ * Native routing S1: which driver a dispatch runs on. A rubric row's `driver` binds (cp-qmry: never another CLI, a
+ * full one queues), a started job keeps its driver (D1). Each driver's spec (src/drivers/registry.ts) decides eligibility.
  */
 import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision, type RoutingDriver } from "./contracts.ts";
 import { liveNativeJobs, nativeBaseEnv, NativeDriverError, type NativeRefusal, nativeSlotRefusal, nativeThinkingEnv } from "./drivers/claude.ts";
-import { codexClassOf, codexPersistRefusal } from "./drivers/codex.ts";
 import { nativeDriverSpec, type NativeDriverSpec } from "./drivers/registry.ts";
 import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest, RoutingError } from "./routing.ts";
 export { observeNative } from "./native-availability-observer.ts";
+export { NativeDriverError };
 import { NATIVE_DRIVERS, type NativeDriver } from "./worker-driver.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 
@@ -26,6 +26,10 @@ export interface DriverContext {
 	nativeLive?: Partial<Record<NativeDriver, readonly string[]>>;
 	/** The selected profile's name: `ops` makes a job ineligible for native. */
 	profile?: string;
+	/** A human's recorded per-job driver override (the only switch off the configured CLI), as `driver_reason` text. */
+	driverOverride?: { driver: RoutingDriver; reason: string };
+	/** Reviewer only: the held, idle author on the same CLI whose slot this reviewer may borrow (cp-912x ruling). */
+	borrowFrom?: string;
 }
 
 type Capacity = Parameters<typeof resolveWithCapacity>[3];
@@ -47,16 +51,31 @@ export async function holdNativeSlot<T>(home: string, jobId: string, run: () => 
 	}
 }
 
+/** Take `driver`'s slot for `jobId` until its `holdNativeSlot` settles. */
+export function reserveNativeSlot(home: string, jobId: string, driver: NativeDriver): void {
+	slots.set(slotKey(home, driver), (slots.get(slotKey(home, driver)) ?? new Set<string>()).add(jobId));
+}
+
 /** The routing decision plus the driver it runs on; the pi lane is `resolveWithCapacity` unchanged. */
 export async function resolveDriverRoute(
 	route: RouteRequest, config: RoutingConfig, probe: ModelProbe, capacity: Capacity, ctx: DriverContext,
 ): Promise<RoutingDecision> {
 	const prior = ctx.jobs.find((job) => job.job_id === ctx.jobId);
 	const locked = prior && !isScriptFleetRecord(prior) ? (prior.worker.driver ?? "pi") : undefined;
+	// The CLI settings bind this job to: its row's driver without any model override (absent is pi).
+	const configuredRow = overrideRow(route, config);
+	const configured = configuredRow?.driver === undefined || configuredRow.driver === "pi" ? undefined : (configuredRow.driver as NativeDriver);
+	const override = ctx.driverOverride !== undefined && ctx.driverOverride.driver === ctx.explicit ? ctx.driverOverride : undefined;
+	// P3: an explicit driver other than the configured CLI is a parent's choice unless the human's v2 pick names it.
+	if (ctx.explicit !== undefined && locked === undefined && ctx.explicit !== (configured ?? "pi") && !override) {
+		const where = configured ? `the ${nativeDriverSpec(configured).label}` : "pi";
+		const rule = configuredRow ? `rule ${configuredRow.id}` : "no row names a CLI";
+		throw new NativeDriverError(`refused: ${ctx.jobId} is configured to run on ${where} (${rule}), and a parent's driver choice is not an override; only the operator's own per-job request (cp_parent model_pick with driver) switches the CLI`, "switch", configured);
+	}
 	if (ctx.explicit === "pi") {
 		if (locked !== undefined && locked !== "pi") throw new NativeDriverError(`refused: ${ctx.jobId} started on ${locked} and a started job keeps its driver; dispatch a new job to run pi`);
 		const pi = await resolveWithCapacity(route, config, probe, capacity);
-		return { ...pi, requested_driver: "pi", driver: "pi", driver_reason: "explicit: cp_dispatch driver pi" };
+		return { ...pi, requested_driver: "pi", driver: "pi", driver_reason: bounded(override?.reason ?? "explicit: cp_dispatch driver pi") };
 	}
 	if (locked === "pi" && ctx.explicit) {
 		throw new NativeDriverError(`refused: ${ctx.jobId} started on pi and a started job keeps its driver; dispatch a new job to run native`);
@@ -66,27 +85,31 @@ export async function resolveDriverRoute(
 	}
 	const picked = pickModel(route, config);
 	const fresh = ctx.explicit === undefined && locked === undefined;
-	const rule = !route.override ? rowOf(picked, config) : fresh ? overrideRow(route, config) : undefined;
-	// J4: an override is native only when the row's own driver accepts that model.
+	const rule = !route.override ? rowOf(picked, config) : fresh ? configuredRow : undefined;
 	const rowDriver = rule?.driver === undefined || rule.driver === "pi" ? undefined : (rule.driver as NativeDriver);
-	const ruleDriver = rowDriver !== undefined && (!route.override || nativeDriverSpec(rowDriver).isModel(route.override)) ? rowDriver : undefined;
+	// A model-only change never changes the CLI: a model the configured CLI cannot run refuses (J4 used to run pi).
+	if (fresh && rowDriver !== undefined && route.override && !nativeDriverSpec(rowDriver).isModel(route.override)) {
+		throw new NativeDriverError(`refused: ${ctx.jobId} asks for ${route.override}, which cannot run on the configured ${nativeDriverSpec(rowDriver).label} (rule ${rule!.id}); a model change never changes the CLI — pick a model that CLI runs, or omit model`, "model", rowDriver);
+	}
 	// `explicit` is not `pi` here, and `locked` is a fleet `worker.driver` (a native name) or `pi`.
-	const wanted = (ctx.explicit ?? (locked !== undefined && locked !== "pi" ? locked : undefined) ?? (fresh ? ruleDriver : undefined)) as NativeDriver | undefined;
+	const wanted = (ctx.explicit ?? (locked !== undefined && locked !== "pi" ? locked : undefined) ?? (fresh ? rowDriver : undefined)) as NativeDriver | undefined;
 	if (wanted === undefined) return resolveWithCapacity(route, config, probe, capacity);
 	const spec = nativeDriverSpec(wanted);
-	const why = ctx.explicit ? `explicit: cp_dispatch driver ${wanted}` : locked ? `lock: the job started on ${wanted}`
+	const why = override ? override.reason : ctx.explicit ? `explicit: cp_dispatch driver ${wanted}` : locked ? `lock: the job started on ${wanted}`
 		: `rule: ${rule!.id} prefers ${wanted}${route.override ? `; override ${route.override}` : ""}`;
 	// A config error, never a silent fallback: the native primary is the row's (or caller's) own explicit model.
 	spec.modelId(picked.model);
 	spec.assertEffort(picked.thinking);
-	const selection = { home: ctx.home, jobId: ctx.jobId, driver: wanted, kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs: ctx.jobs,
+	// Selection counts fleet slots too: a lent author's is not counted there either.
+	const jobs = ctx.borrowFrom === undefined ? ctx.jobs : ctx.jobs.filter((job) => job.job_id !== ctx.borrowFrom);
+	const selection = { home: ctx.home, jobId: ctx.jobId, driver: wanted, kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs,
 		...(ctx.profile !== undefined ? { profile: ctx.profile } : {}) };
 	let selected: ReturnType<NativeDriverSpec["selectionRefusal"]> | undefined;
 	let note: string | undefined;
 	let model: string | undefined;
 	let skipped: { category: NativeRefusal; why: string } | undefined;
 	// J5: the row's native candidates in order; the first allowed one S2's subscription evidence does not block wins.
-	// An explicit model is never substituted: a blocked override refuses (then pi), as before J5.
+	// An explicit model is never substituted: a blocked override refuses.
 	const candidates = route.override ? [picked.model] : [picked.model, ...(rule?.fallbacks ?? [])];
 	for (const candidate of candidates.filter(spec.isModel)) {
 		const blocked = allowRefusal(config, ctx.role, candidate)
@@ -97,16 +120,11 @@ export async function resolveDriverRoute(
 	}
 	// The slot is still taken synchronously after the last await.
 	const refusal = model === undefined ? skipped : slotRefusal(ctx, wanted);
-	if (refusal && (ctx.explicit || locked)) {
-		throw new NativeDriverError(`refused: ${ctx.jobId} cannot run on the ${spec.label} driver: ${refusal.why}`, refusal.category);
-	}
-	if (refusal) {
-		const pi = await resolveWithCapacity(route, config, probe, capacity);
-		// While codex is off no persisted record names it: the previous build reads the fleet and run log.
-		const off = wanted === "codex" && codexPersistRefusal(ctx.home, `the routing record of ${ctx.jobId}`, codexClassOf(ctx.kind, ctx.role)) !== undefined;
-		return { ...pi, ...(off ? {} : { requested_driver: wanted }), driver: "pi", driver_reason: bounded(`${refusal.category}: ${refusal.why}`) };
-	}
-	if (ctx.reserve) slots.set(slotKey(ctx.home, wanted), (slots.get(slotKey(ctx.home, wanted)) ?? new Set<string>()).add(ctx.jobId));
+	// Never another CLI: a full CLI is `occupied` (the caller queues), every other refusal is named.
+	if (refusal) throw new NativeDriverError(`refused: ${ctx.jobId} cannot run on the ${spec.label} driver: ${refusal.why}`, refusal.category, wanted);
+	const borrowed = ctx.borrowFrom !== undefined && slotRefusal({ ...ctx, borrowFrom: undefined }, wanted) !== undefined
+		? `borrowed: reviewer using held author's slot (${ctx.borrowFrom}); ` : "";
+	if (ctx.reserve) reserveNativeSlot(ctx.home, ctx.jobId, wanted);
 	const native: RoutingDecision = {
 		model: model!, source: picked.source, rule: picked.rule,
 		...(picked.thinking ? { thinking: picked.thinking } : {}),
@@ -114,7 +132,7 @@ export async function resolveDriverRoute(
 		...(route.thinking ? { requested_thinking: route.thinking } : {}),
 	};
 	const fellBack = skipped ? `; ${skipped.category}: ${skipped.why}; native fallback ${model}` : "";
-	return { ...native, requested_driver: wanted, driver: wanted, driver_reason: bounded(`${why}; effort ${picked.thinking ?? "CLI default"}${fellBack}${note ? `; ${note}` : ""}`) };
+	return { ...native, requested_driver: wanted, driver: wanted, driver_reason: bounded(`${borrowed}${why}; effort ${picked.thinking ?? "CLI default"}${fellBack}${note ? `; ${note}` : ""}`) };
 }
 
 const rowOf = (picked: ReturnType<typeof pickModel>, config: RoutingConfig) =>
@@ -142,7 +160,8 @@ function allowRefusal(config: RoutingConfig, role: Role, model: string): { categ
 
 /** Checked synchronously after the last await, so admissions in one parent never overfill a driver's N slots. */
 function slotRefusal(ctx: DriverContext, driver: NativeDriver): { category: NativeRefusal; why: string } | undefined {
-	const holders = [...liveNativeJobs(ctx.jobs, driver), ...(slots.get(slotKey(ctx.home, driver)) ?? []), ...(ctx.nativeLive?.[driver] ?? [])];
+	const holders = [...liveNativeJobs(ctx.jobs, driver), ...(slots.get(slotKey(ctx.home, driver)) ?? []), ...(ctx.nativeLive?.[driver] ?? [])]
+		.filter((id) => id !== ctx.borrowFrom);
 	const spec = nativeDriverSpec(driver);
 	return nativeSlotRefusal(holders, ctx.jobId, spec.maxConcurrent(ctx.home), "live or being admitted", spec.noun);
 }

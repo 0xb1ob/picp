@@ -22,6 +22,7 @@ import {
 import type { DispatchRequest } from "./dispatch.ts";
 import { NativeDriverError } from "./drivers/claude.ts";
 import { codexPersistRefusal } from "./drivers/codex.ts";
+import { nativeDriverSpec } from "./drivers/registry.ts";
 import { assertDispatchOpen, readDrain } from "./drain.ts";
 import { UpdateHoldError } from "./update-hold.ts";
 import { atomicWriteJson } from "./json-store.ts";
@@ -49,6 +50,13 @@ export interface DispatchQueueOptions {
 /** A strict native dispatch (explicit `driver: claude` or a locked job) refused only because the slots are full. */
 export function nativeOccupied(error: unknown): boolean {
 	return error instanceof NativeDriverError && error.category === "occupied";
+}
+
+/** The visible status of a job a full CLI keeps waiting (cp-qmry); undefined for any other error. */
+export function waitingLabel(error: unknown): string | undefined {
+	if (!nativeOccupied(error)) return undefined;
+	const driver = (error as NativeDriverError).driver;
+	return `waiting for ${driver ? nativeDriverSpec(driver).label : "native CLI"} capacity`;
 }
 
 /** Still full, or held for a pending update: keep the entry at the head, untouched, and stop the drain. */

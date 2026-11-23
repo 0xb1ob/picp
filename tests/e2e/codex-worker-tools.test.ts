@@ -295,9 +295,9 @@ test("CX-8e: CP_CODEX_READ_ROOTS never reaches a codex planner: no profile entry
 });
 
 // Scenario (main-session condition 3, Q3): Given an `ops:pull` job, When it is dispatched on codex explicitly or
-//   matched by a codex row, Then the explicit request refuses by name before any lease and the row falls back to pi as
-//   ineligible, since the Codex shell has no network and no ssh agent. Catches an ops job silently run without ssh.
-test("CX-5i: the ops profile is ineligible for the Codex CLI and falls back to pi by name", { skip, timeout: 300_000 }, async (t) => {
+//   matched by a codex row, Then both refuse by name as ineligible before any lease (cp-qmry: never pi), since the
+//   Codex shell has no network and no ssh agent. Catches an ops job silently run without ssh.
+test("CX-5i: the ops profile is ineligible for the Codex CLI and refuses by name, never pi", { skip, timeout: 300_000 }, async (t) => {
 	const h = await codexWorkerHome(t);
 	const piModel = h.b.provider.addScript(`cx5i-pi-${Math.random().toString(36).slice(2, 8)}`, [{ kind: "text", text: "idle" }]);
 	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*", FAKE_CODEX_REF],
@@ -309,8 +309,8 @@ test("CX-5i: the ops profile is ineligible for the Codex CLI and falls back to p
 	assert.equal(ends[0]?.isError, true, text(ends[0]));
 	assert.match(text(ends[0]), /cannot run on the Codex CLI driver: profile ops runs no Codex CLI job/);
 	assert.equal(existsSync(join(h.b.home, paths.runDir(ops.id))), false, "no run before any lease");
-	const decision = (ends[1]?.result.details as { decision?: { driver?: string; requested_driver?: string; driver_reason?: string } } | undefined)?.decision;
-	assert.deepEqual([decision?.requested_driver, decision?.driver], ["codex", "pi"], text(ends[1]));
-	assert.match(decision?.driver_reason ?? "", /^ineligible: profile ops runs no Codex CLI job/);
+	const details = ends[1]?.result.details as { decision?: unknown; error?: string } | undefined;
+	assert.equal(details?.decision, undefined, text(ends[1]));
+	assert.match(details?.error ?? "", /cannot run on the Codex CLI driver: profile ops runs no Codex CLI job/);
 	assertClean(h);
 });

@@ -458,9 +458,9 @@ test("N4h report_verdict: native and pi clamp, check, refuse and write the same 
 	assert.equal((await native({ job_id: "cp-rev", verdict: "pass", flags, reasons: ["x".repeat(3_000)] })).isError, true, "pi's lenient bound holds");
 });
 
-// N4h: a reviewer goes native only for a `driver: "claude"` row with claude_review on and the slot free; the subject's own
-// pi driver never binds it. A fake `claude` on PATH makes the CLI check pass without the binary.
-test("N4h reviewer route: off is pi, on is claude, a pi row is pi, a live native worker holds the slot", async (t) => {
+// N4h: a reviewer goes native only for a `driver: "claude"` row with claude_review on; a refused or full claude never
+// routes it to pi (cp-qmry), and only its own idle held author's slot may be lent. A fake `claude` on PATH stands in.
+test("N4h reviewer route: off refuses, on is claude, a pi row is pi, a full CLI refuses occupied, the held author lends", async (t) => {
 	const home = mkdtempSync(join(tmpdir(), "cp-native-review-route-"));
 	const path = process.env.PATH;
 	t.after(() => { process.env.PATH = path; rmSync(home, { recursive: true, force: true }); });
@@ -472,27 +472,32 @@ test("N4h reviewer route: off is pi, on is claude, a pi row is pi, a live native
 		({ schema_version: 1, allow: ["anthropic/*"], rubric: [{ id: "reviews", role: "gate-reviewer", model: "anthropic/claude-x", ...row }] }) as RoutingConfig;
 	const profile = { frontmatter: { name: "gate-reviewer", role: "gate-reviewer" } } as never;
 	const subject = { job_id: "cp-subj", kind: "ship", delivery: "pr", worker: { role: "implementer" } } as never;
-	const route = (row: Record<string, unknown>, live: string[] = []) => resolveReviewerRoute({ profile, jobId: "cp-subj", project: "demo", kind: "research" },
-		config(row), ALWAYS_AVAILABLE, undefined, { home, jobId: "cp-subj", record: subject, jobs: [subject], manager: { active: live.map((key) => ({ key, driver: "claude" })) } as never });
+	const held = (driver: string) => ({ job_id: "cp-subj", kind: "ship", delivery: "pr", phase: "held", worker: { role: "implementer", driver } }) as never;
+	const route = (row: Record<string, unknown>, live: string[] = [], record: never = subject, lendable = true) => resolveReviewerRoute({ profile, jobId: "cp-subj", project: "demo", kind: "research" },
+		config(row), ALWAYS_AVAILABLE, undefined, { home, jobId: "cp-subj", record, jobs: [record], manager: { active: live.map((key) => ({ key, driver: "claude" })), stopping: () => false,
+			get: (key: string) => (lendable && live.includes(key) ? { worker: { alive: true, busy: false } } : undefined) } as never });
+	const refused = (promise: Promise<unknown>, pattern: RegExp, category: string) =>
+		assert.rejects(promise, (error: Error & { category?: string }) => pattern.test(error.message) && error.category === category);
 	writeFileSync(nativeConfigFile(home), JSON.stringify({ claude_review: false }));
-	const off = await route({ driver: "claude" });
-	assert.deepEqual([off.driver, off.requested_driver], ["pi", "claude"]);
-	assert.match(off.driver_reason ?? "", /^switch: the switch workers\.native_claude_review is off/);
+	await refused(route({ driver: "claude" }), /cannot run on the Claude CLI driver: the switch workers\.native_claude_review is off/, "switch");
 	writeFileSync(nativeConfigFile(home), JSON.stringify({ claude_review: true }));
 	assert.equal((await route({ driver: "claude" })).driver, "claude");
 	assert.equal((await route({})).driver, undefined, "a row on pi never asks for claude");
-	const busy = await route({ driver: "claude" }, ["cp-other"]);
-	assert.match(`${busy.driver} ${busy.driver_reason}`, /^pi occupied: native concurrency is 1 and cp-other is live or being admitted/);
-	const own = await route({ driver: "claude" }, ["cp-subj"]);
-	assert.match(`${own.driver} ${own.driver_reason}`, /^pi occupied: .* cp-subj is live/, "the subject's own native worker holds a slot");
+	await refused(route({ driver: "claude" }, ["cp-other"]), /native concurrency is 1 and cp-other is live or being admitted/, "occupied");
+	await refused(route({ driver: "claude" }, ["cp-subj"]), /cp-subj is live/, "occupied");
+	// The ruling's borrow: only the subject's own idle held author on the same CLI, once; anything else stays occupied.
+	const own = await route({ driver: "claude" }, ["cp-subj"], held("claude"));
+	assert.equal(own.driver, "claude");
+	assert.match(own.driver_reason ?? "", /^borrowed: reviewer using held author's slot \(cp-subj\)/);
+	await refused(route({ driver: "claude" }, ["cp-subj"], held("claude"), false), /cp-subj is live/, "occupied");
+	await refused(route({ driver: "claude" }, ["cp-subj", "cp-other"], held("claude")), /cp-other is live/, "occupied");
 	// Unfixed, a review routed native held nothing until its spawn, so a racing second review also routed native and
 	// failed at WorkerManager.spawn; a reserving route now holds the slot until its start settles.
 	const reserving = (jobId: string) => resolveReviewerRoute({ profile, jobId, project: "demo", kind: "research" }, config({ driver: "claude" }),
-		ALWAYS_AVAILABLE, undefined, { home, jobId, record: subject, jobs: [subject], manager: { active: [] } as never, reserve: true });
+		ALWAYS_AVAILABLE, undefined, { home, jobId, record: subject, jobs: [subject], manager: { active: [], get: () => undefined, stopping: () => false } as never, reserve: true });
 	await holdReviewerSlot(home, "cp-a", async () => {
 		assert.equal((await reserving("cp-a")).driver, "claude");
-		const raced = await reserving("cp-b");
-		assert.match(`${raced.driver} ${raced.driver_reason}`, /^pi occupied: .* cp-a\/review is live or being admitted/);
+		await refused(reserving("cp-b"), /cp-a\/review is live or being admitted/, "occupied");
 	});
 	assert.equal(await holdReviewerSlot(home, "cp-b", async () => (await reserving("cp-b")).driver), "claude", "the settled start released its slot");
 });

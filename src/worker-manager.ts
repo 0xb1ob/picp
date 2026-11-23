@@ -51,7 +51,7 @@ import {
 	WorkerProcess,
 	type WorkerSpawnOptions,
 } from "./worker-process.ts";
-import { nativeDriverSpec, nativeWorkerSlotRefusal } from "./drivers/registry.ts";
+import { lentSlot, nativeDriverSpec, nativeWorkerSlotRefusal } from "./drivers/registry.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 
 /** Why a spawn was refused; the message text is unchanged, the code is for callers that branch (cp_dispatch queues `spawn_cap`). */
@@ -360,6 +360,7 @@ export interface SpawnRequest {
 	/** Per-job operator-named skill dirs (`cp_dispatch skills`): absolute realpaths resolved upstream; package skills stay off. */
 	skills?: readonly string[];
 	driver?: NativeDriver; // N3b: set only after assertNativeSelection passed; absent spawns pi
+	borrowsSlotOf?: string; // a reviewer in its idle held author's native slot (cp-912x ruling): that author is not counted
 }
 
 export interface WorkerManagerOptions {
@@ -409,7 +410,7 @@ export interface ManagedWorker {
 	model: string;
 	profile: string;
 	startedAt: number;
-	driver?: NativeDriver;
+	driver?: NativeDriver; borrowsSlotOf?: string;
 }
 
 /**
@@ -623,7 +624,7 @@ export class WorkerManager {
 				{ code: reviewer ? "review_reserve" : "spawn_cap" },
 			);
 		}
-		const full = request.driver && nativeWorkerSlotRefusal(this.#options.home, request.driver, this.active.filter((w) => w.driver === request.driver).map((w) => w.key), key);
+		const lent = lentSlot(this, request.borrowsSlotOf), full = request.driver && nativeWorkerSlotRefusal(this.#options.home, request.driver, this.active.filter((w) => w.driver === request.driver && w.key !== lent).map((w) => w.key), key);
 		if (full) throw new SpawnSafetyError(`job ${key}: ${full.why}`);
 		request.admit?.();
 		const plan = this.plan(request);
@@ -681,6 +682,7 @@ export class WorkerManager {
 			profile: request.profile.frontmatter.name,
 			startedAt: Date.now(),
 			...(request.driver ? { driver: request.driver } : {}),
+			...(lent ? { borrowsSlotOf: lent } : {}),
 		};
 		this.#workers.set(key, managed);
 		// The reserved slot (if any) is now this worker's: consumed, no notify.

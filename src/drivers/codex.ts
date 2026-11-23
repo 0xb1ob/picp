@@ -99,7 +99,7 @@ export async function codexSelectionRefusal(input: NativeSelection): Promise<{ c
 	if (!config[codexClass]) return { category: "switch", why: `the switch ${codexClass} is off (data/native.json ${codexClass})` };
 	if (codexClass === "codex_research" && !DELIVERIES.includes(input.delivery)) return ineligible;
 	if (codexClass === "codex_ship" && !SHIP_DELIVERIES.includes(input.delivery)) return ineligible;
-	// C5 Q3: the Codex shell has no network and no agent socket, so an ops job falls back rather than run without ssh.
+	// C5 Q3: the Codex shell has no network and no agent socket, so an ops job is refused by name rather than run without ssh.
 	if (input.profile === "ops") return { category: "ineligible", why: "profile ops runs no Codex CLI job: the Codex shell has no network and no ssh agent" };
 	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs, "codex"), input.jobId, config.codex_max_concurrent, "live", "codex");
 	if (occupied) return occupied;

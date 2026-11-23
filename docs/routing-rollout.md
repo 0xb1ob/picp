@@ -188,7 +188,7 @@ the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-driv
    ```
 
    Back up `data/routing.json` first (`cp -p data/routing.json data/routing.json.bak-<stamp>`), then check it with
-   `/doctor`: `models.planner` reports `driver=claude <model>; pi fallback …`.
+   `/doctor`: `models.planner` reports `driver=claude <model>, never pi; pi lane (unused) …`.
 2. **The switch.** Dashboard Settings → Native workers, or `data/native.json` `{"claude_research": true}`. Only local
    and answer research runs native, `max_concurrent` jobs at a time (default 1); pipeline research, reviews, gates and ship jobs stay pi. Ship
    implementers have their own switch, `claude_ship` (off by default; [native-drivers.md](native-drivers.md#native-ship-jobs-n4f)).
@@ -199,7 +199,7 @@ the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-driv
    - Cost: a native run with no complete usage reads "unavailable (not measured)", never 0.
    - The run log's `routing_resolved` event carries `requested_driver`, `driver` and `driver_reason`.
 4. **Rollback.** Remove the row: new jobs route to pi again, and a started native job keeps its driver. Or turn the
-   switch OFF: new jobs run on pi, and resumes and revives of native jobs are refused (never moved to pi); teardown
+   switch OFF: new jobs on that row are refused by name (never run on pi), and resumes and revives of native jobs are refused; teardown
    still works. Deleting `state/native-availability.json` only resets the snapshot to unknown.
 
 ## Claude CLI for ship and review workers (the flip)
@@ -255,6 +255,6 @@ every codex switch stays OFF. The mechanism is in [native-drivers.md](native-dri
 7. **Stop rules.** Any kill criterion in native-drivers.md (a forbidden action runs, a dead hook lets a tool act, a
    report for another job is accepted, usage counted twice, a process outlives a stop, an extra surface is not
    refused): turn the switch off and report it. Do not work around it.
-8. **Rollback.** Turn the switch off in Settings (the key is deleted): new jobs run on pi, and resumes and revives of
-   codex jobs are refused, never moved to pi. Or remove the row. Before running an older build, restore the `.bak`
+8. **Rollback.** Remove the codex rows (new jobs then route to pi), then turn the switch off in Settings (the key is
+   deleted); with a codex row left and the switch off its jobs are refused by name, never run on pi. Before running an older build, restore the `.bak`
    files and follow the recovery notes in native-drivers.md.
