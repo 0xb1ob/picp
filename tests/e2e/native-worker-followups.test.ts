@@ -395,9 +395,12 @@ test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_r
 		{ kind: "text", text: "reported" },
 		...Array.from({ length: 4 }, () => ({ kind: "text" as const, text: "pi follow-up noted" })),
 	]);
+	// cp-qmry P3: the pi job runs on a pi row of its own (scope L), ahead of the harness's claude rows.
+	const routing = JSON.parse(readFileSync(join(h.b.home, LAYOUT.routingFile), "utf8")) as { rubric: unknown[] };
+	routing.rubric.unshift({ id: "l1-pi", role: "planner", scope: ["L"], model: piModel });
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify(routing));
 	await h.b.run([
-		// The pi job is the human's own per-job pick on this claude-configured home (cp-qmry P3).
-		tool("cp_dispatch", { job_id: ids.pi, task: "Report.", model: piModel, driver: "pi", operator_quote: seedOperatorPick(h.b.home, piModel, { jobId: ids.pi, driver: "pi" }), queue: false, when_ready: false }),
+		tool("cp_dispatch", { job_id: ids.pi, task: "Report.", scope: "L", queue: false, when_ready: false }),
 		h.wait(ids.pi, "envelope_received", 1),
 		h.dispatch(ids.native),
 	], h.env);

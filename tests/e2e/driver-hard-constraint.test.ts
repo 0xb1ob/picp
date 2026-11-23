@@ -93,8 +93,9 @@ test("P3: an explicit codex on a claude or pi row and an explicit claude on a co
 	h.setScript({ turns: [h.reporting(picked.id)] });
 	const ends = (await h.run([
 		onClaude.dispatch({ scope: "M" }), onPi.dispatch({ scope: "L" }), claudeOnCodex.dispatch({ scope: "S", driver: "claude", model: FAKE_NATIVE_MODEL }),
-		picked.dispatch({ scope: "M", operator_quote: codexPick }), h.awaitEnvelope(picked.id),
+		// Previewed first: once the picked job runs it holds the only codex slot.
 		pickedPi.dispatch({ scope: "L", operator_quote: piRowPick, dry_run: true }),
+		picked.dispatch({ scope: "M", operator_quote: codexPick }), h.awaitEnvelope(picked.id),
 	])).filter((end) => end.toolName === "cp_dispatch");
 	const refusals = [[onClaude, /configured to run on the Claude CLI \(rule claude-research\)/], [onPi, /configured to run on pi \(rule pi-research\)/],
 		[claudeOnCodex, /configured to run on the Codex CLI \(rule codex-research\)/]] as const;
@@ -103,10 +104,10 @@ test("P3: an explicit codex on a claude or pi row and an explicit claude on a co
 		assert.match(text(end), new RegExp(`${pattern.source}, and a parent's driver choice is not an override`));
 		assert.equal(existsSync(join(h.b.home, paths.runDir(job.id))), false, `${job.id} has a run`);
 	}
-	assert.notEqual(ends[3]?.isError, true, text(ends[3]));
+	assert.notEqual(ends[4]?.isError, true, text(ends[4]));
 	const record = h.record(picked.id);
 	assert.deepEqual([record?.worker.driver, record?.routing?.driver], ["codex", "codex"]);
 	assert.match(record?.routing?.driver_reason ?? "", /^override: human terminal \S+ proof omp-[a-f0-9]{32} asked for codex; effort /);
-	const preview = (ends[4]?.result.details as { decision?: { driver?: string; driver_reason?: string } } | undefined)?.decision;
-	assert.deepEqual([preview?.driver, /^override: human terminal \S+ proof omp-/.test(preview?.driver_reason ?? "")], ["codex", true], text(ends[4]));
+	const preview = (ends[3]?.result.details as { decision?: { driver?: string; driver_reason?: string } } | undefined)?.decision;
+	assert.deepEqual([preview?.driver, /^override: human terminal \S+ proof omp-/.test(preview?.driver_reason ?? "")], ["codex", true], text(ends[3]));
 });
