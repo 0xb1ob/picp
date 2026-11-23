@@ -390,6 +390,31 @@ test("P24 MCP access: /doctor --json in a real parent reports mcp.operator and m
 	assert.equal(p.calls().length, 2, "an invalid mcp.json is never probed");
 });
 
+// Scenario: Given native workers on and mcp.json servers with a !command env value, a cwd and an unset $VAR beside a
+//   loadable one, When /doctor --json runs, Then one mcp.native warn names each skipped server and why, with a fix, and
+//   prints no config value. Negative control: with native workers off there is no mcp.native finding.
+test("P24b MCP access: /doctor warns mcp.native for each MCP server the native Claude loader skips, never a config value", { timeout: 300_000 }, async (t) => {
+	const p = await mcpParent(t);
+	const nativeFile = join(p.home, LAYOUT.data, "native.json");
+	mkdirSync(join(p.home, LAYOUT.data), { recursive: true });
+	p.servers({ tok: { command: "z", env: { T: "!pass show np" } }, wd: { command: "z", cwd: "/x" }, ok: { command: "z" }, unset: { command: "z", env: { T: "$NF5_UNSET" } } });
+	p.answer(JSON.stringify({ servers: ["tok", "wd", "ok", "unset"].map((name) => ({ name, enabled: true, state: "connected", tools: [] })), errors: [] }));
+	const native = (report: DoctorReport) => report.findings.filter((finding) => finding.check === "mcp.native");
+	assert.deepEqual(native(await p.doctor()), [], "no mcp.native while native workers are off");
+	writeFileSync(nativeFile, JSON.stringify({ claude_research: true }));
+	const [warn, ...more] = native(await p.doctor());
+	assert.equal(more.length, 0);
+	assert.deepEqual([warn?.severity, Boolean(warn?.fix)], ["warn", true]);
+	assert.match(String(warn?.what), /^native workers: 3 MCP server\(s\) not loaded/);
+	assert.deepEqual(String(warn?.detail).split("\n"), [
+		"MCP server tok not loaded: a !command value is not run for the Claude CLI",
+		"MCP server wd not loaded: \"cwd\" has no Claude CLI equivalent",
+		"MCP server unset not loaded: NF5_UNSET is not set",
+	]);
+	assert.match(String(warn?.fix), /docker run --env-file/);
+	assert.deepEqual(["pass show", "/x"].filter((value) => JSON.stringify(warn).includes(value)), [], "no config value is printed");
+});
+
 // -- pi-lens ---------------------------------------------------------------------
 
 const LENS_FLAGS = ["--no-read-guard", "--no-lazy-tools", "--no-lens-context"];

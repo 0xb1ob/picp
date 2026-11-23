@@ -35,6 +35,8 @@ export interface SpikeJob {
 	artifactPath?: string;
 	/** Implementer only: grant and home `exclude_paths` no Edit/Write may touch, read by the worker process. */
 	excludePaths?: readonly string[];
+	/** Planner only: owners whose repos gh_read may read (data/gh-read.json). */
+	ghReadOwners?: readonly string[];
 	/** The run's scratch TMPDIR (the child's `TMPDIR`), one of its Bash write roots; set by the run itself. */
 	tmp?: string;
 }

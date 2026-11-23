@@ -1,9 +1,7 @@
 /**
- * `/doctor` MCP lines (cp-fl8b): `mcp.operator` (the operator's `<agent dir>/mcp.json` servers, probed
- * live with `pi mcp list --json` — once, bounded by the runner's 20 s, and only when a server is
- * enabled) and `mcp.workers` (every worker profile reaches them, all exposed tools). Never prints a value
- * from `mcp.json`: no transport, command, args, url, headers or env; an error text is scrubbed of
- * every config value and every secret shape first. Kept out of doctor.ts, which sits at its ceiling.
+ * `/doctor` MCP lines: `mcp.operator` (`mcp.json` probed once with `pi mcp list --json`), `mcp.workers`, and (WP8)
+ * `mcp.native`, a warn naming each server the native Claude loader skips. Never prints a config value; error text is
+ * scrubbed of config values and secret shapes. Kept out of doctor.ts, which sits at its ceiling.
  */
 import { join } from "node:path";
 import { type DoctorFinding, LAYOUT } from "./contracts.ts";
@@ -12,7 +10,7 @@ import { operatorDriverSetting } from "./operator-compact.ts";
 import { listProfiles } from "./profiles.ts";
 import { SECRET_PATTERNS } from "./secret-patterns.ts";
 import { loadNativeConfig, NATIVE_CLASSES, nativeConfigFile } from "./worker-driver.ts";
-import { agentDirOf, enabledServers, MCP_CALL_TOOL, readUserMcpServers } from "./worker-mcp.ts";
+import { agentDirOf, claudeMcpServers, enabledServers, MCP_CALL_TOOL, readUserMcpServers } from "./worker-mcp.ts";
 
 export interface McpAccessOptions {
 	packageRoot: string;
@@ -71,7 +69,8 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 	const workerProfiles = listProfiles(join(o.packageRoot, "profiles")).map((p) => p.frontmatter.name);
 	const claude = claudeOperator(o.home);
 	const session = claude ? `operator session: driver claude: servers from ${user.path}, no codemode` : "operator session: builtin:mcp, codemode, tool-search";
-	const native = nativeWorkers(o.home) ? `; native workers: servers from ${user.path} as mcp__<server>__<tool>, no OAuth sign-in under the scratch config` : "";
+	const nativeOn = nativeWorkers(o.home);
+	const native = nativeOn ? `; native workers: servers from ${user.path} as mcp__<server>__<tool>, no OAuth sign-in under the scratch config` : "";
 	const by = `every worker profile (${workerProfiles.join(", ")}; implementer/ship workers and the gate, diff and quality reviewers included) via ${MCP_CALL_TOOL}, all exposed tools, no annotation filter (servers read in place from ${user.path}); the CP parent: unchanged${native}`;
 	const finding = (check: string, severity: DoctorFinding["severity"], what: string, fix?: string, detail?: string): DoctorFinding => ({
 		check,
@@ -95,6 +94,11 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 		];
 	}
 	const workers = finding("mcp.workers", "ok", `workers: all ${enabled.length} enabled servers, all exposed tools`, undefined, by);
+	// Resolved against the parent's env: a worker whose env differs could load or skip a $VAR server differently.
+	const skipped = nativeOn ? claudeMcpServers(user, o.env ?? process.env, "picp").skipped : [];
+	const nativeSkips = skipped.length === 0 ? [] : [finding("mcp.native", "warn", `native workers: ${skipped.length} MCP server(s) not loaded, as the parent's env resolves them`,
+		"use literal or $VAR values set in the parent's env (or a wrapper such as docker run --env-file <0600 file>); !command, cwd and auth " +
+		"are not loaded for the Claude CLI — docs/native-drivers.md WP5", skipped.map((line) => scrubMcpText(line, {}, 300)).join("\n"))];
 	// cwd = the agent dir: no project `.pi/mcp.json` is read by the probe.
 	const result = o.run("pi", ["mcp", "list", "--json"], agentDir);
 	let listed: ListedServer[];
@@ -104,7 +108,7 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 		listed = parsed.servers as ListedServer[];
 	} catch {
 		const why = scrubMcpText((result.stderr || result.stdout || `exit ${result.status}`).trim(), user.servers, 600);
-		return [finding("mcp.operator", "warn", `MCP: ${enabled.length} enabled, not probed (\`pi mcp list --json\` gave no report)`, "run `pi mcp list` by hand; check pi is on PATH", why), workers];
+		return [finding("mcp.operator", "warn", `MCP: ${enabled.length} enabled, not probed (\`pi mcp list --json\` gave no report)`, "run `pi mcp list` by hand; check pi is on PATH", why), workers, ...nativeSkips];
 	}
 	const live = listed.filter((s) => s.enabled !== false);
 	const connected = live.filter((s) => s.state === "connected");
@@ -116,6 +120,6 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 	});
 	const what = `MCP: ${total} configured, ${enabled.length} enabled; connected ${connected.length}/${live.length}; tools ${tools}`;
 	return problems.length === 0
-		? [finding("mcp.operator", "ok", what, undefined, session), workers]
-		: [finding("mcp.operator", "warn", what, "run `pi mcp list` (or /mcp in the operator session) for the full error", [...problems, ...(claude ? [session] : [])].join("\n")), workers];
+		? [finding("mcp.operator", "ok", what, undefined, session), workers, ...nativeSkips]
+		: [finding("mcp.operator", "warn", what, "run `pi mcp list` (or /mcp in the operator session) for the full error", [...problems, ...(claude ? [session] : [])].join("\n")), workers, ...nativeSkips];
 }

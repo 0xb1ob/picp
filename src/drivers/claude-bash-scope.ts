@@ -228,7 +228,7 @@ function gitRefusal(args: readonly Word[], assigns: readonly Word[], here: strin
 	if (sub === undefined) return { dests: [], dir };
 	const impl = scope.role === "implementer";
 	if (sub === "push") return denied("`git push` (no credentials in this run)", impl ? "push HEAD to this job's branch with git_push" : "a planner never pushes");
-	if (sub === "fetch" || sub === "pull") return denied(`\`git ${sub}\` (no credentials in this run)`, impl ? "git_fetch, then `git merge origin/<branch>`" : "read GitHub with gh_read");
+	if (sub === "fetch" || sub === "pull") return denied(`\`git ${sub}\` (no credentials in this run)`, impl ? "git_fetch, then `git merge origin/<branch>`" : "git_fetch, then read `origin/<branch>` with git log/show");
 	if (GIT_NETWORK.has(sub)) return denied(`\`git ${sub}\` (no remote, config, submodule or other checkout from a native worker)`);
 	const located = [dir, ...places.map((p) => (p.open || (dir === undefined && !isAbsolute(p.text)) ? undefined : resolve(dir ?? "/", p.text)))];
 	if (located.some((at) => at === undefined)) return denied("running git in a directory the shell resolves later");
