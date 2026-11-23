@@ -13,7 +13,7 @@ import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { type ControlPorts, type DashboardControl, startDashboardControl } from "../../src/dashboard-control.ts";
 import { type Context, type Json, jsonl, pick, viewer, write } from "../harness/conversations.ts";
-import { browserShims, openTab, type Tab, until } from "../harness/dashboard.ts";
+import { browserShims, expandAsks, openTab, type Tab, until } from "../harness/dashboard.ts";
 
 const OPERATOR = "#sessions?view=you&transcript=1";
 const PENDING = "cp-operator-pending-sends";
@@ -622,7 +622,7 @@ test("P19-chat-replies-send: the context card sends the exact answer once and ho
 	d.append(stamped(local(15, 8), { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "cp_parent", arguments: { action: "ask" } }] }),
 		stamped(local(15, 8), { role: "toolResult", toolCallId: "call-1", toolName: "cp_parent", content: [{ type: "text", text: JSON.stringify({ id }) }] }));
 	const first = await session(t, d, () => false, DELIVERED_WAIT_MS);
-	const wide = async (opened: Promise<Tab>) => { const tab = await opened; browserShims(t, tab); return tab; };
+	const wide = async (opened: Promise<Tab>) => { const tab = await opened; browserShims(t, tab); await expandAsks(tab); return tab; };
 	let tab = await wide(openTab(t, d.port, OPERATOR, new Map(), undefined, {}, true));
 	const OPTION = ".workspace-context-option", held = (view: Tab) => view.$$(OPTION).length > 0 && view.$$(OPTION).every((b) => b.hasAttribute("disabled"));
 	await tab.find(OPTION, (b) => !b.hasAttribute("disabled"));

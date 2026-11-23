@@ -53,7 +53,7 @@
 .session-bar-restart .operator-restart { flex-direction: column; align-items: stretch; }
 .session-file-picker { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--muted); }
 .session-file-picker select { min-width: 0; max-width: 100%; min-height: 44px; padding: 0 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; text-overflow: ellipsis; }
-/* The Full transcript's actions in the heading row: Jobs and Context (M3). */
+/* The Full transcript's actions in the heading row: Context (M3); Ctrl/⌘ J opens Jobs. */
 .session-filter { display: flex; align-items: center; gap: 6px; flex-shrink: 0; min-width: 0; margin-left: auto; }
 /* Phone live/ask strip (design `.strip`): a neutral run ring, the live count, and the ask count only when one is open. */
 .session-strip { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font-size: 13px; color: var(--muted); white-space: nowrap; }

@@ -210,5 +210,12 @@ export function browserShims(t: Context, tab: Tab) {
 	return () => focused;
 }
 
+/** Opens the context panel's "Asked you" disclosure (collapsed on every mount) inside `scope`, once it renders. */
+export async function expandAsks(tab: Tab, scope = ".workspace-context") {
+	const toggle = await tab.find(`${scope} .workspace-context-asked-toggle`);
+	if (toggle.getAttribute("aria-expanded") !== "true") tab.click(toggle);
+	await until(() => toggle.getAttribute("aria-expanded"), (open) => open === "true", "the expanded asks");
+}
+
 export type Tab = Awaited<ReturnType<typeof openTab>>;
 export type { Reply };
