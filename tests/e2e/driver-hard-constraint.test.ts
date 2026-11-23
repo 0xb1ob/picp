@@ -303,7 +303,7 @@ test("R3-quality: a quality panel start on a full codex queues as quality and re
 	const holder = await h.job();
 	h.setScript({ turns: [h.reporting(holder.id), [{ kind: "tool", tool: "report_verdict", arguments: VOTE(id) }, { kind: "message", text: "Voted." }]] });
 	await post.dispatch({ jobId: holder.id, task: "Report what README.md says.", scope: "S", fetch: false });
-	await waitFor(() => existsSync(join(h.b.home, paths.envelopeFile(holder.id))), Boolean, { timeoutMs: 120_000, what: "the holder's report" });
+	await waitFor(() => ofType(h, holder.id, "agent_settled").length > 0, Boolean, { timeoutMs: 120_000, what: "the holder's settled, reported turn" });
 	fileResearch(post, h, id);
 	const result = await post.advancePipeline(id);
 	assert.equal(result.next, "wait", result.message);
@@ -312,7 +312,8 @@ test("R3-quality: a quality panel start on a full codex queues as quality and re
 	assert.deepEqual(entries.map((entry) => [entry.job_id, entry.kind, entry.driver, entry.text]), [[id, "quality", "codex", "waiting for Codex CLI capacity"]]);
 	assert.equal(entries[0]?.request.quality?.verify, true, JSON.stringify(entries[0]?.request));
 	assert.equal(existsSync(join(h.b.home, paths.qualityFile(id))), false, "no panel voted while the CLI was full");
-	await post.tearDown(holder.id);
+	const torn = await post.tearDown(holder.id);
+	assert.equal(torn.torn_down, true, JSON.stringify(torn));
 	await waitFor(() => existsSync(join(h.b.home, paths.qualityFile(id))), Boolean, { timeoutMs: 120_000, what: "the replayed panel's report" });
 	const report = JSON.parse(readFileSync(join(h.b.home, paths.qualityFile(id)), "utf8")) as QualityReport;
 	assert.deepEqual(report.verify?.votes.map((vote) => [vote.model, vote.abstained ?? false]), [[FAKE_CODEX_REF, false]], JSON.stringify(report));
@@ -351,8 +352,10 @@ test("R3-recovery-gate: a recovery gate on a full codex queues with its attempt 
 		holder.dispatch(), h.awaitEnvelope(holder.id),
 		step("cp_gate", { job_id: subject.id, recovery_attempt_id: attemptId }),
 		step("bash", { command: `cp '${join(h.b.home, LAYOUT.nativeWaitFile)}' '${snapshot}' && ls -1 '${runDir}' > '${listing}'` }),
-		step("cp_teardown", { job_id: holder.id }), h.awaitFile(terminal), h.pause(2),
+		h.waitEvent(holder.id, "agent_settled"), step("cp_teardown", { job_id: holder.id }), h.awaitFile(terminal), h.pause(2),
 	]);
+	const teardown = ends.find((end) => end.toolName === "cp_teardown");
+	assert.equal(teardown?.result.details?.torn_down, true, text(teardown));
 	const gate = ends.find((end) => end.toolName === "cp_gate");
 	assert.notEqual(gate?.isError, true, text(gate));
 	assert.deepEqual([gate?.result.details?.state, gate?.result.details?.kind, gate?.result.details?.position, gate?.result.details?.waiting],

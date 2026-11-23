@@ -303,7 +303,8 @@ test("R2-fetch: a pipeline planner queued with fetch:false on a full Claude CLI 
 	const post = h.b.ownPost(new CommandPost({ home: h.b.home, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentEnv: { ...process.env, ...h.b.agent.env, ...h.env } }));
 	ids.holder = (await h.job("research")).id;
 	await post.dispatch({ jobId: ids.holder, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, driver: "claude", fetch: false });
-	await waitFor(() => existsSync(join(h.b.home, paths.envelopeFile(ids.holder))), Boolean, { timeoutMs: 120_000, what: "the holder's report" });
+	await waitFor(() => readRunEvents(h.b.home, ids.holder).some((event) => event.type === "agent_settled"), Boolean,
+		{ timeoutMs: 120_000, what: "the holder's settled, reported turn" });
 	const started = await post.startPipeline({ title: "r2f", project: "demo", task: "Add a line to README.md.", delivery: "local", fetch: false });
 	const id = started.research_id;
 	assert.deepEqual([started.dispatch, started.queued?.waiting], [undefined, "waiting for Claude CLI capacity"], JSON.stringify(started));
@@ -311,7 +312,8 @@ test("R2-fetch: a pipeline planner queued with fetch:false on a full Claude CLI 
 		? (JSON.parse(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8")) as { entries: Array<{ job_id: string; request: { fetch?: boolean } }> }).entries : []);
 	assert.deepEqual(queue().map((entry) => [entry.job_id, entry.request.fetch]), [[id, false]]);
 	const leased = git.fetches().length;
-	await post.tearDown(ids.holder);
+	const torn = await post.tearDown(ids.holder);
+	assert.equal(torn.torn_down, true, JSON.stringify(torn));
 	const record = await waitFor(() => h.record(id), (found) => found?.worker.driver === "claude", { timeoutMs: 120_000, what: "the planner on claude" });
 	assert.deepEqual([record?.worker.role, record?.routing?.driver], ["planner", "claude"]);
 	await waitFor(() => queue().length, (left) => left === 0, { timeoutMs: 30_000, what: "the started planner leaving the dispatch queue" });
