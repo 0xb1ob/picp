@@ -4,15 +4,17 @@
  * (mock model) with fake-codex and the fake `systemd-run` at the boundary (tests/harness/codex-worker.ts).
  */
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { type FailureClass, LAYOUT, paths } from "../../src/contracts.ts";
+import { CommandPost } from "../../src/command-post.ts";
+import { type FailureClass, isoTimestamp, LAYOUT, MINIMAL_PLAN_SUMMARY, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { ReviewRuns } from "../../src/review-runs.ts";
 import { readRecoveryAttempts } from "../../src/recovery.ts";
 import { fakePrompts } from "../harness/codex-mock.ts";
 import { FAKE_NATIVE_MODEL } from "../harness/claude-mock-provider.ts";
 import { codexWorkerHome, FAKE_CODEX_REF } from "../harness/codex-worker.ts";
-import { readRunEvents, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { readRunEvents, REPO_ROOT, treehouseAvailable, waitFor } from "../harness/index.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 const skip = treehouseAvailable() ? false : "needs treehouse on PATH";
@@ -188,4 +190,60 @@ test("T5b: a cp_send whose codex slot is full is queued and delivered on codex w
 	assert.equal(ofType(h, author.id, "envelope_received").length, 2);
 	assert.deepEqual(waitEntries(h), []);
 	assert.deepEqual(readdirSync(join(h.b.home, paths.runDir(author.id))).filter((name) => name.startsWith("waiting-send-")), [], "the waiting body is removed");
+});
+
+// Scenario (T6, R1 retry/hand-off): Given a pipeline whose implementer row is on codex and a codex job holding the one
+// slot, When the advance reaches the implementer, Then it returns wait "waiting for Codex CLI capacity" with no ship
+// record (never pi); And once the holder tears down the queued advance re-runs and the implementer starts on codex.
+test("T6: a pipeline advance whose codex implementer finds the slot full waits for Codex CLI capacity and dispatches on codex when it frees", { skip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_ship: true }, ship: true });
+	const planner = h.b.provider.addScript("t6-plan", [{ kind: "text", text: "Planned." }], { onExhausted: "repeat" });
+	const gate: Array<{ kind: "tool_calls"; calls: Array<{ name: string; args: unknown }> }> = [];
+	const reviewer = h.b.provider.addScript("t6-gate", gate);
+	h.b.agent.writeModels(h.b.provider);
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*", FAKE_CODEX_REF], rubric: [
+		{ id: "codex-plan", role: "planner", scope: ["S"], model: FAKE_CODEX_REF, driver: "codex" },
+		{ id: "pi-plan", role: "planner", scope: ["L"], model: planner },
+		{ id: "pi-gate", role: "gate-reviewer", model: reviewer },
+		{ id: "codex-ship", role: "implementer", model: FAKE_CODEX_REF, driver: "codex" },
+	] }));
+	// Driver selection and the spawn read this process's env: the stub dir and the synthetic Codex home.
+	const saved = { PATH: process.env.PATH, CP_CODEX_HOME: process.env.CP_CODEX_HOME };
+	Object.assign(process.env, h.env);
+	t.after(() => {
+		for (const [key, value] of Object.entries(saved)) value === undefined ? delete process.env[key] : (process.env[key] = value);
+	});
+	const post = h.b.ownPost(new CommandPost({
+		home: h.b.home, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentEnv: { ...process.env, ...h.b.agent.env, ...h.env },
+		authorizer: { ask: async () => ({ approved: true, by: "t6 operator" }) },
+		modelRegistry: () => ({ find: (provider: string, id: string) => ({ provider, id }), hasConfiguredAuth: (m: { provider: string; id: string }) => `${m.provider}/${m.id}` !== FAKE_CODEX_REF }),
+	}));
+	const holder = await h.job();
+	h.setScript({ turns: [h.reporting(holder.id), [{ kind: "hold", marker: "implementing", forMs: 2_000 }, { kind: "message", text: "Implementing." }]] });
+	await post.dispatch({ jobId: holder.id, task: "Report what README.md says.", scope: "S", fetch: false });
+	await waitFor(() => existsSync(join(h.b.home, paths.envelopeFile(holder.id))), Boolean, { timeoutMs: 120_000, what: "the holder's report" });
+	const started = await post.startPipeline({ title: "t6", project: "demo", task: "Add a line to README.md.", delivery: "local", scope: "L", fetch: false });
+	const id = started.research_id;
+	mkdirSync(dirname(post.artifacts.file(id)), { recursive: true });
+	writeFileSync(post.artifacts.file(id), "# Goal\nAdd a line to README.md.\n\n# File list\n- README.md\n\n# Test plan\nnpm test\n\n# Unknowns/Blockers\nnone\n");
+	const envelope = { job_id: id, kind: "research", status: "done", summary: "plan complete", artifact_path: post.artifacts.file(id), plan_summary: MINIMAL_PLAN_SUMMARY,
+		self_assessment: { scope: "S", confidence: "high", destructive_scope: false, blocking_unknowns: false } };
+	mkdirSync(dirname(join(h.b.home, paths.envelopeFile(id))), { recursive: true });
+	writeFileSync(join(h.b.home, paths.envelopeFile(id)), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: id, received_at: isoTimestamp(), attempt: 1, envelope }));
+	gate.push({ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["concrete"] } }] });
+	let result = await post.advancePipeline(id);
+	for (let guard = 0; result.pending && guard < 10; guard += 1) {
+		const key = ReviewRuns.key(result.pending.surface === "review" ? result.ship_id : id, result.pending.surface, result.pending.attempt);
+		post.reviewRuns.handBack(key);
+		await post.reviewRuns.settled(key);
+		result = await post.advancePipeline(id);
+	}
+	assert.equal(result.next, "wait", result.message);
+	assert.match(result.message, new RegExp(`^${started.ship_id}: waiting for Codex CLI capacity — this advance is queued \\(position 1\\)`));
+	assert.equal(h.record(started.ship_id), undefined, "no implementer ran on another CLI");
+	assert.deepEqual(post.nativeWait.list().map((row) => [row.job_id, row.kind, row.driver]), [[id, "pipeline-advance", "codex"]]);
+	await post.tearDown(holder.id);
+	const ship = await waitFor(() => h.record(started.ship_id), (record) => record?.worker.driver === "codex", { timeoutMs: 120_000, what: "the implementer on codex" });
+	assert.deepEqual([ship?.worker.role, ship?.routing?.driver], ["implementer", "codex"]);
+	assert.deepEqual(post.nativeWait.list(), []);
 });

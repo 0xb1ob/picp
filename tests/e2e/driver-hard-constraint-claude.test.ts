@@ -52,9 +52,9 @@ async function claudeHome(t: TestContext) {
 	chmodSync(join(shim, "bin", "claude"), 0o755);
 	const job = async () => (await b.ledger.create({ title: `hard claude ${Math.random()}`, project: "demo", delivery: "local", kind: "research" })).id;
 	const fleet = (id: string) => (existsSync(join(b.home, LAYOUT.fleetFile)) ? readFleet(b.home).jobs.find((record) => record.job_id === id) : undefined);
-	const run = async (steps: Parameters<typeof b.run>[0], shimmed = true) => {
+	const run = async (steps: Parameters<typeof b.run>[0], shimmed = true, tool = "cp_dispatch") => {
 		await b.closeParents();
-		return ((await b.run(steps, { PATH: pathWith(join(shim, "tools"), shimmed ? join(shim, "bin") : undefined) })) as Tool[]).filter((end) => end.toolName === "cp_dispatch");
+		return ((await b.run(steps, { PATH: pathWith(join(shim, "tools"), shimmed ? join(shim, "bin") : undefined) })) as Tool[]).filter((end) => end.toolName === tool);
 	};
 	const piUntouched = () => assert.equal(b.provider.requests(script).length, 0, "a job reached the pi model");
 	return { b, piModel, job, fleet, run, piUntouched };
@@ -82,6 +82,28 @@ test("claude saturation: with Workers CLI claude and max_concurrent 1 full, a se
 	assert.equal(h.fleet(second), undefined, "the queued job has no fleet record");
 	assert.equal(existsSync(join(h.b.home, paths.runDir(second))), false, "the queued job has a run");
 	assert.match(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8"), new RegExp(second));
+	h.piUntouched();
+});
+
+// T7 (R2): a pipeline whose planner row is on the full Claude CLI never starts that planner on pi: cp_pipeline start
+// returns queued "waiting for Claude CLI capacity" and the research job waits in the dispatch queue (its replay is T1's).
+test("T7: cp_pipeline start on a full Claude CLI queues its planner waiting for Claude CLI capacity, never pi", { timeout: 300_000 }, async (t) => {
+	const h = await claudeHome(t);
+	const holder = await h.job();
+	const now = isoTimestamp();
+	await new FleetStore({ home: h.b.home }).add({
+		job_id: holder, project: "demo", kind: "research", delivery: "local", origin: DEFAULT_ORIGIN, phase: "held", reported_at: now, dispatched_at: now, usage: EMPTY_USAGE, branch: holder,
+		worker: { pid: process.pid, session_id: "native", session_file: join(h.b.home, "native.jsonl"), profile: "planner", role: "planner", model: FAKE_NATIVE_MODEL, started_at: now, driver: "claude" },
+		worktree: join(h.b.home, "recycled", holder),
+	});
+	const [end] = await h.run([{ kind: "tool_calls", calls: [{ name: "cp_pipeline", args: { action: "start", title: "t7 pipeline", task: "Add a line to README.md.", project: "demo" } }] }], true, "cp_pipeline");
+	assert.notEqual(end?.isError, true, text(end));
+	const details = end?.result.details as { state?: string; waiting?: string; research_id?: string; queued?: { position: number } } | undefined;
+	assert.deepEqual([details?.state, details?.waiting, details?.queued?.position], ["queued", "waiting for Claude CLI capacity", 1], text(end));
+	assert.match(text(end), /queued \(position 1\), waiting for Claude CLI capacity — the planner starts on that CLI when a slot frees, never on another/);
+	const research = details?.research_id ?? "";
+	assert.equal(h.fleet(research), undefined, "the planner has no fleet record");
+	assert.match(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8"), new RegExp(research));
 	h.piUntouched();
 });
 
