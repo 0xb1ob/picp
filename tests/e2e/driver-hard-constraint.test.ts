@@ -6,9 +6,10 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
-import { type FailureClass, isoTimestamp, LAYOUT, MINIMAL_PLAN_SUMMARY, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { type FailureClass, isoTimestamp, LAYOUT, MINIMAL_PLAN_SUMMARY, paths, type QualityReport, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { recoveryDigest, recoveryJson } from "../../src/gate-recovery.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
 import { readRecoveryAttempts } from "../../src/recovery.ts";
 import { fakePrompts } from "../harness/codex-mock.ts";
@@ -253,4 +254,122 @@ test("T6: a pipeline advance whose codex implementer finds the slot full waits f
 	assert.deepEqual([ship?.worker.role, ship?.worker.model, ship?.routing?.driver], ["implementer", FAKE_CODEX_REF, "codex"]);
 	assert.match(ship?.routing?.driver_reason ?? "", new RegExp(`override ${FAKE_CODEX_REF}`), "the replay ran with the pin");
 	assert.deepEqual(post.nativeWait.list(), []);
+});
+
+// Off CI a laptop without treehouse skips by name; under CI (Actions and Dagger set CI=true) a missing tool fails.
+const ciSkip = process.env.CI === "true" ? false : skip;
+
+/** T6's in-process parent on h's home: this process's env carries the codex stub dir and the synthetic Codex home. */
+function codexPost(t: TestContext, h: H): CommandPost {
+	const saved = { PATH: process.env.PATH, CP_CODEX_HOME: process.env.CP_CODEX_HOME };
+	Object.assign(process.env, h.env);
+	t.after(() => {
+		for (const [key, value] of Object.entries(saved)) value === undefined ? delete process.env[key] : (process.env[key] = value);
+	});
+	return h.b.ownPost(new CommandPost({
+		home: h.b.home, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentEnv: { ...process.env, ...h.b.agent.env, ...h.env },
+		modelRegistry: () => ({ find: (provider: string, id: string) => ({ provider, id }), hasConfiguredAuth: (m: { provider: string; id: string }) => `${m.provider}/${m.id}` !== FAKE_CODEX_REF }),
+	}));
+}
+
+/** A filed research envelope for `id` over a minimal plan artifact, as T6 writes it. */
+function fileResearch(post: CommandPost, h: H, id: string): void {
+	mkdirSync(dirname(post.artifacts.file(id)), { recursive: true });
+	writeFileSync(post.artifacts.file(id), "# Goal\nAdd a line to README.md.\n\n# File list\n- README.md\n\n# Test plan\nnpm test\n\n# Unknowns/Blockers\nnone\n");
+	const envelope = { job_id: id, kind: "research", status: "done", summary: "plan complete", artifact_path: post.artifacts.file(id), plan_summary: MINIMAL_PLAN_SUMMARY,
+		self_assessment: { scope: "S", confidence: "high", destructive_scope: false, blocking_unknowns: false } };
+	mkdirSync(dirname(join(h.b.home, paths.envelopeFile(id))), { recursive: true });
+	writeFileSync(join(h.b.home, paths.envelopeFile(id)), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: id, received_at: isoTimestamp(), attempt: 1, envelope }));
+}
+
+const VOTE = (id: string) => ({ job_id: id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["reviewed the packet"] });
+
+// Scenario (R3): a pipeline's quality panel on a full codex queues as kind "quality" (without QualityPass's wait: a
+// "pipeline-advance"); once the slot frees it replays (nativeReplay) and its voter votes on codex, never pi.
+test("R3-quality: a quality panel start on a full codex queues as quality and replays its voter on codex when the slot frees", { skip: ciSkip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_review: true } });
+	const planner = h.b.provider.addScript("r3q-plan", [{ kind: "text", text: "Planned." }], { onExhausted: "repeat" });
+	const piVoter = h.b.provider.addScript("r3q-pi-voter", [{ kind: "text", text: "unused" }]);
+	h.b.agent.writeModels(h.b.provider);
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*", FAKE_CODEX_REF], rubric: [
+		{ id: "codex-plan", role: "planner", scope: ["S"], model: FAKE_CODEX_REF, driver: "codex" },
+		{ id: "pi-plan", role: "planner", scope: ["L"], model: planner },
+		{ id: "reviews", role: "gate-reviewer", model: FAKE_CODEX_REF, fallbacks: [piVoter], driver: "codex" },
+	] }));
+	const post = codexPost(t, h);
+	const started = await post.startPipeline({ title: "r3q", project: "demo", task: "Add a line to README.md.", delivery: "local", scope: "L", fetch: false,
+		quality: { verify: true, voters: 1 } });
+	const id = started.research_id;
+	const holder = await h.job();
+	h.setScript({ turns: [h.reporting(holder.id), [{ kind: "tool", tool: "report_verdict", arguments: VOTE(id) }, { kind: "message", text: "Voted." }]] });
+	await post.dispatch({ jobId: holder.id, task: "Report what README.md says.", scope: "S", fetch: false });
+	await waitFor(() => ofType(h, holder.id, "agent_settled").length > 0, Boolean, { timeoutMs: 120_000, what: "the holder's settled, reported turn" });
+	fileResearch(post, h, id);
+	const result = await post.advancePipeline(id);
+	assert.equal(result.next, "wait", result.message);
+	assert.match(result.message, new RegExp(`^${started.ship_id}: waiting for Codex CLI capacity — queued \\(position 1\\)`));
+	const entries = post.nativeWait.read().entries;
+	assert.deepEqual(entries.map((entry) => [entry.job_id, entry.kind, entry.driver, entry.text]), [[id, "quality", "codex", "waiting for Codex CLI capacity"]]);
+	assert.equal(entries[0]?.request.quality?.verify, true, JSON.stringify(entries[0]?.request));
+	assert.equal(existsSync(join(h.b.home, paths.qualityFile(id))), false, "no panel voted while the CLI was full");
+	const torn = await post.tearDown(holder.id);
+	assert.equal(torn.torn_down, true, JSON.stringify(torn));
+	await waitFor(() => existsSync(join(h.b.home, paths.qualityFile(id))), Boolean, { timeoutMs: 120_000, what: "the replayed panel's report" });
+	const report = JSON.parse(readFileSync(join(h.b.home, paths.qualityFile(id)), "utf8")) as QualityReport;
+	assert.deepEqual(report.verify?.votes.map((vote) => [vote.model, vote.abstained ?? false]), [[FAKE_CODEX_REF, false]], JSON.stringify(report));
+	assert.equal(h.b.provider.requests("r3q-pi-voter").length, 0, "a voter ran on pi");
+	assert.deepEqual(post.nativeWait.list(), []);
+	assert.deepEqual(readdirSync(join(h.b.home, paths.runDir(id))).filter((name) => name.startsWith("waiting-quality-")), [], "the waiting task is removed");
+});
+
+/** A prepared recovery attempt for `jobId` (as cp_gate prepare_attempt writes it), bound to no recorded authority. */
+function seedRecoveryAttempt(h: H, jobId: string, dependents: [string, string]): string {
+	const [authority_id, predecessor_id] = ["ra-r3g-fixture", "anchor-r3g-fixture"];
+	const attempt_id = recoveryDigest(recoveryJson({ authority_id, predecessor_id }));
+	const artifact = readFileSync(join(h.b.home, paths.artifactFile(jobId)));
+	const task = Buffer.from("frozen recovery task\n");
+	const attempt = { schema_version: 2, attempt_id, authority_id, predecessor_id, job_id: jobId, root_job_id: jobId, dependent_job_ids: dependents,
+		history_sha256: recoveryDigest(Buffer.from("history")), graph_sha256: recoveryDigest(Buffer.from("graph")), artifact_sha256: recoveryDigest(artifact),
+		artifact_bytes: artifact.length, task_sha256: recoveryDigest(task), artifact_base64: artifact.toString("base64"), task_base64: task.toString("base64"), state: "prepared" };
+	mkdirSync(join(h.b.home, paths.runDir(jobId)), { recursive: true });
+	writeFileSync(join(h.b.home, paths.runDir(jobId), `recovery-attempt-${attempt_id}-prepared.json`), recoveryJson(attempt));
+	return attempt_id;
+}
+
+// Scenario (R3): cp_gate with recovery_attempt_id on a full codex queues as kind "gate" with that id, nothing claimed;
+// the replay re-reads, claims and re-validates the attempt (no recorded authority here: invalidated, no reviewer runs).
+test("R3-recovery-gate: a recovery gate on a full codex queues with its attempt id and replays with the attempt re-read", { skip: ciSkip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t, { native: { codex_research: true, codex_review: true } });
+	h.reviewsRow(h.b.provider.addScript("r3g-pi", [{ kind: "text", text: "unused" }]));
+	const [holder, subject, first, second] = await Promise.all([h.job(), h.job(), h.job(), h.job()]);
+	writeFileSync(subject.artifact, "# recovery candidate\n");
+	const attemptId = seedRecoveryAttempt(h, subject.id, [first.id, second.id]);
+	const runDir = join(h.b.home, paths.runDir(subject.id));
+	const terminal = join(runDir, `recovery-attempt-${attemptId}-terminal.json`);
+	const [snapshot, listing] = [join(h.state, "native-wait-snapshot.json"), join(h.state, "run-dir-while-queued.txt")];
+	h.setScript({ turns: [h.reporting(holder.id)] });
+	const ends = await h.run([
+		holder.dispatch(), h.awaitEnvelope(holder.id),
+		step("cp_gate", { job_id: subject.id, recovery_attempt_id: attemptId }),
+		step("bash", { command: `cp '${join(h.b.home, LAYOUT.nativeWaitFile)}' '${snapshot}' && ls -1 '${runDir}' > '${listing}'` }),
+		h.waitEvent(holder.id, "agent_settled"), step("cp_teardown", { job_id: holder.id }), h.awaitFile(terminal), h.pause(2),
+	]);
+	const teardown = ends.find((end) => end.toolName === "cp_teardown");
+	assert.equal(teardown?.result.details?.torn_down, true, text(teardown));
+	const gate = ends.find((end) => end.toolName === "cp_gate");
+	assert.notEqual(gate?.isError, true, text(gate));
+	assert.deepEqual([gate?.result.details?.state, gate?.result.details?.kind, gate?.result.details?.position, gate?.result.details?.waiting],
+		["queued", "gate", 1, "waiting for Codex CLI capacity"], text(gate));
+	const queued = (JSON.parse(readFileSync(snapshot, "utf8")) as { entries: Array<{ kind: string; job_id: string; driver: string; request: { recovery_attempt_id?: string } }> }).entries;
+	assert.deepEqual(queued.map((entry) => [entry.kind, entry.job_id, entry.driver, entry.request.recovery_attempt_id]), [["gate", subject.id, "codex", attemptId]]);
+	const whileQueued = readFileSync(listing, "utf8").split("\n").filter(Boolean);
+	assert.deepEqual(whileQueued.filter((name) => /^gate-\d+-standing\.json$/.test(name)), [], `the queued gate claimed an ordinal: ${JSON.stringify(whileQueued)}`);
+	// The replay, not the refused start, claimed a gate ordinal for this attempt and re-validated its authority.
+	const standing = readdirSync(runDir).filter((name) => /^gate-\d+-standing\.json$/.test(name));
+	assert.equal(standing.length, 1, JSON.stringify(readdirSync(runDir)));
+	assert.equal((JSON.parse(readFileSync(join(runDir, standing[0]!), "utf8")) as { attempt_id: string }).attempt_id, attemptId);
+	assert.equal((JSON.parse(readFileSync(terminal, "utf8")) as { outcome: string }).outcome, "invalidated");
+	assert.equal(readdirSync(runDir).some((name) => /^gate-\d+\.json$/.test(name)), false, "no reviewer decided");
+	assert.equal(h.b.provider.requests("r3g-pi").length, 0, "a reviewer ran on pi");
+	assert.deepEqual(waitEntries(h), []);
 });

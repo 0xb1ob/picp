@@ -4,10 +4,12 @@
  * never skips; the real `cp_dispatch` of a pi parent (mock model) decides. Nothing here may reach the pi model.
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
+import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { nativeAvailabilityFile } from "../../src/native-availability.ts";
@@ -18,7 +20,7 @@ import { VERDICT_TOOL } from "../../src/drivers/claude-verdict.ts";
 import { type ClaudeStep, FAKE_NATIVE_MODEL } from "../harness/claude-mock-provider.ts";
 import { FAKE_CODEX_REF } from "../harness/codex-worker.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { readFleet, readRunEvents, routeDriver, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { readFleet, readRunEvents, REPO_ROOT, routeDriver, treehouseAvailable, waitFor } from "../harness/index.ts";
 import { nativeWorkerHome } from "../harness/native-worker.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
 
@@ -260,4 +262,62 @@ test("T9/T10/T11: a held claude author lends its slot to its own reviewer; a sen
 	assert.equal(h.record(other.id), undefined, "the unrelated job never borrowed and never ran on another CLI");
 	assert.match(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8"), new RegExp(other.id));
 	assert.equal(h.claude.requests.some((request) => JSON.stringify(request.body).includes(message)), true, "the follow-up reached claude");
+});
+
+// Off CI a laptop without treehouse skips by name; under CI (Actions and Dagger set CI=true) a missing tool fails.
+const ciSkip = process.env.CI === "true" ? false : skip;
+
+/**
+ * A pass-through `git` first on PATH that logs each fetch with its parent pid. `treehouse get` (however wrapped)
+ * fetches on every lease from its own process; only a fetch this process spawns (picp's preflight) breaks fetch:false.
+ */
+function fetchLog(dir: string): { bin: string; fetches: () => Array<{ ownProcess: boolean; args: string }> } {
+	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+	const [bin, log] = [join(dir, "git-shim"), join(dir, "git-fetches.log")];
+	mkdirSync(bin);
+	writeFileSync(join(bin, "git"), `#!/bin/sh\ncase " $* " in *" fetch "*) printf '%s\\t%s\\n' "$PPID" "$*" >> '${log}';; esac\nexec '${real}' "$@"\n`, { mode: 0o755 });
+	const fetches = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => {
+		const [parent = "", args = ""] = line.split("\t");
+		return { ownProcess: parent === String(process.pid), args };
+	}) : []);
+	return { bin, fetches };
+}
+
+// Scenario (R2): a pipeline planner started with fetch:false on a full Claude CLI queues with fetch:false (contract)
+// and, once the slot frees, starts on claude with no preflight `git fetch` (treehouse's lease still fetches).
+test("R2-fetch: a pipeline planner queued with fetch:false on a full Claude CLI keeps fetch:false when it starts on claude", { skip: ciSkip, timeout: 300_000 }, async (t) => {
+	const ids = { holder: "" };
+	const research = (id: string) => ({ job_id: id, kind: "research", status: "done", summary: "Native research done.", artifact_path: join(h.b.home, paths.artifactFile(id)),
+		plan_summary: { goal: "Name the package.", approach: ["Read README.md."], acceptance: ["The name is reported."], risk: "None.", touched: ["README.md"] } });
+	const h = await nativeWorkerHome(t, [
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids.holder)), content: "# native\n" }) }] } as ClaudeStep,
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => research(ids.holder) }] } as ClaudeStep,
+		{ kind: "text", text: "Reported." },
+		{ kind: "text", text: "Planning." },
+	]);
+	const git = fetchLog(h.fakeHome);
+	// This process's PATH drives driver selection, preflight and treehouse; the workers keep the harness PATH.
+	const saved = process.env.PATH;
+	process.env.PATH = [git.bin, h.env.PATH].join(delimiter);
+	t.after(() => { process.env.PATH = saved; });
+	const post = h.b.ownPost(new CommandPost({ home: h.b.home, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentEnv: { ...process.env, ...h.b.agent.env, ...h.env } }));
+	ids.holder = (await h.job("research")).id;
+	await post.dispatch({ jobId: ids.holder, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, driver: "claude", fetch: false });
+	await waitFor(() => readRunEvents(h.b.home, ids.holder).some((event) => event.type === "agent_settled"), Boolean,
+		{ timeoutMs: 120_000, what: "the holder's settled, reported turn" });
+	const started = await post.startPipeline({ title: "r2f", project: "demo", task: "Add a line to README.md.", delivery: "local", fetch: false });
+	const id = started.research_id;
+	assert.deepEqual([started.dispatch, started.queued?.waiting], [undefined, "waiting for Claude CLI capacity"], JSON.stringify(started));
+	const queue = () => (existsSync(join(h.b.home, LAYOUT.dispatchQueueFile))
+		? (JSON.parse(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8")) as { entries: Array<{ job_id: string; request: { fetch?: boolean } }> }).entries : []);
+	assert.deepEqual(queue().map((entry) => [entry.job_id, entry.request.fetch]), [[id, false]]);
+	const leased = git.fetches().length;
+	const torn = await post.tearDown(ids.holder);
+	assert.equal(torn.torn_down, true, JSON.stringify(torn));
+	const record = await waitFor(() => h.record(id), (found) => found?.worker.driver === "claude", { timeoutMs: 120_000, what: "the planner on claude" });
+	assert.deepEqual([record?.worker.role, record?.routing?.driver], ["planner", "claude"]);
+	await waitFor(() => queue().length, (left) => left === 0, { timeoutMs: 30_000, what: "the started planner leaving the dispatch queue" });
+	const replayed = git.fetches().slice(leased);
+	assert.ok(replayed.some((fetch) => !fetch.ownProcess), `the shim saw the replay's lease fetch: ${JSON.stringify(replayed)}`);
+	assert.deepEqual(replayed.filter((fetch) => fetch.ownProcess), [], "the replayed planner's preflight fetched origin");
 });

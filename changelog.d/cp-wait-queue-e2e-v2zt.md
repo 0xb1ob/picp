@@ -1,0 +1,1 @@
+- Tests: end-to-end cases now cover three native-wait-queue paths: a quality panel start on a full CLI queues as `quality` and its voter votes on that CLI once a slot frees; a recovery gate keeps its `recovery_attempt_id` while it waits and re-reads the attempt on replay; a pipeline planner started with `fetch:false` keeps `fetch:false` through the dispatch queue.
