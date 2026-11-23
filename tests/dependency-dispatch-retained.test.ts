@@ -6,6 +6,7 @@ import { ARMED_DISPATCH_MAX, type FleetRecord, type Job, LAYOUT } from "../src/c
 import { ArmedDispatches } from "../src/dependency-dispatch.ts";
 import { BlockedDispatchError } from "../src/dispatch.ts";
 import { drainFile } from "../src/drain.ts";
+import { NativeDriverError } from "../src/drivers/claude.ts";
 import { MandateError } from "../src/mandate-accounting.ts";
 import type { DurableWakeupInput } from "../src/wakeup-outbox.ts";
 import { SpawnSafetyError } from "../src/worker-manager.ts";
@@ -60,10 +61,12 @@ test("arm persists the request; re-arm replaces it; a pipeline job, a drain and 
 });
 
 
-test("spawn_cap queues; parallelism_full and a reopened blocker keep; other refusals, promote and stale entries drop with a wake-up", async (t) => {
+test("spawn_cap and a full configured CLI queue; parallelism_full and a reopened blocker keep; other refusals, promote and stale entries drop with a wake-up", async (t) => {
 	const b = armedBench(t, {
 		dispatch: async (request) => {
 			if (request.jobId === "cp-cap") throw new SpawnSafetyError("spawn cap reached (2/2 workers)", { code: "spawn_cap" });
+			// cp-qmry T3: a full codex used to drop the armed job (and a fresh one ran pi); it queues for codex instead.
+			if (request.jobId === "cp-cli") throw new NativeDriverError("refused: cp-cli cannot run on the Codex CLI driver: codex concurrency is 1", "occupied", "codex");
 			if (request.jobId === "cp-par") throw new MandateError("dispatch-parallelism 1 is full", { code: "parallelism_full" });
 			if (request.jobId === "cp-reblock") throw new BlockedDispatchError("cp-reblock is blocked by cp-new", ["cp-new"]);
 			if (request.jobId === "cp-risk") throw new Error("risk:high needs authorization\nsecond line");
@@ -73,20 +76,21 @@ test("spawn_cap queues; parallelism_full and a reopened blocker keep; other refu
 		jobs: { "cp-closed": { status: "closed", close_reason: "dropped: superseded" }, "cp-script": { script: { path: "scripts/run.sh" } } as Partial<Job> },
 		fleet: ["cp-fleet"],
 	});
-	const ids = ["cp-cap", "cp-par", "cp-reblock", "cp-risk", "cp-live", "cp-closed", "cp-script", "cp-fleet"];
+	const ids = ["cp-cap", "cp-cli", "cp-par", "cp-reblock", "cp-risk", "cp-live", "cp-closed", "cp-script", "cp-fleet"];
 	for (const id of ids) b.armed.arm(id, {}, ["cp-base"]);
 	await b.armed.release();
-	assert.deepEqual(b.calls.map((call) => call.jobId), ["cp-cap", "cp-par", "cp-reblock", "cp-risk", "cp-live"], "stale entries drop before any dispatch");
-	assert.deepEqual(b.queued, ["cp-cap"]);
+	assert.deepEqual(b.calls.map((call) => call.jobId), ["cp-cap", "cp-cli", "cp-par", "cp-reblock", "cp-risk", "cp-live"], "stale entries drop before any dispatch");
+	assert.deepEqual(b.queued, ["cp-cap", "cp-cli"]);
 	assert.deepEqual(b.armed.ids(), ["cp-par", "cp-reblock"], "kept entries stay armed");
 	const text = b.wakes.map((wake) => wake.content).join("\n");
 	assert.match(text, /ARMED DISPATCH QUEUED — cp-cap \(position 1\)/);
+	assert.match(text, /ARMED DISPATCH QUEUED — cp-cli \(position 2\): its blockers landed but waiting for Codex CLI capacity/);
 	assert.match(text, /DROPPED: risk:high needs authorization — cp-risk/);
 	assert.doesNotMatch(text, /second line/);
 	assert.match(text, /DROPPED: the job already has a live worker .* cp-live/);
 	assert.match(text, /DROPPED: the job is closed \(dropped: superseded\) — cp-closed/);
 	assert.match(text, /DROPPED: script jobs are never armed — cp-script/);
 	assert.match(text, /DROPPED: the job is already in the fleet — cp-fleet/);
-	assert.equal(b.wakes.length, 6);
-	assert.equal(new Set(b.wakes.map((wake) => wake.id)).size, 6, "one durable id per outcome");
+	assert.equal(b.wakes.length, 7);
+	assert.equal(new Set(b.wakes.map((wake) => wake.id)).size, 7, "one durable id per outcome");
 });

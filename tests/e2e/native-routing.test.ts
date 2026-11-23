@@ -58,7 +58,7 @@ async function routedHome(t: TestContext, script: readonly ClaudeStep[], options
 	const switchFile = join(b.home, LAYOUT.data, "native.json");
 	const toggle = (on: boolean) => writeFileSync(switchFile, JSON.stringify({ claude_research: on }));
 	const job = (delivery: "local" | "answer" = "local") => b.ledger.create({ title: `s1 ${Math.random()}`, project: "demo", delivery, kind: "research" });
-	const fleet = (id: string) => readFleet(b.home).jobs.find((record) => record.job_id === id);
+	const fleet = (id: string) => (existsSync(join(b.home, LAYOUT.fleetFile)) ? readFleet(b.home).jobs.find((record) => record.job_id === id) : undefined);
 	const noLease = (id: string) => assert.equal(existsSync(join(b.home, paths.runDir(id))), false, `${id} has a run`);
 	return { b, claude, scratch, piModel, routing, toggle, job, fleet, noLease, env: { HOME: fakeHome, CLAUDE_CONFIG_DIR: join(fakeHome, ".claude") } };
 }
@@ -279,18 +279,30 @@ test("S1 carry: a native primary missing from a plain allowlist refuses with den
 	assert.equal(h.claude.requests.length, 0);
 });
 
-test("S1 pi pin: driver pi bypasses a claude row and a job started on claude refuses it", { skip, timeout: 300_000 }, async (t) => {
+// cp-qmry: a parent's driver pi on a claude row is refused; only the human's own per-job request (a v2 pick naming the
+// CLI) switches it, recorded on the job with its source. A model-only pick never moves the CLI.
+test("S1 pi pin: driver pi on a claude row needs the human's driver pick; a job started on claude refuses it", { skip, timeout: 300_000 }, async (t) => {
 	const bash = { kind: "tool_use" as const, calls: [{ name: "Bash", input: { command: "ls" } }] };
 	const h = await routedHome(t, [bash, bash]);
 	const limited = { ...h.env, CP_NATIVE_MAX_TURNS: "1" };
 	h.toggle(true);
-	const [pinned, locked] = await Promise.all([h.job(), h.job()]);
-	const ends = (await h.b.run([{ kind: "tool_calls", calls: [dispatch(pinned.id, { driver: "pi" })] }], limited)) as Tool[];
-	const end = ends.find((e) => e.toolName === "cp_dispatch");
-	assert.notEqual(end?.isError, true, text(end));
+	const [parentPin, modelOnly, pinned, locked] = await Promise.all([h.job(), h.job(), h.job(), h.job()]);
+	const modelQuote = seedOperatorPick(h.b.home, h.piModel, { jobId: modelOnly.id });
+	const driverQuote = seedOperatorPick(h.b.home, h.piModel, { jobId: pinned.id, driver: "pi" });
+	const ends = ((await h.b.run([dispatch(parentPin.id, { driver: "pi" }), dispatch(modelOnly.id, { driver: "pi", model: h.piModel, operator_quote: modelQuote }),
+		dispatch(pinned.id, { driver: "pi", model: h.piModel, operator_quote: driverQuote })].map((call) => ({ kind: "tool_calls" as const, calls: [call] })), limited)) as Tool[])
+		.filter((e) => e.toolName === "cp_dispatch");
+	for (const [end, id] of [[ends[0], parentPin.id], [ends[1], modelOnly.id]] as const) {
+		assert.equal(end?.isError, true, text(end));
+		assert.match(text(end), /configured to run on the Claude CLI \(rule native-research\), and a parent's driver choice is not an override/);
+		h.noLease(id);
+	}
+	assert.notEqual(ends[2]?.isError, true, text(ends[2]));
 	const record = h.fleet(pinned.id)!;
 	assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.requested_driver, record.routing?.driver], [undefined, h.piModel, "pi", "pi"]);
-	assert.equal(record.routing?.driver_reason, "explicit: cp_dispatch driver pi");
+	assert.match(record.routing?.driver_reason ?? "", /^override: human terminal \S+ proof omp-[a-f0-9]{32} asked for pi$/);
+	const resolved = readRunEvents(h.b.home, pinned.id).find((event) => event.type === "routing_resolved")?.payload as { driver_override?: Record<string, unknown> };
+	assert.deepEqual([resolved.driver_override?.driver, resolved.driver_override?.kind, resolved.driver_override?.quote], ["pi", "terminal", driverQuote.quote]);
 	assert.equal(h.claude.requests.length, 0, "the pin never reached the native model");
 	// A job that started on claude keeps its driver: the pin is refused before any spawn.
 	await h.b.closeParents();
@@ -306,18 +318,19 @@ test("S1 pi pin: driver pi bypasses a claude row and a job started on claude ref
 });
 
 for (const kind of ["queue", "armed"] as const) {
-	test(`S1 pi pin: ${kind === "queue" ? "a queued" : "an armed"} request with driver pi is released as pi on a claude row`, { skip, timeout: 300_000 }, async (t) => {
+	test(`S1 pi pin: ${kind === "queue" ? "a queued" : "an armed"} request with the human's driver pi pick is released as pi on a claude row`, { skip, timeout: 300_000 }, async (t) => {
 		const h = await routedHome(t, []);
 		h.toggle(true);
 		const job = await h.job();
+		const quote = seedOperatorPick(h.b.home, h.piModel, { jobId: job.id, driver: "pi" });
 		const file = join(h.b.home, kind === "queue" ? LAYOUT.dispatchQueueFile : LAYOUT.armedDispatchFile);
 		mkdirSync(dirname(file), { recursive: true });
 		const stamp = kind === "queue" ? { queued_at: "2026-10-04T15:00:00Z", attempts: 0 } : { armed_at: "2026-10-04T15:00:00Z", blockers: [] };
-		writeFileSync(file, JSON.stringify({ schema_version: 1, entries: [{ job_id: job.id, request: { task: "Report the repo's package name.", scope: "S", driver: "pi" }, ...stamp }] }));
+		writeFileSync(file, JSON.stringify({ schema_version: 1, entries: [{ job_id: job.id, request: { task: "Report the repo's package name.", scope: "S", driver: "pi", model: h.piModel, operator_quote: quote }, ...stamp }] }));
 		await h.b.run([], h.env);
 		const record = await waitFor(() => h.fleet(job.id), (r) => r?.worker !== undefined, { timeoutMs: 60_000, what: `${kind} release reaches a worker` });
 		assert.deepEqual([record?.worker.driver, record?.worker.model, record?.routing?.requested_driver, record?.routing?.driver], [undefined, h.piModel, "pi", "pi"]);
-		assert.equal(record?.routing?.driver_reason, "explicit: cp_dispatch driver pi");
+		assert.match(record?.routing?.driver_reason ?? "", /^override: human terminal \S+ proof omp-[a-f0-9]{32} asked for pi$/);
 		assert.equal(h.claude.requests.length, 0);
 	});
 }

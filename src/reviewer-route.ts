@@ -4,6 +4,8 @@
  */
 import { type Delivery, type FleetRecord, isScriptFleetRecord, type RoutingConfig, type RoutingDecision } from "./contracts.ts";
 import { holdNativeSlot, liveNativeWorkers, reserveNativeSlot, resolveDriverRoute } from "./dispatch-driver.ts";
+import { waitingLabel } from "./dispatch-queue.ts";
+import { NativeDriverError } from "./drivers/claude.ts";
 import type { ModelProbe, RouteRequest, resolveWithCapacity } from "./routing.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 import type { WorkerManager } from "./worker-manager.ts";
@@ -57,5 +59,10 @@ export function resolveReviewerRoute(
 		...(ctx.reserve ? { reserve: true } : {}),
 		...(borrowFrom ? { borrowFrom } : {}),
 		nativeLive: liveNativeWorkers(ctx.manager, ""),
+	}).catch((error: unknown) => {
+		const waiting = waitingLabel(error);
+		if (waiting === undefined) throw error;
+		const native = error as NativeDriverError;
+		throw new NativeDriverError(`${native.message} — the review of ${ctx.jobId} is ${waiting}: run it again once a slot frees; it never runs on another CLI`, native.category, native.driver);
 	});
 }

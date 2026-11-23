@@ -304,8 +304,8 @@ request refuses as `refused: <job> cannot run on the Claude CLI driver: <reason>
 dispatch held by the spawn cap or full native slots (queued) or by open blockers (armed) keeps its driver
 (`QueuedDispatchRequestSchema.driver`, `toDispatchRequest`), so its release re-runs this selection: it runs native or is
 refused, never on pi. A queued entry refused as `occupied` stays at the head; a successful `cp_teardown` drains the queue
-once the closed record frees the slot. A quality voter that finds the native slot taken at spawn re-routes to pi
-(`explicit: "pi"`) instead of abstaining.
+once the closed record frees the slot. A quality panel keeps the one slot its route got between its serial voters; a
+voter that still finds the slot taken at spawn abstains by name and never runs on pi (cp-qmry).
 
 Policy: a version floor (2.1.318), not an exact pin, because `claude` auto-updates and an exact pin would refuse every
 run after each update, while the N3a lockdown digest already refuses a changed built-in surface; remedy `claude update`.
@@ -413,14 +413,33 @@ kills the native worker; the job keeps its session record, and a plain `cp_reviv
 A rubric row's `driver` (`docs/contracts.md`, routing) makes native a routing choice, still behind the switch. Nothing
 changes until a row carries `driver: "claude"` **and** the switch is ON; the shipped defaults name no driver.
 
+**The configured CLI binds (cp-qmry).** The CLI settings name for a job — its rubric row's `driver`, absent is pi —
+is a hard constraint: picp never runs the job on another CLI. A full CLI (`occupied`) queues a new job
+(`cp_dispatch`, `cp_ask`, an armed release) with the status `waiting for <Claude CLI|Codex CLI> capacity`; it starts
+on that same CLI when a slot frees. Every other refusal (`switch`, `ineligible`, `cli_missing`, `cli_version`,
+`denied`, `window`, `auth`, `model`, `effort`) refuses by name and switches nothing; a preview reports it as `error`.
+The one exception is a human's own per-job request: `cp_parent model_pick` with `driver` issues a version-2 proof whose
+quote names the model and the CLI; relayed with `cp_dispatch driver`, it is recorded on the job as
+`routing.driver_reason` `override: human <terminal|dashboard> <entry or control id> proof <omp-…> asked for <cli>` and
+as `driver_override` (driver, quote, kind, entry id, control id) on the `routing_resolved` run event. A parent's own
+`driver: "pi"` on a native row is refused ("a parent's driver choice is not an override"), and a model-only override
+the configured CLI cannot run is refused, never routed to pi. An explicit native `driver` still needs that CLI's
+switch, which the dashboard's Workers CLI setting turns on together with the rows. A reviewer refused `occupied` is
+refused by name with the same waiting status; it may instead run in its own idle, held author's slot on the same CLI
+(`driver_reason` `borrowed: reviewer using held author's slot (<job>)`, routing line `slot="reviewer using held
+author's slot <job>"`), at most one reviewer per author; a `cp_send` to that author meanwhile is refused as waiting for
+the CLI's capacity until the verdict lands. Jobs that started on pi under the old fallback keep pi (D1).
+
 **Precedence** (`resolveDriverRoute`, `src/dispatch-driver.ts`, for `cp_dispatch` preview and admission alike):
 
 | Request | Driver | On a failed condition |
 |---|---|---|
 | explicit `driver: "claude"` | claude | refused by name, today's semantics; no lease |
-| explicit `anthropic/claude-…` `model` override (cp_dispatch `model`, pipeline `implementer_model`), no `driver`, and the role's row (picked as if no override) is `driver: "claude"` | claude on the override model; `driver_reason` `rule: <row> prefers claude; override <model>` | pi on the override, `driver_reason` names the condition |
-| any other explicit `model` override, no `driver` | pi | (the row is not consulted) |
-| matching row `driver: "claude"` | claude | pi, `driver_reason` names the condition |
+| explicit `driver: "pi"` on a native row | pi only with the human's v2 driver pick for this job | refused: a parent's choice is not an override |
+| explicit `anthropic/claude-…` `model` override (cp_dispatch `model`, pipeline `implementer_model`), no `driver`, and the role's row (picked as if no override) is `driver: "claude"` | claude on the override model; `driver_reason` `rule: <row> prefers claude; override <model>` | refused by name; `occupied` queues |
+| any other explicit `model` override on a `driver: "claude"` row | — | refused `model`: a model change never changes the CLI |
+| explicit `model` override on a pi row | pi | (the row's driver is pi) |
+| matching row `driver: "claude"` | claude | refused by name; `occupied` queues |
 | row without `driver` (legacy) or `pi` | pi | — |
 | a job whose fleet record already started (D1) | the recorded driver | a native job refuses rather than move to pi |
 
@@ -485,7 +504,7 @@ window, or a successful native turn (which clears only `five_hour`, `seven_day`,
 `unspecified` and its own model family's window); (ii) the Settings switch turned OFF then ON (the switch file rewritten after the observation); (iii) a
 different installed CLI version than the one that observed it.
 
-**Lock.** The snapshot only steers NEW automatic jobs, which fall back to pi with the reason; an explicit
+**Lock.** The snapshot only refuses NEW automatic jobs by name (never pi, cp-qmry); an explicit
 `driver: "claude"` and a started native job are refused by name instead. A native resume (`cp_send`, a queued
 follow-up at turn end, `cp_revive`) is refused while a relevant window is rejected; queued sends stay queued in order,
 and nothing moves to pi. Bounded recovery never resumes a native job (N3c).
@@ -555,8 +574,8 @@ passed. The same slice makes `git checkout -- <path>` and `git restore` paths ho
 **The switch.** `data/native.json` key `claude_ship` (no Settings row of its own; N4j was cut, and the Settings Workers
 CLI sets it with the others, see [the flip](#native-concurrency-and-the-flip-n4i)) is OFF by default. It changes
 nothing on its own: an implementer runs native only when its routing row (or the dispatch) says `driver: "claude"`,
-the job is `kind:ship` with delivery `pr` or `local`, and `claude_ship` is on. Off, a claude row falls back to pi with
-`driver_reason` `switch: the switch workers.native_claude_ship is off …`; an explicit `driver: "claude"` is refused
+the job is `kind:ship` with delivery `pr` or `local`, and `claude_ship` is on. Off, a claude row's job is refused by
+name (`the switch workers.native_claude_ship is off …`, never pi); an explicit `driver: "claude"` is refused
 with no lease. The other keys: `claude_research` (unchanged), `claude_review` (the native reviewer, N4h, below) and
 `max_concurrent` (integer 1–4, default 1; applied since
 [N4i](#native-concurrency-and-the-flip-n4i)). Any other key, a non-boolean switch or an out-of-range count is refused by name, by every reader.
@@ -587,9 +606,9 @@ Rows stay pi until the routing flip: this slice leaves the home's `data/native.j
 apply it: selection (`nativeSelectionRefusal`, live fleet records), dispatch admission (`src/dispatch-driver.ts`, a
 per-home set of jobs being admitted, checked with the live records after the last await) and `WorkerManager.spawn`. A
 live native process counts whether it is working or held, because a held PR keeps its idle worker for repairs. A job
-never counts against itself, so a held job's own repair resumes its own slot. When the slots are full, a new job that
-only prefers claude on its routing row falls back to pi, with a `driver_reason` starting `occupied:` that names the
-live jobs. An explicit or locked native job is refused by name and never moved to pi (D1).
+never counts against itself, so a held job's own repair resumes its own slot. When the slots are full, a new job on a
+claude routing row is queued `waiting for Claude CLI capacity` (cp-qmry; `queue: false` keeps the named `occupied`
+refusal) and never runs pi. An explicit or locked native job is refused by name and never moved to pi (D1).
 
 **The flip** (operator, by hand; picp never edits these files):
 
@@ -1062,8 +1081,8 @@ Every other role, kind and delivery stays on pi. No `data/*.json` or `defaults/r
 | `codex` missing or below `0.170.0` | `cli_missing` / `cli_version` |
 | `codex login status` not 0 (HOME `/nonexistent`, only `CODEX_HOME` is read) | `auth` |
 
-An explicit `driver: "codex"` is strict and refuses by name; a row's `codex` is a preference that falls back to pi
-with a `driver_reason`, and with `requested_driver: "codex"` only while `codex_research` is on (CX-off-2). A started job keeps its driver: `pi` or `claude` on a codex job
+An explicit `driver: "codex"` is strict and refuses by name; a row's `codex` binds too (cp-qmry): a full codex queues
+the job `waiting for Codex CLI capacity`, any other refusal names its reason, and nothing runs on pi (CX-off-2). A started job keeps its driver: `pi` or `claude` on a codex job
 refuses naming the lock. A codex row's model must match `openai/gpt-…` (checked in the resolver and in a Settings rubric
 write; programme D1: never a vendor check); its effort is `low`…`max` (`off` and `minimal` refuse). The home's `allow`
 and `deny_by_role` still apply. Per-driver specs live in `src/drivers/registry.ts`.
@@ -1253,7 +1272,7 @@ resume admission read it for codex as they read S2 for Claude:
 | Snapshot | New codex selection | Resume, revive, queued follow-up |
 |---|---|---|
 | no file, no limit, or a no-reset limit older than `data/native.json`'s mtime | allowed | allowed |
-| a limit whose reset is ahead | a row falls back to pi with `window: usage limit reached until <iso>`; an explicit dispatch is refused by name | refused by name |
+| a limit whose reset is ahead | a row's job and an explicit dispatch are both refused by name (`usage limit reached until <iso>`), never pi | refused by name |
 | a limit whose reset passed | attempted, with the note `usage limit unknown since its reset <iso>` | allowed |
 | a no-reset limit newer than the switch file | `window: usage limit reached, reset unknown …` (as above) | refused by name |
 
@@ -1315,7 +1334,7 @@ so no decision is bypassed; a failed hook kills the run and the job fails by nam
 R3 is on the C7 carry-in list, re-decided before any write-capable codex job.
 
 **Known limits.** No hosted web search and no network for the shell (D4), so a planner profile with web on pi has none
-here; the `ops` profile is `ineligible` (a codex row falls back to pi; an explicit codex dispatch refuses by name),
+here; the `ops` profile is `ineligible` (a codex row's job and an explicit codex dispatch both refuse by name),
 since the shell has no ssh agent. A server whose name the CLI spells differently in its tool names is not skipped:
 `codexMcpConfig` (`src/worker-mcp.ts`) loads a hyphenated name, picp's route then does not recognise its tools and
 refuses each call at the hook, so it fails closed (only a name outside `[A-Za-z0-9_-]` is skipped). A thread started before
@@ -1341,7 +1360,8 @@ C6 runs a `gate-reviewer` on the Codex CLI behind `codex_review` (off). No `data
 was edited. `cp_review`, `cp_gate` and the quality panel resolve their reviewer through `resolveReviewerRoute`
 (`src/reviewer-route.ts`); a `gate-reviewer` rubric row naming `driver: "codex"` and an explicit `openai/gpt-…` model
 runs on Codex when `codex_review` is on and a codex slot is free (`codex_max_concurrent`, shared with research). In
-every other case it runs the row's pi fallback, as a Claude row's reviewer does; the delivery check is research-only.
+every other case it refuses by name and never runs the row's pi fallback (cp-qmry), as a Claude row's reviewer does; the
+delivery check is research-only.
 
 **Surface.** A reviewer's app-servers (trust probe and turn) get `SURFACE_FLAGS` plus `--disable shell_tool`, and the
 lockdown requires `shell_tool` to read back off. The thread declares four dynamic tools, served in the worker process:
@@ -1378,7 +1398,7 @@ empty resource list (V7). `request_user_input` stays offered; the hook refuses i
 ends a job: `deleteCodexThread` (one contained bare app-server, D5), then `removeNativeScratch`, as the run events
 `native_thread_deleted` and `native_scratch_removed` in the review's run dir. Its transcript is
 `<review run dir>/native-transcript.jsonl`; its `message_end` counts tokens at cost 0 with `cost_unknown` (D3).
-`src/quality.ts` now re-routes a voter that lost a codex slot at spawn ("codex concurrency") to pi, as for Claude.
+A voter that lost a codex slot at spawn ("codex concurrency") abstains by name, as for Claude; it never votes on pi.
 
 **Shipped off (C6).** No persisted shape, contract schema or golden changed; a reviewer writes codex values only while
 `codex_review` is on, and with every switch off a codex reviews row runs pi with no codex value in any file (CX-6d).
@@ -1511,7 +1531,7 @@ with `driver: "codex"` (or matched by a rubric row naming it) and an explicit `o
 
 | Piece | What happens |
 |---|---|
-| Selection | `codexClassOf` returns `codex_ship` for implementer ship; delivery other than `pr` or `local` is `ineligible`; switch off is `switch: the switch codex_ship is off` (an explicit dispatch refuses before any lease, a row falls back to pi) |
+| Selection | `codexClassOf` returns `codex_ship` for implementer ship; delivery other than `pr` or `local` is `ineligible`; switch off is `switch: the switch codex_ship is off` (an explicit dispatch and a row's job both refuse before any lease, never pi) |
 | Spawn | `nativeSpawn` passes `CP_BASE_BRANCH` to codex as to Claude; the addendum is `CODEX_SHIP_ADDENDUM` (pr) or `CODEX_LOCAL_SHIP_ADDENDUM` (local): shell writes, no `apply_patch`, no git writes in the shell, `git_commit`, `git_merge`, `git_push`, `pr_create`, `head_sha`; the parent's `CP_CODEX_READ_ROOTS` passes to an implementer only (C8) |
 | Worker | the implementer's artifact path and `exclude_paths` as on Claude; no `mcp.json` read and no MCP server (R3, also refused in the run core); read roots vetted by `codexSkillRoots` (a home, the Codex home, the agent dir or the CP home refuses the run before any app-server); the session record keeps `base` |
 | Profile | the worktree entry is its realpath, so a symlinked worktree still holds its read-only `.git` and excluded entries (`codexExcludedRoots` returns realpaths) |
@@ -1606,7 +1626,7 @@ ships **off**; no `data/*.json` or `defaults/routing*.json` was edited and no sh
   `codex.login` (the `codex login status` exit code only, `HOME=/nonexistent`; named `codex login`) and
   `codex.workers` (the switches, `codex_max_concurrent`, the rows naming codex; a row whose class switch is off, or an
   unreadable `data/native.json`, is `warn`). Each line is `ok` with its fix while no switch is on and no row names
-  codex, `warn` once one does, and never `error`: a codex row falls back to pi and an explicit dispatch refuses by name.
+  codex, `warn` once one does, and never `error`: a codex row's job and an explicit dispatch both refuse by name.
 - **Footer.** The chat footer's Codex item shows while any codex switch is on.
 
 **Persisted shapes.** `data/native.json` takes `codex_*: true` only after an operator turns a switch on, and loses the
