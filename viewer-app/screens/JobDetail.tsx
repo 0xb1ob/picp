@@ -9,16 +9,17 @@ import { JobTranscript } from "./JobTranscript.tsx";
 import { elapsed, money, observedTime, prNumber, shortSha, time, zone } from "../format.ts";
 import { CopyReply } from "../components/CopyReply.tsx";
 import { ContextChip } from "../components/ContextChip.tsx";
-import { PhaseDot, CiSignal, ModelName, parkedPendingText } from "../components/JobSignals.tsx";
+import { PhaseDot, CiSignal, DriverBadge, ModelName, parkedPendingText } from "../components/JobSignals.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { composerHref, jobHref } from "../routes.ts";
 import "./job-detail.css";
 
 function ModelFact({job}: {job: ViewerJob}) {
- const id = job.script_path ?? job.model;
+ if (job.script_path) return <code>{job.script_path}</code>;
+ const id = job.model;
  if (!id) return <>not recorded</>;
- const provider = !job.script_path && id.includes("/") ? id.slice(0,id.lastIndexOf("/")) : null;
- return job.script_path ? <code>{job.script_path}</code> : <><ModelName job={job}/>{provider && <span class="job-provider">{provider}</span>}{job.driver && <span class="job-provider">{job.driver === "claude" ? "Claude CLI" : job.driver === "codex" ? "Codex CLI" : `native ${job.driver}`}</span>}</>;
+ const provider = id.includes("/") ? id.slice(0,id.lastIndexOf("/")) : null;
+ return <><ModelName job={job}/>{provider && <span class="job-provider">{provider}</span>}<DriverBadge driver={job.driver}/></>;
 }
 
 /** C1b: an unknown USD cost (a codex run, an estimated Claude run) never reads as a measured $0.00. */
@@ -225,7 +226,7 @@ export function JobDetail({data, wide, initial, embedded = false}: {data: JobRes
      {data.deploy && <div class="job-fact-wide job-fact-deploy"><dt>Deploy</dt><dd><DeployFact deploy={data.deploy}/></dd></div>}
      {data.quota_continuation && <div class="job-fact-wide job-fact-quota"><dt>Quota continuation</dt><dd><QuotaFact jobId={job.id} q={data.quota_continuation}/></dd></div>}
      <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>
-     <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}</dd></div>
+     <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}{(job.review_attempts > 0 || job.reviewer_driver) && <DriverBadge driver={job.reviewer_driver}/>}</dd></div>
     </dl>
     <div class="job-links"><JobFiles data={data}/><JobAsk data={data}/></div>
    </div>

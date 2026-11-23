@@ -414,7 +414,7 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	assert.match(v.rule(".jobs-screen .job-row-done .job-cost", PHONE), /^position:absolute;/, "the absolute cost rides done rows only");
 	assert.equal(v.css.filter((r) => r.selector === ".jobs-screen .job-cost").length, 0);
 	assert.match(v.rule(".job-row-link", WIDE), /grid-area:1 \/ 1 \/ 2 \/ 3;.*display:grid;.*min-height:0/);
-	assert.match(v.rule(".jobs-columns-flight,.job-row-flight", WIDE), /grid-template-columns:220px minmax\(0,1fr\) 104px 140px 120px 92px 88px 56px/);
+	assert.match(v.rule(".jobs-columns-flight,.job-row-flight", WIDE), /grid-template-columns:220px minmax\(0,1fr\) 104px 140px 120px 92px 128px 56px/);
 	assert.doesNotMatch(v.rule(/\.job-row-link/, WIDE), /display:contents/);
 	assert.match(v.rule(".reports-grid", WIDE), /^display:grid;/);
 });
