@@ -200,9 +200,9 @@ test("D2-pick-tools: cp_ask and an armed cp_dispatch carry the quote, verify it 
 	assert.equal(readFileSync(join(b.home, LAYOUT.routingFile), "utf8"), routingBytes, "no pick was written to routing.json");
 });
 
-// cp-qmry review: a driver pick is the human's alone. Through the real `cp_parent model_pick` with `driver`, a quote that
-// only the parent relayed (a `[cp-bridge send]` message) and one the operator's own model wrote are both refused before
-// any proof exists; the human's own words naming the driver issue one.
+// cp-qmry review: a driver pick is the human's alone. Through the real `cp_parent model_pick` with `driver`, a quote
+// only the parent relayed (a `[cp-bridge send]` message) and one the operator's own model wrote are both refused
+// before any proof exists; the human's own words naming the driver issue one.
 test("D2-driver-pick: cp_parent model_pick with driver refuses the parent's relayed words and the operator model's own", { timeout: 300_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	const picked = b.provider.addScript("d2-driver-picked", [{ kind: "text", text: "working" }], { onExhausted: "repeat" });
