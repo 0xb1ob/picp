@@ -430,6 +430,26 @@ refused by name with the same waiting status; it may instead run in its own idle
 author's slot <job>"`), at most one reviewer per author; a `cp_send` to that author meanwhile is refused as waiting for
 the CLI's capacity until the verdict lands. Jobs that started on pi under the old fallback keep pi (D1).
 
+Until the follow-up wait queue lands (R6 `state/native-wait.json`, T5–T11, the full explicit-driver rule P3), these
+paths refuse by name on a full CLI instead of waiting:
+- reviews (`cp_review`, `cp_gate`, quality panels);
+- `cp_revive` and bounded recovery;
+- `cp_send` continuation;
+- pipeline retries;
+- planners started by `cp_pipeline`.
+
+They never switch the CLI. The checks that prove the binding (cp-qmry):
+
+| Command | Proves |
+|---|---|
+| `npm run test:one -- tests/e2e/driver-hard-constraint.test.ts` | T1: a full codex queues the next job and starts it on codex, never pi (fails on base); T4: a parent's `driver: "pi"`, a model-only pick and a pi model refuse; the human's v2 pick runs pi, recorded |
+| `npm run test:one -- tests/e2e/driver-hard-constraint-claude.test.ts` | the reported bug with a fake `claude` (never skips; fails on base); missing CLI, auth failure, spent window and model-only switch refuse by name; a dashboard `dc-` pick switches only its job; parent and main-session picks refuse |
+| `npm run test:one -- tests/e2e/codex-worker.test.ts` | a codex row refuses by name when off, ineligible, denied or full; `dry_run` reports the refusal as `error`; nothing runs on pi |
+| `npm run test:one -- tests/e2e/codex-reviewer.test.ts` | codex reviewers and quality voters never run on pi: switch off, a full slot and a signed-out CLI refuse by name; a voter that loses its slot abstains |
+| `npm run test:one -- tests/claude-spike.test.ts` | the reviewer route never returns pi; only the subject's own idle, held, lendable author lends its slot |
+| `npm run test:one -- tests/e2e/native-routing.test.ts` | claude rows refuse by name (switch, CLI, window, auth, denied, model); the human pick switches one job, queued and armed included |
+| `npm run typecheck` | the new signatures compile across src, extensions and tests: `NativeDriverError.driver`, the cp_ask queued result, the v2 proof types, `SpawnRequest.borrowsSlotOf` |
+
 **Precedence** (`resolveDriverRoute`, `src/dispatch-driver.ts`, for `cp_dispatch` preview and admission alike):
 
 | Request | Driver | On a failed condition |

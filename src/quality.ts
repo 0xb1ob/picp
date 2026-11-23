@@ -466,7 +466,8 @@ export class QualityPass {
 		});
 		const native = route.decision.driver === "claude" || route.decision.driver === "codex" ? route.decision.driver : undefined;
 		try {
-			// cp-qmry: never another CLI. Serial voters keep the panel's one slot (re-taken below before each exit).
+			// cp-qmry: never another CLI. Serial voters keep the panel's one slot (re-taken below before each exit);
+			// the panel's own holdReviewerSlot (`wait`) releases the last re-take when the panel settles.
 			const managed = await holdReviewerSlot(home, request.jobId, async () => spawn(route.decision));
 			recorder.markSpawned({ pid: managed.worker.pid, model, profile: profile.frontmatter.name });
 			recorder.attach(managed.worker);
