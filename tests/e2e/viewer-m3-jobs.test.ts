@@ -543,7 +543,7 @@ test("M3-jobs-css: phone bottom sheet from y96 and full-screen job; desktop 861 
 	assert.match(rule(desktop, ".workspace-jobs"), /background:var\(--surface\)/, "desktop: the drawer is the design's raised surface");
 	assert.match(rule(desktop, ".workspace-jobs-job>code"), /overflow:hidden;text-overflow:ellipsis/, "desktop: a long id clips in the Job cell");
 	assert.match(rule(desktop, ".workspace-job"), /grid-column:2/, "under 1280 px the job covers the chat column");
-	assert.match(rule(beside, ".sessions:has(>.workspace-job)"), /grid-template-columns:261px minmax\(0,1fr\) 521px/, "from 1280 px a 521 px pane, border included");
+	assert.match(rule(beside, ".sessions:has(>.workspace-job)"), /grid-template-columns:var\(--sidebar-width,261px\) minmax\(0,1fr\) 521px/, "from 1280 px a 521 px pane, border included");
 	// Only an unboxed reply's code block takes the surface: ask cards and pending sends sit on it,
 	// so theirs keep the page fill.
 	assert.deepEqual([rule(css, ".sessions .md .md-code"), /background:var\(--background\)/.test(rule(css, ".md .md-code"))], ["", true],

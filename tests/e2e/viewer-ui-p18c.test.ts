@@ -843,7 +843,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 	assert.match(v.rule(".shell", WIDE), /--page-header-gap: 24px/);
 	assert.equal(v.rule(".page-header-fallback", WIDE), "margin-bottom:var(--page-header-gap)");
 	assert.equal(v.css.filter((r) => /margin-right:248px|z-index:4$/.test(r.body) || /shell-page-bar|session-title|job-crumb|not-found-crumb/.test(r.selector)).length, 0, "no overlay hacks left");
-	assert.match(v.rule(".shell-sidebar", WIDE), /width:208px;/);
+	assert.match(v.rule(".shell-sidebar", WIDE), /width:var\(--sidebar-width,208px\);/);
 	assert.match(v.rule(".page-header-context"), /height:24px;.*border-radius:999px/);
 });
 
