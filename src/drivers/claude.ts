@@ -141,29 +141,34 @@ export function nativeModelId(model: string): string {
 /** What the native model is told after the profile body: its tools are Claude's, and the artifact is Written. */
 export const NATIVE_ADDENDUM = [
 	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Bash, Write), gh_read for GitHub",
-	"reads (never gh in Bash) and report_result; ignore any other tool names above. Bash runs any command under pi's",
-	"guards, but writes only in your artifact directory, TMPDIR or /tmp and never changes the repo.",
-	"Write the research artifact to the predeclared artifact path (CP_ARTIFACT_PATH), then call report_result.",
+	"reads and git_fetch for origin (never gh or git fetch in Bash) and report_result; ignore any other tool names above.",
+	"Bash runs any command under pi's guards, but writes only in your artifact directory, TMPDIR or /tmp and never",
+	"changes the repo. Write the research artifact to the predeclared artifact path (CP_ARTIFACT_PATH), then call",
+	"report_result.",
 ].join("\n");
 
 /** Delivery `board`: intake publishes the artifact dir's board.json and site/, so both are Written there. */
 export const NATIVE_BOARD_ADDENDUM = [
 	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Bash, Write), gh_read for GitHub",
-	"reads (never gh in Bash) and report_result; ignore any other tool names above. Bash runs any command under pi's",
-	"guards, but writes only in your artifact directory, TMPDIR or /tmp. This job is delivery board: write",
-	"board.json, site/index.html and a short report.md in the artifact directory (the directory of CP_ARTIFACT_PATH),",
-	"then call report_result with artifact_path = CP_ARTIFACT_PATH (the board.json path).",
+	"reads and git_fetch for origin (never gh or git fetch in Bash) and report_result; ignore any other tool names above.",
+	"Bash runs any command under pi's guards, but writes only in your artifact directory, TMPDIR or /tmp.",
+	"This job is delivery board: write board.json, site/index.html and a short report.md in the artifact directory",
+	"(the directory of CP_ARTIFACT_PATH), then call report_result with artifact_path = CP_ARTIFACT_PATH (the board.json",
+	"path).",
 ].join("\n");
 
 /** The ship counterpart (N4f): the forge tools replace pi's push and gh; the PR base is the job's base branch. */
 export const NATIVE_SHIP_ADDENDUM = [
 	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Edit, Write, Bash), the picp forge",
-	"tools (git_push, git_fetch, pr_create, pr_edit, gh_read) and report_result; ignore any other tool names above.",
+	"tools (git_push, git_fetch, pr_create, pr_edit, gh_read, issue_comment, pr_review_reply, pr_thread_resolve) and",
+	"report_result; ignore any other tool names above.",
 	"Bash runs any command under pi's guards, but writes only in your worktree (outside .git and excluded paths), your",
 	"artifact directory, TMPDIR or /tmp.",
 	"Commit with git in Bash, push only with git_push, open the draft PR with pr_create (never gh in Bash), then call",
-	"report_result once with head_sha = git rev-parse HEAD. gh_read reads this repo: pr view|list|diff|checks, issue",
-	"view|list, run view|list, release view|list, repo view, and api GET of repos/<owner>/<repo>/... of this repo only.",
+	"report_result once with head_sha = git rev-parse HEAD. gh_read reads this repo: pr view|list|diff|checks|threads,",
+	"issue view|list, run view|list, release view|list, repo view, and api GET of repos/<owner>/<repo>/... of this repo.",
+	"issue_comment posts on an issue your brief names or your PR closes; pr_review_reply answers a review comment and",
+	"pr_thread_resolve resolves a thread of your own PR (ids from gh_read pr threads).",
 ].join("\n");
 
 /** Delivery `local` (N4i): picp integrates the branch itself, so the worker commits and never pushes or opens a PR. */

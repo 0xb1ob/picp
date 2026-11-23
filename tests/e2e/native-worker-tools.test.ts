@@ -226,7 +226,7 @@ test("NP-5b: a user MCP server named picp is skipped by name; picp's own report_
 	const skipped = readRunEvents(h.b.home, id).filter((event) => event.type === "native_mcp_skipped").map((event) => (event.payload as { lines: string[] }).lines);
 	assert.deepEqual(skipped, [["MCP server picp not loaded: picp is the worker's own server"]]);
 	const first = h.claude.requests.find(isModelCall);
-	assert.deepEqual(offered(first).filter((name) => name.startsWith("mcp__picp__")).sort(), [REPORT_TOOL, "mcp__picp__gh_read"].sort(), offered(first).join(", "));
+	assert.deepEqual(offered(first).filter((name) => name.startsWith("mcp__picp__")).sort(), [REPORT_TOOL, "mcp__picp__gh_read", "mcp__picp__git_fetch"].sort(), offered(first).join(", "));
 	assert.ok(offered(first).includes("mcp__probe__read_thing"), offered(first).join(", "));
 	assert.equal((await h.runs(id))[0]?.lockdown, "ok");
 });

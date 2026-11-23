@@ -2165,7 +2165,8 @@ unknown name is refused. The CP parent is unchanged; a home with no enabled serv
 `mcp.json`) spawns workers with no gateway. The change applies to newly launched and revived workers
 after the normal install; running workers keep the tools they loaded, and no operator reload is
 needed. `/doctor` prints `mcp.operator` (a live `pi mcp list --json`,
-bounded at 20 s, run only when a server is enabled; never a config value) and `mcp.workers`.
+bounded at 20 s, run only when a server is enabled; never a config value) and `mcp.workers`, plus `mcp.native` (warn)
+naming each MCP server the native Claude loader skips.
 
 **No worker gets a package `--skill` path (skillreads-vqy).** pi lists every loaded
 skill with "use the read tool to load a skill's file", and some models then
