@@ -458,6 +458,7 @@ Test files added after the baseline, with the PR that owns them.
 | tests/e2e/viewer-sidebar-resize.test.ts | cp-resizable-sidebar-ayrl (https://github.com/0xb1ob/picp/pull/865) | Resizable desktop sidebar through `bin/cp-view` and the served app: drag, reload, 180–480 px clamp, keyboard steps, double-click reset, invalid stored widths, a plain click storing nothing, and the Chats column on the shared width |
 | tests/e2e/driver-hard-constraint.test.ts | cp-qmry (https://github.com/0xb1ob/picp/pull/869) | The configured CLI binds, through the real `cp_dispatch` of a pi parent with fake-codex: T1 a full codex queues the next row-routed job "waiting for Codex CLI capacity" and starts it on codex (fails on base); T4 a parent's driver pi, a v1 model-only pick and a pi model refuse, the human's v2 driver pick runs pi, recorded |
 | tests/e2e/driver-hard-constraint-claude.test.ts | cp-qmry (https://github.com/0xb1ob/picp/pull/869) | The reported bug with a fake `claude` shim on PATH and Workers CLI = claude via the settings writer: a full Claude CLI queues the next job and never runs pi (fails on base); unavailable CLI, auth failure, spent window and a model-only switch refuse by name; a dashboard (dc-) driver pick switches only that job, recorded with its id; parent and main-session picks refuse |
+| tests/e2e/native-forge-parity.test.ts | cp-3lf5 (PR URL on the branch) | G1–G4 native GitHub parity: owner-scoped planner reads, issue comment, review reply/resolve, planner fetch |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

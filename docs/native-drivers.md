@@ -785,7 +785,7 @@ Tests: `tests/e2e/native-operator.test.ts` NO-11 (stdio server offered as `mcp__
 started, a hidden tool refused) and NO-12 (an extra init plugin refused, with a negative control). fake-claude runs
 `--mcp-config` stdio servers and answers the hook listing.
 
-## Worker tool parity (WP0–WP7)
+## Worker tool parity (WP0–WP8)
 
 The Claude CLI workers are moving to the pi workers' tools, role by role, under pi's worker guards and the operator's
 floors (secret paths, worktree write scope, `exclude_paths`, no push outside the job branch). Recovery for any step:
@@ -918,6 +918,11 @@ detail names the native path when a `data/native.json` switch is on. `tests/e2e/
 NP-5a…NP-5c pin every role reaching the servers, the reserved name, and the lockdown with web and MCP optional.
 Recovery: switch `claude_ship` / `claude_research` off, remove the server from `mcp.json`, or revert.
 
+A `!command` value is never run for the Claude CLI. A server whose secret comes from a command runs with no `!` value:
+`"command": "docker", "args": ["run", "-i", "--rm", "--env-file", "<0600 file>", "<image>"]`, or a wrapper script
+that reads the file and execs the server; a literal or a `$VAR` set in the worker's env also loads. Since WP8,
+`/doctor`'s `mcp.native` warn names each server the native loader skips and why (never a value).
+
 ### WP6 per-job skills
 
 A job naming per-job skills (`cp_dispatch skills`) no longer routes to pi as `ineligible`. The native worker gets the
@@ -938,6 +943,46 @@ refused. The native Bash scope still refuses `scp` and `rsync`, so a native ops 
 dir>/…`. `tests/e2e/native-routing.test.ts` J1 (the ops row routes claude) and `tests/e2e/native-worker-tools.test.ts`
 NP-7a (a stub `ssh` sees the agent, one audit row, the key read and README write refused; a plain planner beside it
 gets no agent and keeps `GIT_SSH_COMMAND`) pin it. Recovery: revert (ops goes back to pi by the selection refusal).
+
+### WP8 GitHub parity (G1–G5)
+
+Every new tool runs in the claude-worker process (the in-process picp MCP server), so the CLI child's env is unchanged
+(WP3) and no token reaches it; every write is limited to the job's origin repo, its own PR, or an issue it names.
+
+- G1, owner-scoped reads (planner only, off by default): `data/gh-read.json` `{"owners": ["acme"]}` grants owners
+  whose repos a planner's `gh_read` may read. No file is no grant: today's origin-only refusals hold. The worker reads
+  it each planner turn (`plannerReadOwners`, `SpikeJob.ghReadOwners`); invalid JSON, an unknown key, a non-array, more
+  than 50 entries or a non-owner name throws naming the file, and the turn fails closed. Implementers and Codex never
+  carry owners. `gh_read` adds `search prs|issues|commits` (query terms in `args`). Scopes are `-R`/`--repo` values on
+  every verb but `api` (a repo: the origin or a granted owner's; `pr view|diff|checks` then need `number`),
+  `--owner` and `org:`/`user:`/`owner:` qualifiers (a granted owner), `repo:` qualifiers, and `api repos/<owner>/…`
+  paths, matched case-insensitively. A search needs one positive scope; one with `OR` or parentheses is refused, so a
+  scope binds the whole query. Write, host, browser and watch flags and graphql stay refused.
+- G2, `issue_comment {issue, body}` (implementer): the issue must be named in the job brief (`#n` or an origin
+  `/issues/n` URL) or closed by the job PR (`closingIssuesReferences` of the origin, or `Closes|Fixes|Resolves #n` in
+  its body); `repos/<origin>/issues/<n>` must not be a PR. Any other number, a PR or another repo is refused, naming the
+  allowed set. On delivery `local` only brief-named issues qualify.
+- G3, `pr_review_reply {comment_id, body}` and `pr_thread_resolve {thread_id}` (implementer), on the job's own PR (the
+  `native-pr.json` record, else the job branch's same-repo PR): the reply GETs the comment and refuses another PR's or a
+  reply's id (naming the top-level id); the resolve reads the thread node and refuses another PR's, and an already
+  resolved thread is a no-op. Bodies go through `-f body=`/`--body`, never `-F` (which reads `@file`). `gh_read`
+  `pr threads` is the one fixed graphql read: each review thread's `thread_id`, `isResolved`, `isOutdated`, path, line
+  and comments (`comment_id`, author, body cut at 400 characters).
+- G4, planner fetch: planners get `git_fetch` (origin, in the worktree only), and Bash `git fetch|pull` names it.
+  `api repos/<origin>/commits` and `commits/<sha>` never counted toward the CI snapshot; an `api` call with
+  `-f`/`-F`/`-X` now names the fix: a GET takes its query in path (`repos/<owner>/<repo>/commits?sha=main&per_page=5`).
+- G5, `/doctor` `mcp.native` (warn): when a `data/native.json` switch is on and the Claude loader would skip a server
+  of `mcp.json` (as the parent's env resolves it), one finding names each server and its reason, never a value; none is
+  emitted when nothing is skipped. `!command` values are still not run (WP5 has the env-file pattern).
+
+`tests/e2e/native-forge-parity.test.ts` NF-1 (granted reads reach gh; other owners, an unscoped search, `-X POST` and
+graphql refused; an implementer and an ungranted planner refused), NF-1b (an invalid grant fails the job before the
+CLI starts), NF-2 (two issue comments post; 99, a PR and another
+repo's issue refused), NF-3 (no PR yet; threads, one reply and one resolve post, the rest refused) and NF-4 (the
+planner's fetch shows upstream main in Bash, the `-F` remedy, teardown passes), and
+`tests/e2e/host-compatibility.test.ts` P24b (`mcp.native`) pin it; NP-1a…NP-1c still pin the origin-only reads.
+Recovery: delete `data/gh-read.json`, switch
+`claude_ship` / `claude_research` off, or revert.
 
 ## Codex CLI workers (C0–C8)
 

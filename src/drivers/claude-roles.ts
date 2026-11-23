@@ -1,8 +1,8 @@
 /** N4c: the native tool set and the Edit/Write scope per role: planner (research), implementer and (N4h) reviewer. */
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { paths, type Role } from "../contracts.ts";
+import { LAYOUT, paths, type Role } from "../contracts.ts";
 import { liveGrants, MandateStore } from "../mandate.ts";
 import { loadMandateDefaults } from "../mandate-defaults.ts";
 import { SECRET_ENV_NAME } from "../web-egress.ts";
@@ -51,11 +51,36 @@ export function reviewerReadGuard(job: SpikeJob): SpikeGuard {
 }
 
 /** N4d: the implementer's picp MCP tools beside `report_result` (claude-forge-tools.ts), in the lockdown's surface. */
-export const FORGE_TOOL_NAMES = ["git_push", "git_fetch", "pr_create", "pr_edit", "gh_read"] as const;
-/** WP1: a planner reads GitHub through gh_read alone; forge writes stay off (U1). */
+export const FORGE_TOOL_NAMES = ["git_push", "git_fetch", "pr_create", "pr_edit", "gh_read", "issue_comment", "pr_review_reply", "pr_thread_resolve"] as const;
+/** WP1/WP8: a planner reads GitHub through gh_read and fetches origin with git_fetch; forge writes stay off (U1). */
 export const roleForgeTools = (role: Role): readonly string[] =>
-	({ implementer: FORGE_TOOL_NAMES, research: ["gh_read"], reviewer: [] })[nativeRole(role)];
+	({ implementer: FORGE_TOOL_NAMES, research: ["git_fetch", "gh_read"], reviewer: [] })[nativeRole(role)];
 export const roleMcpTools = (role: Role): readonly string[] => roleForgeTools(role).map((name) => `mcp__picp__${name}`);
+
+const GH_READ_GRANT_KEYS = new Set(["owners"]);
+const GH_READ_OWNERS_MAX = 50;
+/** WP8: `data/gh-read.json`'s owners a planner's gh_read may read; no file is none. Invalid throws, naming the file. */
+export function plannerReadOwners(home: string): string[] {
+	if (home === "") throw new Error("Claude CLI worker started without CP_HOME; its gh_read grant cannot be read");
+	const file = join(home, LAYOUT.data, "gh-read.json");
+	if (!existsSync(file)) return [];
+	const bad = (why: string) => new Error(`${file}: ${why}; fix or delete it (the planner's gh_read owner grant)`);
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(file, "utf8"));
+	} catch (error) {
+		throw bad(`not valid JSON (${(error as Error).message.slice(0, 120)})`);
+	}
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw bad('expected an object like {"owners": ["acme"]}');
+	const unknown = Object.keys(parsed).find((key) => !GH_READ_GRANT_KEYS.has(key));
+	if (unknown !== undefined) throw bad(`unknown key "${unknown}"`);
+	const owners = (parsed as { owners?: unknown }).owners ?? [];
+	if (!Array.isArray(owners)) throw bad('"owners" must be an array of GitHub owner names');
+	if (owners.length > GH_READ_OWNERS_MAX) throw bad(`"owners" lists ${owners.length} entries, at most ${GH_READ_OWNERS_MAX}`);
+	const invalid = owners.find((owner) => typeof owner !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(owner));
+	if (invalid !== undefined) throw bad(`"owners" entry ${JSON.stringify(invalid).slice(0, 60)} is not a GitHub owner name`);
+	return owners as string[];
+}
 
 const CHILD_IDENTITY = ["CP_JOB_ID", "CP_KIND", "CP_DELIVERY", "CP_ROLE", "CP_WORKTREE", "CP_ARTIFACT_PATH", "CP_BASE_BRANCH"] as const;
 const CHILD_TOOL_VARS = [
