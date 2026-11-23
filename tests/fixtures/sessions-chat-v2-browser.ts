@@ -842,7 +842,8 @@ try {
 		const look = `(() => { const q = s => document.querySelector(s), h = s => Math.round(q(s)?.getBoundingClientRect().height ?? 0), cs = s => q(s) && getComputedStyle(q(s)), r = s => q(s).getBoundingClientRect();
 			const shown = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			return { inspector: !!q("aside.workspace-context"), sheet: !!q("dialog[open]"), heading: h(".session-heading"), bar: h(".session-bar"),
-				rail: shown(".session-sidebar .shell-icon-nav > a").map(a => a.textContent).join(), drawer: shown(".workspace-sessions[open] .shell-icon-nav > a").map(a => a.textContent).join(),
+				rail: shown(".session-sidebar > .shell-sidebar-nav > a .shell-nav-label").map(a => a.textContent).join(), icons: shown(".session-sidebar .shell-icon-nav > a").length,
+				search: shown(".session-sidebar > .shell-desktop-search").length, drawer: shown(".workspace-sessions[open] .shell-icon-nav > a").map(a => a.textContent).join(),
 				sides: innerWidth < 900 ? cs(".operator-composer").paddingLeft + " " + cs(".session-entries").paddingLeft : null,
 				field: innerWidth < 900 ? (() => { const t = r(".operator-composer textarea"), f = r(".operator-composer-footer"), b = q(".operator-composer-box"), p = cs(".operator-composer-box");
 					const inner = b.clientWidth - parseFloat(p.paddingLeft) - parseFloat(p.paddingRight);
@@ -855,7 +856,7 @@ try {
 		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .shell-icon-nav")`];
 		// The committed five are desktop, phone, 899, 900 and drawer; 1279 stays in the artifacts.
 		const shotsS: [string, number, number, Step[], object][] = [
-			["desktop", 1440, 1000, [], { inspector: true, sheet: false, heading: 48, rail: "Chat,Jobs,More", jobs: 0, small: "" }],
+			["desktop", 1440, 1000, [], { inspector: true, sheet: false, heading: 48, rail: "Chat,Jobs,More", icons: 0, search: 1, jobs: 0, small: "" }],
 			["1279", 1279, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
 			["900", 900, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
 			["phone", 390, 844, [], { inspector: false, sheet: false, heading: 45, bar: 53, sides: "10px 14px", field: "18px field over footer full width",

@@ -92,8 +92,8 @@
  .jobs-group > header { border-bottom: 0; padding-bottom: 12px; }
  .jobs-project h3 { padding: 12px; border: 1px solid var(--border); border-radius: 10px 10px 0 0; background: var(--surface); }
  .jobs-columns, .jobs-screen .job-row { display: grid; column-gap: 16px; align-items: center; }
- .jobs-columns-flight, .job-row-flight { grid-template-columns: 220px minmax(0,1fr) 104px 140px 120px 92px 88px 56px; }
- .jobs-columns-done, .job-row-done { grid-template-columns: 240px minmax(0,1fr) 112px 80px 96px 52px 56px; }
+ .jobs-columns-flight, .job-row-flight { grid-template-columns: 220px minmax(0,1fr) 104px 140px 120px 92px 128px 56px; }
+ .jobs-columns-done, .job-row-done { grid-template-columns: 240px minmax(0,1fr) 112px 80px 136px 52px 56px; }
  .job-row-queued { grid-template-columns: 220px minmax(0,1fr) auto; }
  .jobs-columns { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }
  .jobs-screen .job-row { min-height: 40px; row-gap: 0; padding: 4px 0; } /* Approved S4 compact desktop rows: 40px flight / 36px done; phone keeps 44px. */
@@ -108,7 +108,8 @@
  .job-project { display: inline; }
  .job-outcome > a { min-height: 24px; }
  .job-model, .job-ci { min-width: 0; overflow: hidden; white-space: nowrap; }
- .job-model code { display: block; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+ .job-model { display: flex; align-items: center; gap: 4px; }
+ .job-model code { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
  .job-ci { flex-wrap: nowrap; }
  .job-signals > *, .job-finished > *, .job-row-queued > .job-meta { grid-row: 1; font-size: 11px; }
  .job-clock, .job-outcome { grid-column: 3; }

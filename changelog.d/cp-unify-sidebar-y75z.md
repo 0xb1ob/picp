@@ -1,0 +1,1 @@
+- Viewer: the desktop Chat sidebar now opens with the same Search (⌘K) and Chat/Jobs/More nav as every other page, above Operator, project filters and Fleet; the icon-only search button and Chat/Jobs/More icons pinned at its bottom-left are gone.

@@ -17,6 +17,7 @@ import { TranscriptImages } from "../components/TranscriptImages.tsx";
 import { TranscriptFiles } from "../components/TranscriptFiles.tsx";
 import { TranscriptSkills } from "../components/TranscriptSkills.tsx";
 import { PendingBubble } from "../components/PendingBubble.tsx";
+import { DriverBadge } from "../components/JobSignals.tsx";
 import { transcriptHasSend } from "../pending-sends.ts";
 import { ShellContext } from "../components/Shell.tsx";
 import { WorkspaceStatus } from "../components/WorkspaceStatus.tsx";
@@ -72,6 +73,9 @@ function CtxPct({usage,label=false}: {usage:ContextUsage | null | undefined;labe
 }
 const workerPhase = (w: Worker): string => w.run_phase ?? "no run status";
 const workerDot = (w: Worker): string => w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown";
+/** The selected session's recorded CLI: operator, parent or the shown worker; undefined renders `unknown`. */
+const selectedDriver = (data: SessionsResponse) => data.selected === "you" ? data.operator_driver
+ : data.selected === "parent" ? data.parent.driver : data.workers.find(w => w.id === data.session_id)?.driver;
 /**
  * The conversation header's state line and dot, from recorded facts only: missing busy is unknown (never Idle), an older
  * file names no model, and a parent's recorded activity is not liveness.
@@ -276,7 +280,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
   <details class="session-bar-menu session-bar-more">
    <summary aria-label="More" title="More"><Icon name="more"/>{alert && <span class="shell-more-dot" role="status" aria-label="Version alert"/>}</summary>
    <div class="session-bar-sheet">
-    <p class="session-bar-state" role="status"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></p>
+    <p class="session-bar-state" role="status"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><DriverBadge driver={selectedDriver(data)}/><CtxPct usage={context} label/></p>
     <nav class="session-bar-views" aria-label="Session streams">
      {views.map(([id,label]) => <a key={id} href={sessionHref(id)} aria-current={data.selected === id ? "page" : undefined} onClick={closeMenu}>{label}</a>)}
      {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)} aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}><span class={`session-dot session-dot-${workerDot(w)}`}/><span>{w.id}</span><small>{workerPhase(w)}</small></a>)}
@@ -385,14 +389,13 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {shell.rail?.head}
    <div class="session-sidebar-chats">{chats(sessionHref("you"))}</div>
    {shell.rail?.status}
-   {shell.rail?.nav("Desktop primary")}
   </aside>
   {shell.resizer?.(261)}
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools} state={state} conversations={workspace.conversations}/>
    {/* One compact row: identity and actions from 900 px; on a phone the live/ask strip and the same actions. */}
    <header class="session-heading">{data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
-    <div class="session-heading-id"><strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong><span class="session-heading-state"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></span></div>
+    <div class="session-heading-id"><strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong><span class="session-heading-state"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><DriverBadge driver={selectedDriver(data)}/><CtxPct usage={context} label/></span></div>
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}
     {filterable && <div class="session-strip"><span class="session-strip-run" aria-hidden="true"/><span class="session-strip-count">{working.length ? `${working.length} working` : "none working"}</span>{working[0] && <span class="session-strip-job" title={working[0].id}>· {jobSuffix(working[0].id)}{stripClock !== null && ` · ${elapsed(stripClock)}`}</span>}
      {open.length > 0 && <><span class="session-strip-sep" aria-hidden="true"/><span class="workspace-badge workspace-badge-ask">{open.length}</span><span class="session-strip-what"> asked you</span></>}</div>}

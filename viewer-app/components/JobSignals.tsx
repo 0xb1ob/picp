@@ -38,3 +38,9 @@ export function CiSignal({job,badge=false}:{job:ViewerJob;badge?:boolean}) {
 export const shortModel = (id:string | null) => id ? id.slice(id.lastIndexOf("/")+1) : "-";
 
 export function ModelName({job}:{job:ViewerJob}) { const id=job.script_path ?? job.model; return <code title={id ?? undefined}>{shortModel(id)}</code>; }
+
+const DRIVER_LABEL: Record<string,string> = {pi:"pi", claude:"Claude CLI", codex:"Codex CLI"};
+/** The recorded CLI a session ran on; nothing recorded reads `unknown`, never a guess. */
+export function DriverBadge({driver}:{driver:string | null | undefined}) {
+ return <span class={`driver-badge${driver ? "" : " driver-badge-unknown"}`} title={driver ? "CLI driver, as recorded" : "CLI driver not recorded"}>{driver ? DRIVER_LABEL[driver] ?? driver : "unknown"}</span>;
+}
