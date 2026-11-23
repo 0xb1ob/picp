@@ -2318,6 +2318,13 @@ Other spawn-time policy, all fail-closed:
   entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause. Only STARTED carries
   the job as a candidate key, so a DROPPED notice is never superseded for lacking a
   fleet record.
+- **Native wait queue (cp-7qic R6).** A review, gate, confirmed revive, bounded-recovery revive, plain send or
+  pipeline advance that a full CLI refuses `occupied` is appended to `state/native-wait.json`
+  (`src/native-wait-queue.ts`, at most `NATIVE_WAIT_MAX` = 32, one entry per kind and job; a repeat returns the same
+  position) and answers `state: "queued"` (a send: receipt `queued` with `waiting`). It is drained by the lock owner
+  on the same triggers as the dispatch queue and before it, FIFO per CLI; each entry re-runs its full entry point on
+  the CLI it waits for, and a still-full head keeps its place and that CLI's later entries. Every start or drop is a
+  `recovery` wake-up (`NATIVE WAIT STARTED`/`DROPPED`); a send body lives in the run dir, never in the state file.
 - **Armed dispatch (unload-parent PR2).** A `cp_dispatch` refused only by open
   blockers (`BlockedDispatchError`; `when_ready` not `false`; never a pipeline
   or script job) is armed in `state/armed-dispatches.json`

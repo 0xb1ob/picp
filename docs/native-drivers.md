@@ -425,27 +425,31 @@ as `driver_override` (driver, quote, kind, entry id, control id) on the `routing
 `cp_dispatch driver` that differs from the job's row (absent = pi) is the parent's choice and is refused in every
 direction (pi ↔ claude ↔ codex: "a parent's driver choice is not an override"); one that matches the row is allowed and
 still needs that CLI's switch. A model-only override the configured CLI cannot run is refused, never routed to pi. A reviewer refused `occupied` is
-refused by name with the same waiting status; it may instead run in its own idle, held author's slot on the same CLI
+queued with the same waiting status (below); it may instead run in its own idle, held author's slot on the same CLI
 (`driver_reason` `borrowed: reviewer using held author's slot (<job>)`, routing line `slot="reviewer using held
-author's slot <job>"`), at most one reviewer per author; a `cp_send` to that author meanwhile is refused as waiting for
-the CLI's capacity until the verdict lands. Jobs that started on pi under the old fallback keep pi (D1).
+author's slot <job>"`), at most one reviewer per author; a `cp_send` to that author meanwhile is queued as "waiting for <CLI> capacity: its
+reviewer is using the held author's slot" and delivered on the same CLI once the reviewer exits. Jobs that started on pi under the old fallback keep pi (D1).
 
-Until the follow-up wait queue lands (R6 `state/native-wait.json`, T5–T11), these
-paths refuse by name on a full CLI instead of waiting:
-- reviews (`cp_review`, `cp_gate`, quality panels);
-- `cp_revive` and bounded recovery;
-- `cp_send` continuation;
-- pipeline retries;
-- planners started by `cp_pipeline`.
+**The wait queue (cp-7qic, R6).** Work on an existing job that a full CLI refuses `occupied` waits in
+`state/native-wait.json` (`src/native-wait-queue.ts`, at most 32 entries, one per kind and job) instead of refusing:
+- `cp_review` and `cp_gate` starts (and an automatic held-PR review), `state: queued` with the waiting text;
+- a confirmed `cp_revive` and bounded recovery's native revive (no recovery attempt spent);
+- a `cp_send` continuation (receipt `queued`, `waiting`; the body in `<runDir>/waiting-send-<ms>.md`, mode 0600);
+- a `cp_pipeline advance` whose implementer, gate or quality panel start is refused (`wait`, state unchanged).
 
-They never switch the CLI. The checks that prove the binding (cp-qmry):
+A `cp_pipeline start` whose planner's CLI is full queues the planner as a new job in the dispatch queue. The lock owner
+drains the wait queue on every slot free, teardown and scheduler tick, before the dispatch queue: FIFO per CLI, each
+entry re-running its full entry point on the same CLI; a still-full head keeps its place and every later entry of that
+CLI. Each start or drop is a `recovery` wake-up (`NATIVE WAIT STARTED`/`DROPPED`). `cp_next` lists the entries under
+`lined_up.waiting`. A steer, or a send with a task or model, is never queued and refuses by name. Old builds ignore the
+file: after a downgrade, re-issue what was waiting. Nothing here ever switches the CLI. The checks that prove the binding (cp-qmry):
 
 | Command | Proves |
 |---|---|
-| `npm run test:one -- tests/e2e/driver-hard-constraint.test.ts` | T1: a full codex queues the next job and starts it on codex, never pi (fails on base); T4: a parent's `driver: "pi"`, a model-only pick and a pi model refuse; the human's v2 pick runs pi, recorded |
-| `npm run test:one -- tests/e2e/driver-hard-constraint-claude.test.ts` | the reported bug with a fake `claude` (never skips; fails on base); missing CLI, auth failure, spent window and model-only switch refuse by name; a dashboard `dc-` pick switches only its job; parent and main-session picks refuse |
+| `npm run test:one -- tests/e2e/driver-hard-constraint.test.ts` | T1: a full codex queues the next job and starts it on codex, never pi (fails on base); T4: a parent's `driver: "pi"`, a model-only pick and a pi model refuse; the human's v2 pick runs pi, recorded; T5a/T5b/T6: a revive, a send and a pipeline advance wait for Codex CLI capacity and run on codex when it frees |
+| `npm run test:one -- tests/e2e/driver-hard-constraint-claude.test.ts` | the reported bug with a fake `claude` (never skips; fails on base); missing CLI, auth failure, spent window and model-only switch refuse by name; a dashboard `dc-` pick switches only its job; parent and main-session picks refuse; T7 a pipeline planner queues; T9–T11 a held author lends its slot to its own reviewer, a send waits for the verdict, an unrelated job keeps waiting |
 | `npm run test:one -- tests/e2e/codex-worker.test.ts` | a codex row refuses by name when off, ineligible, denied or full; `dry_run` reports the refusal as `error`; nothing runs on pi |
-| `npm run test:one -- tests/e2e/codex-reviewer.test.ts` | codex reviewers and quality voters never run on pi: switch off, a full slot and a signed-out CLI refuse by name; a voter that loses its slot abstains |
+| `npm run test:one -- tests/e2e/codex-reviewer.test.ts` | codex reviewers and quality voters never run on pi: switch off and a signed-out CLI refuse by name; a full slot queues reviews FIFO and runs them on codex when it frees (T8); a voter that loses its slot abstains |
 | `npm run test:one -- tests/claude-spike.test.ts` | the reviewer route never returns pi; only the subject's own idle, held, lendable author lends its slot |
 | `npm run test:one -- tests/e2e/native-routing.test.ts` | claude rows refuse by name (switch, CLI, window, auth, denied, model); the human pick switches one job, queued and armed included |
 | `npm run typecheck` | the new signatures compile across src, extensions and tests: `NativeDriverError.driver`, the cp_ask queued result, the v2 proof types, `SpawnRequest.borrowsSlotOf` |
