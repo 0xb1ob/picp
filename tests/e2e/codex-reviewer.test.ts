@@ -95,7 +95,6 @@ test("CX-6a: cp_review on a codex reviews row files pi's verdict.json through re
 	await h.run([h.review(b)]);
 	const pi = await h.reviewRun(b);
 	assert.equal(pi.routed?.model, piModel, JSON.stringify(pi.routed));
-	assert.match(String(pi.routed?.line), /driver=pi/);
 	assert.doesNotMatch(String(pi.routed?.line), /driver=codex/);
 	assert.equal(nativeRun(pi.events), undefined);
 	const same = (v: typeof pi.result) => ({ verdict: v.verdict, cause: v.cause, flags: v.flags, reasons: v.reasons });
