@@ -132,7 +132,7 @@ test("S5-status-css: from 900 px the footer is the chat's 37 px second row; the 
 	const d = await start(t);
 	const css = (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
 	const rule = (sheet: string, selector: string) => [...sheet.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
-	const split = css.indexOf("@media(min-width:900px){.workspace-jobs-open>kbd"), wide = css.indexOf("@media(min-width:1280px){.sessions:has(>.workspace-job)");
+	const split = css.indexOf("@media(min-width:900px){.workspace-jobs{inset"), wide = css.indexOf("@media(min-width:1280px){.sessions:has(>.workspace-job)");
 	assert.ok(split > 0 && wide > split, "the 900 px switch, then 1280 px");
 	const [phone, desktop] = [css.slice(0, split), css.slice(split, wide)];
 	assert.equal(rule(phone, ".workspace-status"), "", "phones have no footer rule");

@@ -1,0 +1,1 @@
+- Viewer: the operator chat's header no longer shows the `Jobs ⌘J` button; Ctrl/⌘ J, the Context card's All jobs and `/jobs` still open the Jobs drawer, and the rail's Jobs item still opens the Jobs page.
