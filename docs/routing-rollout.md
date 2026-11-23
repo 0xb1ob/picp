@@ -188,7 +188,7 @@ the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-driv
    ```
 
    Back up `data/routing.json` first (`cp -p data/routing.json data/routing.json.bak-<stamp>`), then check it with
-   `/doctor`: `models.planner` reports `driver=claude <model>; pi fallback …`.
+   `/doctor`: `models.planner` reports `driver=claude <model>, never pi; pi lane (unused) …`.
 2. **The switch.** Dashboard Settings → Native workers, or `data/native.json` `{"claude_research": true}`. Only local
    and answer research runs native, `max_concurrent` jobs at a time (default 1); pipeline research, reviews, gates and ship jobs stay pi. Ship
    implementers have their own switch, `claude_ship` (off by default; [native-drivers.md](native-drivers.md#native-ship-jobs-n4f)).
