@@ -32,15 +32,15 @@ not candidates passed over by the capacity comparison.
 
 | row | selector | preferred | then | effort |
 |---|---|---|---|---|
-| `risky-any` | planner, risk high | see defaults/routing.default.json | see defaults/routing.default.json | xhigh |
-| `risky-ship` | implementer, risk high | see defaults/routing.default.json | see defaults/routing.default.json | high |
 | `reviews` | gate-reviewer | see defaults/routing.default.json | see defaults/routing.default.json | high |
-| `research-big` | planner, scope L | see defaults/routing.default.json | see defaults/routing.default.json | high |
-| `big-ship` | implementer, scope M/L | see defaults/routing.default.json | see defaults/routing.default.json | medium |
-| `small-ship` | implementer, scope S | see defaults/routing.default.json | see defaults/routing.default.json | high |
+| `implementer-small` | implementer, scope S and risk low | see defaults/routing.default.json | see defaults/routing.default.json | high |
+| `implementer-default` | implementer, any other cell | see defaults/routing.default.json | see defaults/routing.default.json | medium |
+
+cp-4iyy collapsed the template to these rows plus `planner-default`: the earlier `risky-any`, `research-big`,
+`risky-ship` and `big-ship` rows are gone, and risk still gates dispatch but no longer picks a planner's model.
 
 Profiles (`profiles/*.md`) name no model since R1 PR4; a profile's `thinking` is the
-effort only where the row names none. Ordinary planning and QA resolve from the template's
+effort only where the row names none. Planning, ops and QA, at every scope and risk, resolve from the template's
 last row, `planner-default`; a home whose rubric left a role uncovered gets that role's row
 from `defaults/routing.role-defaults.json` once (contracts.md §Routing config). Models: see that file.
 
@@ -209,7 +209,8 @@ The operator does this by hand. picp never edits the home's data files. The mech
 
 1. **Back up** both files with dated copies: `cp data/routing.json data/routing.json.<date>.bak` and
    `cp data/native.json data/native.json.<date>.bak`.
-2. **Rows.** In `data/routing.json`, set `"driver": "claude"` on `risky-ship`, `big-ship`, `small-ship` and `reviews`.
+2. **Rows.** In `data/routing.json`, set `"driver": "claude"` on `implementer-small`, `implementer-default` and
+   `reviews` (a home scaffolded before cp-4iyy: `risky-ship`, `big-ship`, `small-ship` and `reviews`).
    Each row keeps its explicit `anthropic/claude-…` model, and that model stays in `allow`.
 3. **Switches.** In `data/native.json`, set `"claude_ship": true` and `"claude_review": true`, and keep
    `"max_concurrent": 1`. When every slot is taken, a new row-preferred job runs on pi with `driver_reason`
@@ -244,7 +245,7 @@ every codex switch stays OFF. The mechanism is in [native-drivers.md](native-dri
    Settings writes `driver: "codex"` on that rule through the audited write (SD-codex-rule); picking pi again deletes
    it. The Workers CLI leaves a codex rule alone.
 5. **Order.** Research first (`codex_research`), then reviews (the `reviews` row, `codex_review`), then ship (the
-   `small-ship` row, `codex_ship`). Move to the next class only after five clean jobs in the current one.
+   `implementer-small` row, `codex_ship`). Move to the next class only after five clean jobs in the current one.
 6. **What to watch.**
    - Job detail's Driver fact: `codex, effort <level>` for a codex job, `pi (preferred codex: <reason>)` for a fallback.
    - The chat footer's Codex item (shown while any codex switch is on): `Codex ok`, `Codex limited until HH:MMZ`,

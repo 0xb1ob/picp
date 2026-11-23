@@ -76,14 +76,14 @@ async function settingsTab(h: Awaited<ReturnType<typeof home>>) {
 }
 
 // Scenario: switching the workers CLI pi↔native filters the model lists and validates rows
-//   Given the shipped rubric with small-ship on openai/gpt-5 and planner-default at thinking minimal
+//   Given the shipped rubric with implementer-small on openai/gpt-5 and planner-default at thinking minimal
 //   When the operator picks the Claude CLI, then pi again
 //   Then only Claude models and efforts are offered, both rows are named and Save is off until they are fixed
 test("Workers CLI: native filters every row's model and effort list, names the rows to fix, saves rows and switches together", { timeout: 120_000 }, async (t) => {
 	const h = await home(t, (root) => {
 		const routing = JSON.parse(readFileSync(join(root, LAYOUT.routingFile), "utf8")) as Json;
 		for (const row of routing.rubric as Json[]) {
-			if (row.id === "small-ship") row.model = "openai/gpt-5";
+			if (row.id === "implementer-small") row.model = "openai/gpt-5";
 			if (row.id === "planner-default") row.thinking = "minimal";
 		}
 		put(join(root, LAYOUT.routingFile), JSON.stringify(routing));
@@ -93,8 +93,8 @@ test("Workers CLI: native filters every row's model and effort list, names the r
 	assert.deepEqual([(await h.field("workers.driver"))?.value, optionValues(cli)], ["pi", ["pi", "claude"]]);
 	const cliSource = () => ui.section("Model routing").querySelector(".settings-cli .settings-meta")?.textContent;
 	assert.equal(cliSource(), "from code", "no row names a driver yet");
-	const small = ui.row("small-ship");
-	assert.match(small.querySelector(".settings-rule-name")?.textContent ?? "", /^Small ship$/, "a human label over the row id");
+	const small = ui.row("implementer-small");
+	assert.match(small.querySelector(".settings-rule-name")?.textContent ?? "", /^Small implementer$/, "a human label over the row id");
 	assert.deepEqual(groupLabels(small.querySelector("select")!), ["anthropic", "openai"], "pi offers every model pi lists");
 	assert.ok(optionValues(ui.thinking(small)).includes("minimal"), "pi offers its own levels");
 	const save = () => ui.button(ui.section("Model routing"), "Save");
@@ -103,9 +103,9 @@ test("Workers CLI: native filters every row's model and effort list, names the r
 	for (const li of ui.section("Model routing").querySelectorAll("li.settings-rule")) {
 		assert.deepEqual(groupLabels(li.querySelector("select")!), ["anthropic"], `${li.querySelector("code")?.textContent}: only anthropic/claude-* under native`);
 	}
-	assert.deepEqual(optionValues(ui.thinking(ui.row("big-ship"))), ["", ...CLAUDE_EFFORTS], "the Claude driver's effort levels, from the session");
+	assert.deepEqual(optionValues(ui.thinking(ui.row("implementer-default"))), ["", ...CLAUDE_EFFORTS], "the Claude driver's effort levels, from the session");
 	const block = ui.section("Model routing").querySelector(".settings-cli-block")?.textContent ?? "";
-	assert.match(block, /These rules need a new model, effort or CLI: Small ship \(small-ship\), Planner \(planner-default\)\./);
+	assert.match(block, /These rules need a new model, effort or CLI: Small implementer \(implementer-small\), Planner \(planner-default\)\./);
 	assert.match(small.querySelector(".settings-rule-error")?.textContent ?? "", /anthropic\/claude-… model, not openai\/gpt-5/);
 	assert.match(ui.row("planner-default").querySelector(".settings-rule-error")?.textContent ?? "", /Effort minimal has no Claude equivalent/);
 	assert.ok(save().hasAttribute("disabled"), "Save stays off while a row cannot run native");
@@ -121,16 +121,16 @@ test("Workers CLI: native filters every row's model and effort list, names the r
 	assert.equal(saved?.status, 200);
 	assert.equal(saved?.json.changes["workers.driver"], "claude");
 	const routing = h.json(LAYOUT.routingFile);
-	assert.deepEqual((routing.rubric as Json[]).map((row) => row.driver), Array(7).fill("claude"), "every row runs native");
-	const smallRow = (routing.rubric as Json[]).find((row) => row.id === "small-ship")!;
+	assert.deepEqual((routing.rubric as Json[]).map((row) => row.driver), Array(4).fill("claude"), "every row runs native");
+	const smallRow = (routing.rubric as Json[]).find((row) => row.id === "implementer-small")!;
 	assert.deepEqual([smallRow.model, smallRow.fallbacks], ["anthropic/claude-haiku-5", ["anthropic/claude-opus-5-5", "openai/gpt-6.1-sol"]], "fallbacks kept as they were");
 	assert.deepEqual(h.json(`${LAYOUT.data}/native.json`), { claude_research: true, claude_ship: true, claude_review: true });
 	assert.deepEqual([(await h.field("workers.driver"))?.value, (await h.field("workers.native_claude_research"))?.value], ["claude", true]);
 
 	await until(cliSource, (source) => source === "from file", "the re-read");
 	await ui.choose(ui.section("Model routing").querySelector("#setting-workers-driver")!, "pi");
-	assert.deepEqual(groupLabels(ui.row("small-ship").querySelector("select")!), ["anthropic", "openai"], "pi lists every model again");
-	assert.ok(optionValues(ui.thinking(ui.row("small-ship"))).includes("minimal"));
+	assert.deepEqual(groupLabels(ui.row("implementer-small").querySelector("select")!), ["anthropic", "openai"], "pi lists every model again");
+	assert.ok(optionValues(ui.thinking(ui.row("implementer-small"))).includes("minimal"));
 	await ui.press(ui.section("Model routing"), "Save");
 	await until(() => ui.posts().length, (n) => n === 2, "the pi save");
 	assert.deepEqual(ui.posts()[1]?.json.changes, { "workers.driver": "pi" });
@@ -190,7 +190,7 @@ test("native + an openai model is refused before any write, for the parent and f
 	assert.equal((both.body.errors as string[]).length, 2, "the model and the effort, each named");
 	const workers = await h.post("/api/settings/apply", { changes: { "workers.driver": "claude" } });
 	assert.equal(workers.status, 400);
-	assert.deepEqual(workers.body.errors, ["row risky-any: the Claude CLI runs only an anthropic/claude-… model, not openai/gpt-5; pick one for this row"]);
+	assert.deepEqual(workers.body.errors, ["row reviews: the Claude CLI runs only an anthropic/claude-… model, not openai/gpt-5; pick one for this row"]);
 	assert.equal((await h.post("/api/settings/apply", { changes: { "workers.driver": "claude" } }, true)).status, 400, "a dry run refuses the same way");
 	assert.deepEqual([readFileSync(join(h.root, LAYOUT.data, "parent.json"), "utf8"), readFileSync(join(h.root, LAYOUT.routingFile), "utf8")], before, "nothing written");
 	assert.equal(existsSync(join(h.root, LAYOUT.data, "native.json")), false, "no native switch turned on");
@@ -237,7 +237,7 @@ test("C1b codex row: a changed codex row is refused while codex_research is off;
 
 // Scenario: C1b review item 2 — a legacy-role home keeps its hand-written codex row through an unrelated write
 //   Given planner-default spelled with the legacy role `researcher`, hand-written onto codex, and no native.json
-//   When a rubric write changes only small-ship's model, then one changes the codex row's model
+//   When a rubric write changes only implementer-small's model, then one changes the codex row's model
 //   Then the first saves with the codex row as spelled; the second is refused naming codex_research
 test("SD-legacy: a legacy-role codex row while codex is off does not refuse an unrelated rubric write", { timeout: 120_000 }, async (t) => {
 	const h = await home(t, (root) => {
@@ -251,10 +251,10 @@ test("SD-legacy: a legacy-role codex row while codex is off does not refuse an u
 	const shown = (await h.field("models.rubric"))?.value as Json[];
 	assert.equal(shown.find((row) => row.id === "planner-default")?.role, "planner");
 	const rubric = (over: Record<string, Json>) => shown.map((row) => (over[row.id as string] ? { ...row, ...over[row.id as string] } : row));
-	const saved = await h.post("/api/settings/apply", { changes: { "models.rubric": rubric({ "small-ship": { model: "anthropic/claude-haiku-5" } }) } });
+	const saved = await h.post("/api/settings/apply", { changes: { "models.rubric": rubric({ "implementer-small": { model: "anthropic/claude-haiku-5" } }) } });
 	assert.equal(saved.status, 200, JSON.stringify(saved.body).slice(0, 400));
 	const after = h.json(LAYOUT.routingFile).rubric as Json[];
-	assert.equal(after.find((row) => row.id === "small-ship")?.model, "anthropic/claude-haiku-5");
+	assert.equal(after.find((row) => row.id === "implementer-small")?.model, "anthropic/claude-haiku-5");
 	assert.deepEqual(after.find((row) => row.id === "planner-default"), seeded, "the codex row stays as spelled, role researcher included");
 	assert.equal(existsSync(join(h.root, LAYOUT.data, "native.json")), false);
 	const changed = await h.post("/api/settings/apply", { changes: { "models.rubric": rubric({ "planner-default": { model: "openai/gpt-6.1-sol" } }) } });
@@ -262,12 +262,12 @@ test("SD-legacy: a legacy-role codex row while codex is off does not refuse an u
 	assert.match((changed.body.errors as string[]).join("\n"), /row planner-default names the codex driver while codex_research is off/);
 });
 
-// Scenario (C8 h): Given codex rows on reviews, planner-default and small-ship; only codex_review on, then codex_ship
+// Scenario (C8 h): Given codex rows on reviews, planner-default and implementer-small; only codex_review on, then codex_ship
 //   When a rubric write changes one codex row's model at a time
-//   Then reviews saves under codex_review and small-ship under codex_ship; any other is refused naming its own switch,
+//   Then reviews saves under codex_review and implementer-small under codex_ship; any other is refused naming its own switch,
 //   with nothing written. Before C8 every row keyed on codex_research and the first save was refused.
 test("SD-codex-class: a changed codex row saves under its own class switch and is refused naming it otherwise", { timeout: 120_000 }, async (t) => {
-	const ids = ["reviews", "planner-default", "small-ship"];
+	const ids = ["reviews", "planner-default", "implementer-small"];
 	const h = await home(t, (root) => {
 		const routing = JSON.parse(readFileSync(join(root, LAYOUT.routingFile), "utf8")) as Json;
 		for (const row of routing.rubric as Json[]) if (ids.includes(row.id as string)) Object.assign(row, { model: "openai/gpt-5", thinking: "high", driver: "codex" });
@@ -291,9 +291,9 @@ test("SD-codex-class: a changed codex row saves under its own class switch and i
 	assert.equal(modelOf("reviews"), "openai/gpt-6.1-sol");
 	await refused("planner-default", "codex_research");
 	put(join(h.root, LAYOUT.data, "native.json"), JSON.stringify({ codex_ship: true }));
-	const ship = await write("small-ship");
+	const ship = await write("implementer-small");
 	assert.equal(ship.status, 200, JSON.stringify(ship.body).slice(0, 400));
-	assert.deepEqual([modelOf("small-ship"), (h.json(LAYOUT.routingFile).rubric as Json[]).find((row) => row.id === "small-ship")?.driver], ["openai/gpt-6.1-sol", "codex"]);
+	assert.deepEqual([modelOf("implementer-small"), (h.json(LAYOUT.routingFile).rubric as Json[]).find((row) => row.id === "implementer-small")?.driver], ["openai/gpt-6.1-sol", "codex"]);
 	await refused("reviews", "codex_review");
 });
 
@@ -364,7 +364,7 @@ test("SD-codex-rule: a rule's CLI offers Codex under its class switch, saves dri
 
 	assert.deepEqual(optionValues(cli("reviews")), ["pi", "codex"]);
 	assert.deepEqual([codexOption("reviews").hasAttribute("disabled"), codexOption("reviews").textContent], [false, "Codex CLI"]);
-	for (const [id, name] of [["planner-default", "codex_research"], ["small-ship", "codex_ship"]] as const) {
+	for (const [id, name] of [["planner-default", "codex_research"], ["implementer-small", "codex_ship"]] as const) {
 		assert.ok(codexOption(id).hasAttribute("disabled"), `${id}: no Codex while ${name} is off`);
 		assert.match(codexOption(id).textContent ?? "", new RegExp(`${name} is off`));
 	}
@@ -398,7 +398,7 @@ test("SD-codex-rule: a rule's CLI offers Codex under its class switch, saves dri
 		assert.equal(auditTypes().at(-1), "refused");
 	};
 	await refused({ "planner-default": { driver: "codex", model: "openai/gpt-5" } }, /row planner-default names the codex driver while codex_research is off/);
-	await refused({ "small-ship": { driver: "codex" } }, /row small-ship: the Codex CLI runs only an openai\/gpt-… model, not anthropic\/claude-sonnet-5-5/);
+	await refused({ "implementer-small": { driver: "codex" } }, /row implementer-small: the Codex CLI runs only an openai\/gpt-… model, not anthropic\/claude-sonnet-5-5/);
 
 	const driversOf = () => fileRows().map((row) => [row.id, row.driver]);
 	const claude = await h.post("/api/settings/apply", { changes: { "workers.driver": "claude" } });
@@ -427,8 +427,8 @@ test("SD-codex-rule: a rule's CLI offers Codex under its class switch, saves dri
 	const { driver: _driver, ...piRow } = want;
 	assert.deepEqual(fileRow("reviews"), piRow, "pi deletes the driver key and keeps the row");
 	await until(() => (cli("reviews") as HTMLSelectElement).value, (value) => value === "pi", "the re-read after the pi save");
-	assert.ok(codexOption("small-ship").hasAttribute("disabled"), "small-ship stays without Codex while codex_ship is off");
-	assert.match(codexOption("small-ship").textContent ?? "", /codex_ship is off/);
+	assert.ok(codexOption("implementer-small").hasAttribute("disabled"), "implementer-small stays without Codex while codex_ship is off");
+	assert.match(codexOption("implementer-small").textContent ?? "", /codex_ship is off/);
 	await ui.choose(cli("reviews"), "codex");
 	assert.equal(ui.section("Model routing").querySelector(".settings-unsaved")?.textContent, "1 unsaved change");
 	await ui.choose(cli("reviews"), "pi");

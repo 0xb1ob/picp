@@ -1,0 +1,1 @@
+- Routing: the shipped template (`defaults/routing.default.json`) is now four rows — `reviews`, `implementer-small` (scope S and risk low, Sonnet 5.5 high), `implementer-default` (Opus 5.5 medium) and `planner-default` — replacing `risky-any`, `research-big`, `risky-ship` and `big-ship`; an existing `data/routing.json` is untouched.
