@@ -1,0 +1,1 @@
+- Test-only: CX-7d (`tests/e2e/codex-ship.test.ts`) no longer flakes under load; it waits for the first patch job's worker to exit before it resets the fake Codex script, so a late settle nudge cannot consume the shared turn cursor.
