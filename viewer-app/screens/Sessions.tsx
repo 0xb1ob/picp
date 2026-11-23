@@ -391,6 +391,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {shell.rail?.status}
    {shell.rail?.nav("Desktop primary")}
   </aside>
+  {shell.resizer?.(261)}
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools} state={state} conversations={workspace.conversations}/>
    {/* One compact row: identity and actions from 900 px; on a phone the live/ask strip and the same actions. */}

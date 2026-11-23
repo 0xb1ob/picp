@@ -221,11 +221,11 @@
  .workspace-status-live > .workspace-status-dot { background: var(--green); }
 }
 @media (min-width: 1280px) {
- .sessions:has(> .workspace-job) { grid-template-columns: 261px minmax(0,1fr) 521px; }
+ .sessions:has(> .workspace-job) { grid-template-columns: var(--sidebar-width,261px) minmax(0,1fr) 521px; }
  .sessions:has(> .workspace-job) > .page-header > .page-header-end { right: 529px; }
  .workspace-job { grid-column: 3; border-left: 1px solid var(--divider); }
  .workspace-job-bar { padding-right: 4px; }
- .sessions:has(> aside.workspace-context) { grid-template-columns: 261px minmax(0,1fr) 340px; }
+ .sessions:has(> aside.workspace-context) { grid-template-columns: var(--sidebar-width,261px) minmax(0,1fr) 340px; }
  .sessions:has(> aside.workspace-context) > .page-header > .page-header-end { right: 348px; }
  aside.workspace-context { position: relative; grid-column: 3; grid-row: 1 / -1; width: auto; border-left-color: var(--divider); box-shadow: none; }
  aside.workspace-context .workspace-context-head { padding-right: 4px; }
