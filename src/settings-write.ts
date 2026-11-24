@@ -36,15 +36,13 @@ import {
 	normalizeLegacyRoles,
 	type RoutingConfig,
 	RoutingConfigSchema,
-	type RoutingRule,
 } from "./contracts.ts";
-import { isNativeModel, NATIVE_EFFORTS } from "./drivers/claude.ts";
-import { CODEX_EFFORTS, codexPersistRefusal, codexRowClass, isCodexModel } from "./drivers/codex.ts";
+import { isNativeModel } from "./drivers/claude.ts";
 import { PACKAGE_ROOT } from "./home.ts";
 import { atomicWriteText, durableAppend } from "./json-store.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
 import { operatorCompactDefault } from "./operator-compact.ts";
-import { deniedFor, isAllowed } from "./routing.ts";
+import { claudeEfforts, routingRowRefusals } from "./routing-row-checks.ts";
 import { readSettings } from "./settings.ts";
 import { acquireSettingsLock } from "./settings-lock.ts";
 import { CODEX_CLASSES } from "./worker-driver.ts";
@@ -331,8 +329,6 @@ function installedHome(home: string): boolean {
 
 /** The data/native.json switches the workers CLI turns on together (claude) or deletes (pi: absent is off). */
 const NATIVE_SWITCHES = ["claude_research", "claude_ship", "claude_review"] as const;
-/** What a claude parent or row may run: off, plus the levels the SDK serves as `effort` (`assertNativeEffort`). */
-const CLAUDE_EFFORTS: readonly string[] = ["off", ...NATIVE_EFFORTS];
 const NATIVE_KEYS: Readonly<Record<"parent" | "operator", readonly SettingKey[]>> = {
 	parent: ["models.parent_driver", "models.parent", "models.parent_thinking"],
 	operator: ["models.operator_driver", "models.operator", "models.operator_thinking"],
@@ -369,27 +365,9 @@ function setNativeSwitches(doc: Record<string, unknown>, driver: string): boolea
 function refuseRoutingRows(home: string, config: RoutingConfig, prior: Record<string, unknown>): void {
 	// `config` is legacy-role normalised, so the prior rows are too: `kept` compares like with like.
 	const priorRows = (Array.isArray(prior.rubric) ? (normalizeLegacyRoles(clone(prior.rubric)) as unknown[]) : []).filter(isObject);
-	const was = new Map(priorRows.map((row) => [row.id, row.model]));
 	const rows = new Map(priorRows.map((row) => [row.id, row]));
-	// Condition 2 (C1b): while codex is off, picp writes no new or changed codex row; an unchanged hand-written one stays.
-	const errors = config.rubric.flatMap((row: RoutingRule) => {
-		const out: string[] = [];
-		const kept = JSON.stringify(rows.get(row.id)) === JSON.stringify(row);
-		const off = row.driver === "codex" && !kept ? codexPersistRefusal(home, `row ${row.id}`, codexRowClass(row.role)) : undefined;
-		if (off !== undefined) out.push(off);
-		if (row.driver === "claude" && !isNativeModel(row.model)) out.push(`row ${row.id}: the Claude CLI runs only an anthropic/claude-… model, not ${row.model}; pick one for this row`);
-		if (row.driver === "claude" && row.thinking !== undefined && !CLAUDE_EFFORTS.includes(row.thinking)) out.push(`row ${row.id}: thinking ${row.thinking} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);
-		if (row.driver === "codex" && !isCodexModel(row.model)) out.push(`row ${row.id}: the Codex CLI runs only an openai/gpt-… model, not ${row.model}`);
-		if (row.driver === "codex" && row.thinking !== undefined && !(CODEX_EFFORTS as readonly string[]).includes(row.thinking)) {
-			out.push(`row ${row.id}: thinking ${row.thinking} has no Codex effort; use ${CODEX_EFFORTS.join(", ")}`);
-		}
-		const toCodex = row.driver === "codex" && rows.get(row.id)?.driver !== "codex";
-		if (was.get(row.id) === row.model && !toCodex) return out;
-		if (!isAllowed(config, row.model)) out.push(`row ${row.id}: models.allow does not permit ${row.model}, so routing would refuse it`);
-		const pattern = deniedFor(config, row.role, row.model);
-		if (pattern !== undefined) out.push(`row ${row.id}: deny_by_role.${row.role} matches ${pattern} for ${row.model}`);
-		return out;
-	});
+	const errors = config.rubric
+		.flatMap((row) => routingRowRefusals(home, config, row, rows.get(row.id)).map((each) => each.message));
 	if (errors.length) throw new Refusal(400, "data/routing.json would name a model its driver or allowlist refuses", errors);
 }
 
@@ -401,7 +379,11 @@ function refuseNative(role: "parent" | "operator", doc: Record<string, unknown>,
 	// No operator model at all would start nothing on Restart session (nativeOperatorSpawn refuses it).
 	if (model === undefined && role === "operator") errors.push("models.operator: the claude operator needs an anthropic/claude-… model; none is set in data/operator.json or CP_OPERATOR_MODEL");
 	if (model !== undefined && !(typeof model === "string" && isNativeModel(model))) errors.push(`models.${role}: the claude ${role} runs only an anthropic/claude-… model, not ${JSON.stringify(model)}`);
-	if (doc.thinking !== undefined && !(typeof doc.thinking === "string" && CLAUDE_EFFORTS.includes(doc.thinking))) errors.push(`models.${role}_thinking: ${JSON.stringify(doc.thinking)} has no Claude effort; use ${CLAUDE_EFFORTS.join(", ")}`);
+	const efforts = claudeEfforts();
+	if (doc.thinking !== undefined && !(typeof doc.thinking === "string" && efforts.includes(doc.thinking))) {
+		const levels = efforts.join(", ");
+		errors.push(`models.${role}_thinking: ${JSON.stringify(doc.thinking)} has no Claude effort; use ${levels}`);
+	}
 	if (errors.length) throw new Refusal(400, `the Claude CLI ${role} needs an anthropic/claude-… model and a Claude effort`, errors);
 }
 

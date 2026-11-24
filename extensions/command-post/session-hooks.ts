@@ -197,7 +197,8 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		// one silent check; only the first session (or a broken home) says anything.
 		try {
 			const report = scaffoldHome({ home });
-			const interesting = report.steps.filter((step) => step.action === "created" || step.action === "failed");
+			const interesting = report.steps
+				.filter((step) => (step.action === "created" && !step.quiet) || step.action === "failed");
 			if (interesting.length > 0) {
 				const text = formatScaffold(report);
 				if (ctx.hasUI) ctx.ui.notify(text, report.steps.some((step) => step.action === "failed") ? "error" : "info");

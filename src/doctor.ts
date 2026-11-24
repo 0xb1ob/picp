@@ -77,7 +77,9 @@ import { jobsFile } from "./ledger.ts";
 import { describeRuntime } from "./mode.ts";
 import { listProfiles } from "./profiles.ts";
 import { ProjectRegistry } from "./projects.ts";
-import { resolveLedgerPrefix, routingCoverageFindings, workflowExclusionFindings } from "./scaffold.ts";
+import {
+	resolveLedgerPrefix, roleDefaultsAppended, routingCoverageFindings, workflowExclusionFindings,
+} from "./scaffold.ts";
 import { routedModels } from "./routed-models.ts";
 import {
 	boundedList,
@@ -91,6 +93,7 @@ import {
 	RoutingError,
 	shadowedRubricRows,
 } from "./routing.ts";
+import { routingTemplateFindings } from "./routing-template.ts";
 import { installScriptHint, OPTIONAL_TOOL_INFO, OPTIONAL_TOOLS, PI_LENS_TOOLS, REQUIRED_TOOLS, type RequiredTool } from "./tool-manifest.ts";
 import { classifyPi, PI_COMPAT_CHECK, piCompatFinding, type PiProbe, readPiCompat } from "./pi-compat.ts";
 import { PI_DRIFT_CHECK, piDriftFinding, readDriftFacts } from "./pi-qualify.ts";
@@ -756,7 +759,9 @@ export class Doctor {
 						fix: `add at least one pattern to allow in ${routingFile} (an empty allow list is honoured as written)`,
 					});
 				}
-				findings.push(...this.#routingLint(config, routingFile), ...routingCoverageFindings(this.#options.home, config));
+				const { home, packageRoot } = this.#options;
+				findings.push(...this.#routingLint(config, routingFile), ...routingCoverageFindings(home, config),
+					...routingTemplateFindings(home, packageRoot, roleDefaultsAppended(home)));
 			} catch (error) {
 				findings.push({
 					check: "config.routing",
