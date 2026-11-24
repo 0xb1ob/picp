@@ -6,7 +6,8 @@
  * scaffold` calls this, and `/doctor` reports what it found. Three rules:
  *
  *  - **Idempotent, and never destructive.** An existing directory, ledger or
- *    file is left exactly as it is. Scaffolding twice is a no-op that says so.
+ *    file is left as it is (data/routing.json: two journaled one-time migrations).
+ *    Scaffolding twice is a no-op that says so.
  *  - **It reports rather than logs.** Every action comes back as a line the
  *    operator can read; nothing is written to stdout from inside a session.
  *  - **The ledger is a file.** A missing jobs document is created empty with
@@ -48,6 +49,7 @@ import {
 } from "./mandate-defaults.ts";
 import { uncoveredRoles } from "./routed-models.ts";
 import { boundedList, loadRoutingConfig } from "./routing.ts";
+import { routingTemplateStep } from "./routing-template.ts";
 
 /** Id prefix for the ledger this package creates. Job ids are `cp-...`. */
 export const LEDGER_PREFIX = "cp";
@@ -80,6 +82,8 @@ export interface ScaffoldStep {
 	step: string;
 	action: ScaffoldAction;
 	detail?: string;
+	/** Reported on its own channel (a durable wake); session start does not notify it. */
+	quiet?: boolean;
 }
 
 export interface ScaffoldReport {
@@ -139,6 +143,7 @@ export function scaffoldHome(options: ScaffoldOptions = {}): ScaffoldReport {
 	if (!flat) steps.push(gitignoreStep(home));
 	steps.push(routingDefaultStep(home, options.packageRoot ?? PACKAGE_ROOT));
 	steps.push(routingRoleDefaultsStep(home, options.packageRoot ?? PACKAGE_ROOT));
+	steps.push(routingTemplateStep(home, options.packageRoot ?? PACKAGE_ROOT, roleDefaultsAppended(home)));
 	steps.push(mandateDefaultsStep(home));
 	steps.push(mandateDefaultsWorkflowsStep(home));
 	if (options.ledger !== false) steps.push(ledgerStep(home, env));
@@ -178,14 +183,8 @@ function gitignoreStep(home: string): ScaffoldStep {
 }
 
 /**
- * Copy the shipped default rubric into `data/routing.json`, once. This is the
- * *only* write this scaffold ever makes to a routing decision: an existing
- * file — operator-authored or a previous copy — is never touched, so a later
- * `session_start` can never silently rewrite policy out from under an
- * operator who has since edited it. A missing template (a home whose package
- * root does not ship one, e.g. an old install) is a skip, not a failure:
- * `DEFAULT_ROUTING_CONFIG`'s in-code fallback ( "no policy configured yet" )
- * still applies exactly as before.
+ * Copy the shipped rubric into `data/routing.json` once, when it is absent. An existing file changes only through
+ * the journaled one-time migrations `role-defaults-v1` and `routing-template-v1`; a missing template is a skip.
  */
 function routingDefaultStep(home: string, packageRoot: string): ScaffoldStep {
 	const dest = join(home, LAYOUT.routingFile);
@@ -232,7 +231,12 @@ export function readRoleDefaultsJournal(home: string): RoleDefaultsJournalLine[]
 	});
 }
 
-const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
+/** The row ids role-defaults-v1 appended to this home's rubric (its `done` lines). */
+export function roleDefaultsAppended(home: string): string[] {
+	return readRoleDefaultsJournal(home).filter((line) => line.outcome === "done").flatMap((line) => line.ids ?? []);
+}
+
+const sha256 =(text: string): string => createHash("sha256").update(text).digest("hex");
 
 /**
  * Once per home (D1): append a default row (defaults/routing.role-defaults.json) for every role an existing
@@ -474,7 +478,7 @@ function ledgerStep(home: string, env: NodeJS.ProcessEnv = process.env): Scaffol
 
 /** One operator-facing block. Silent about the boring case unless asked. */
 export function formatScaffold(report: ScaffoldReport, options: { verbose?: boolean } = {}): string {
-	const interesting = report.steps.filter((step) => step.action !== "present");
+	const interesting = report.steps.filter((step) => step.action !== "present" && !step.quiet);
 	if (interesting.length === 0 && !options.verbose) {
 		return `command post home ready (${report.home_source}): ${report.home}`;
 	}

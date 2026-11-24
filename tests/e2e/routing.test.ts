@@ -3,11 +3,15 @@
  * in-process CommandPosts (pi's registry and the sub2api gateway stubbed at their edges) cover capacity and launches.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
-import { type DoctorReport, EMPTY_USAGE, LAYOUT, THINKING_LEVELS, type ThinkingLevel } from "../../src/contracts.ts";
+import {
+	type DoctorReport, EMPTY_USAGE, LAYOUT, type RoutingConfig, THINKING_LEVELS, type ThinkingLevel,
+} from "../../src/contracts.ts";
 import type { DispatchPreview } from "../../src/dispatch.ts";
 import { modelPicksDir } from "../../src/operator-model-pick.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
@@ -260,6 +264,227 @@ test("P16-route-migrate: a rubric that left a role to its profile gets one defau
 	const moved = await parent(b, { phases: [{ calls: [{ job_id: plan, task: "t", scope: "S", risk: "low" }] }], env: { ANTHROPIC_API_KEY: "sk-ant-test" } });
 	assert.equal(said(moved.previews[0]![0]!), `source=rubric model=${OPUS} rule=planner-default-migrated thinking=medium quota=off:no admin key`);
 	assert.deepEqual(done(), [["planner-default-migrated"]]);
+});
+
+// P16-route-template (routing-template-v1): an earlier shipped rubric shape becomes the 4 shipped rows once, values
+// carried; anything else stays byte for byte and doctor names it. Every subtest fails on main.
+test("P16-route-template: an earlier shipped rubric shape becomes the shipped rows once with its own values, "
+	+ "and an edited one is only named by doctor", { timeout: 900_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	type Row = Record<string, unknown>;
+	type Doc = { schema_version: number; allow: string[]; rubric: Row[] };
+	const M = "routing-template-v1";
+	const data = join(b.home, LAYOUT.data), file = join(b.home, LAYOUT.routingFile);
+	const journal = join(b.home, LAYOUT.routingMigrationsFile), outbox = join(b.home, LAYOUT.wakeupsFile);
+	const gitShow = (sha: string) =>
+		execFileSync("git", ["-C", REPO_ROOT, "show", `${sha}:defaults/routing.default.json`], { encoding: "utf8" });
+	const parse = (text: string) => JSON.parse(text) as Doc;
+	const json = (doc: Doc) => `${JSON.stringify(doc, null, 2)}\n`;
+	const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+	const only = (row: Row, names: readonly string[]) =>
+		Object.fromEntries(names.filter((n) => n in row).map((n) => [n, row[n]]));
+	const OLD7 = gitShow("8dd7d2cc"), template = parse(SHIPPED), ids = template.rubric.map((row) => row.id);
+	const journaled = (migration: string): Row[] => (existsSync(journal)
+		? readFileSync(journal, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Row)
+		: []).filter((line) => line.migration === migration);
+	const backups = () => readdirSync(data).filter((name) => name.startsWith("routing.json.bak-"));
+	const wakes = (): Row[] => {
+		if (!existsSync(outbox)) return [];
+		const o = JSON.parse(readFileSync(outbox, "utf8")) as Record<string, Row[] | undefined>;
+		return [...(o.pending ?? []), ...(o.delivered ?? []), ...(o.discarded ?? [])]
+			.filter((e) => String(e.id).startsWith(`${M}:`));
+	};
+	const seed = (text: string, mode = 0o644) => {
+		for (const name of backups()) rmSync(join(data, name));
+		rmSync(journal, { force: true });
+		rmSync(outbox, { force: true });
+		routing(b.home, text);
+		chmodSync(file, mode);
+	};
+	const start = () => parent(b, { doctor: true });
+	const finding = (turn: Turn) => findings(turn.doctor, "config.routing.template");
+	const quiet = (turn: Turn) => {
+		const plain = turn.notes.filter((n) => !n.trimStart().startsWith("{"));
+		assert.ok(!plain.some((n) => n.includes("routing.template")), turn.notes.join("\n"));
+	};
+	const untouched = (text: string, turn: Turn) => {
+		assert.equal(readFileSync(file, "utf8"), text);
+		assert.deepEqual([backups(), journaled(M), wakes()], [[], [], []]);
+		quiet(turn);
+	};
+	const migrated = (before: string, turn: Turn) => {
+		const after = readFileSync(file, "utf8"), [name, ...more] = backups();
+		assert.deepEqual(parse(after).rubric.map((row) => row.id), ids, "the shipped ids replace the old rows");
+		assert.deepEqual([more, readFileSync(join(data, name!), "utf8")], [[], before], "one byte-identical backup");
+		const [intent, done, ...rest] = journaled(M);
+		assert.deepEqual([intent?.outcome, done?.outcome, rest], ["intent", "done", []]);
+		assert.deepEqual([done?.before_sha256, done?.after_sha256, done?.backup],
+			[sha(before), sha(after), join(data, name!)]);
+		const [wake, ...extra] = wakes();
+		assert.deepEqual([wake?.id, extra], [`${M}:${sha(before).slice(0, 16)}`, []], "exactly one durable notice");
+		if (wake && "content" in wake) assert.equal(wake.content, intent?.notice);
+		assert.deepEqual(finding(turn).map((f) => f.severity), ["ok"]);
+		quiet(turn);
+		return { after, notice: String(intent?.notice), backup: join(data, name!), done: done! };
+	};
+
+	// Ruling test i and the fill rule: the reporting home's 8 rows, all on claude, keep their own values.
+	await t.test("8-row home", async () => {
+		const rubric: Row[] = parse(OLD7).rubric.map((row) => ({ ...row, model: `anthropic/claude-test-${String(row.id)}`,
+			fallbacks: ["anthropic/claude-test-spare", "openai/gpt-test"], note: `note-${String(row.id)}`, driver: "claude" }));
+		const by = (id: string) => rubric.find((row) => row.id === id)!;
+		delete by("big-ship").fallbacks;
+		by("small-ship").fallbacks = [];
+		delete by("small-ship").thinking;
+		rubric.splice(6, 0, { id: "native-research", role: "planner", scope: ["S"],
+			model: "anthropic/claude-test-native-research", fallbacks: ["openai/gpt-test"], thinking: "high",
+			driver: "claude" });
+		const before = json({ schema_version: 1, allow: ["*/*"], rubric });
+		seed(before, 0o640);
+		const { after, notice, backup } = migrated(before, await start());
+		const source: Record<string, string> = {
+			reviews: "reviews", "implementer-small": "small-ship",
+			"implementer-default": "big-ship", "planner-default": "planner-default",
+		};
+		const shape = ["id", "role", "scope", "risk", "project"];
+		const carried = ["model", "fallbacks", "thinking", "driver", "note"];
+		assert.deepEqual(parse(after).rubric,
+			template.rubric.map((row) => ({ ...only(row, shape), ...only(by(source[String(row.id)]!), carried) })));
+		assert.deepEqual([statSync(file).mode & 0o777, statSync(backup).mode & 0o777], [0o640, 0o640]);
+		for (const id of ["risky-any", "risky-ship", "research-big", "native-research"]) {
+			assert.ok(notice.includes(`${id} (anthropic/claude-test-${id}, claude)`), notice);
+		}
+		assert.ok(notice.includes(backup) && notice.includes("Fell back to the template: none."), notice);
+		// Brief rule 5: a later start writes nothing and posts nothing.
+		const snapshot = [after, readFileSync(journal, "utf8"), wakes().map((e) => e.id), 1];
+		const second = await start();
+		const now = [readFileSync(file, "utf8"), readFileSync(journal, "utf8"), wakes().map((e) => e.id), backups().length];
+		assert.deepEqual(now, snapshot);
+		quiet(second);
+	});
+
+	// Ruling test ii: a custom id is an edit; the file keeps its bytes and doctor names the row with the manual reset.
+	await t.test("custom id", async () => {
+		const doc = parse(OLD7);
+		doc.rubric.push({ id: "my-planner", role: "planner", model: "anthropic/claude-test-a" });
+		const text = json(doc);
+		seed(text);
+		const turn = await start();
+		untouched(text, turn);
+		const [f] = finding(turn);
+		assert.equal(f?.severity, "warn");
+		assert.match(f?.detail ?? "", /my-planner \(not a shipped row\)/);
+		assert.match(f?.fix ?? "", /defaults\/routing\.default\.json/);
+	});
+
+	// Ruling test iii: a changed scope is an edit, untouched and named.
+	await t.test("changed scope", async () => {
+		const doc = parse(OLD7);
+		doc.rubric.find((row) => row.id === "research-big")!.scope = ["M", "L"];
+		const text = json(doc);
+		seed(text);
+		const turn = await start();
+		untouched(text, turn);
+		assert.deepEqual(finding(turn).map((f) => f.severity), ["warn"]);
+		assert.match(finding(turn)[0]?.detail ?? "", /research-big: scope \["M","L"\] \(shipped \["L"\]\)/);
+	});
+
+	// Brief mixed-driver case under ruling 2 and rule 5: per-row drivers carry; a refused effort takes the template's.
+	await t.test("mixed driver", async () => {
+		const doc = parse(OLD7);
+		Object.assign(doc.rubric.find((row) => row.id === "small-ship")!, { driver: "claude", thinking: "minimal" });
+		const before = json(doc);
+		seed(before);
+		const { after, notice } = migrated(before, await start());
+		assert.deepEqual(parse(after).rubric.map((row) => [row.driver, row.thinking]),
+			[[undefined, "high"], ["claude", "high"], [undefined, "medium"], [undefined, undefined]]);
+		const fell = "implementer-small.thinking minimal -> high "
+			+ "(row implementer-small: thinking minimal has no Claude effort";
+		assert.ok(notice.includes(fell), notice);
+	});
+
+	// Ruling b: every shipped row passes the Settings row checks on pi and on claude, so none can block the migration.
+	await t.test("template passes row checks", async () => {
+		const { routingRowRefusals } = await import("../../src/routing-row-checks.ts");
+		const { isNativeModel } = await import("../../src/drivers/claude.ts");
+		for (const driver of [undefined, "claude"] as const) {
+			const rubric = template.rubric.map((row) => ({ ...row, ...(driver ? { driver } : {}) }));
+			const config = { ...template, rubric } as unknown as RoutingConfig;
+			for (const row of config.rubric) {
+				assert.ok(isNativeModel(row.model), row.id);
+				assert.deepEqual(routingRowRefusals(b.home, config, row), [], `${row.id} on ${driver ?? "pi"}`);
+			}
+		}
+	});
+
+	// Planner-proposed (brief uniform driver on the plain 7 rows): no fallback, and doctor never says a later start
+	// replaces it.
+	await t.test("plain 7-row claude", async () => {
+		const doc = parse(OLD7);
+		for (const row of doc.rubric) row.driver = "claude";
+		const before = json(doc);
+		seed(before);
+		const turn = await start();
+		const { after, notice } = migrated(before, turn);
+		assert.deepEqual(parse(after).rubric, template.rubric.map((row) => ({ ...row, driver: "claude" })));
+		assert.match(notice, /Fell back to the template: none\./);
+		assert.doesNotMatch(JSON.stringify(finding(turn)), /next session start/);
+	});
+
+	// Brief appended-row case, plus every earlier shipped file from git (planner-proposed); ea63179 first gains
+	// role-defaults-v1's planner-default.
+	await t.test("every earlier shipped file", async () => {
+		const log = execFileSync("git", ["-C", REPO_ROOT, "log", "--format=%H", "--", "defaults/routing.default.json"],
+			{ encoding: "utf8" });
+		const shas = log.trim().split("\n").slice(1);
+		assert.ok(shas.length >= 2, shas.join(","));
+		for (const commit of shas) {
+			const seeded = gitShow(commit);
+			seed(seeded);
+			const turn = await start();
+			const grown = journaled("role-defaults-v1").find((line) => line.outcome === "intent")?.rows as Row[] | undefined;
+			const before = grown?.length ? json({ ...parse(seeded), rubric: [...parse(seeded).rubric, ...grown] }) : seeded;
+			const { after, done } = migrated(before, turn);
+			assert.ok(String(done.from).startsWith(commit.slice(0, 7)), `${commit}: ${String(done.from)}`);
+			assert.deepEqual(journaled("role-defaults-v1").filter((l) => l.outcome === "done").map((l) => l.ids),
+				commit.startsWith("ea631794") ? [["planner-default"]] : [], commit);
+			if (commit.startsWith("8dd7d2cc") || commit.startsWith("ea631794")) assert.equal(after, SHIPPED, commit);
+		}
+	});
+
+	// Brief rule 4: the current rows (also after Settings edits) and a fresh home are no-ops; doctor says ok.
+	await t.test("current and fresh", async () => {
+		const rubric = template.rubric.map((row) => ({ ...row, model: "anthropic/claude-test-c", driver: "claude" }));
+		const settings = json({ ...template, rubric });
+		for (const text of [SHIPPED, settings]) {
+			seed(text);
+			const turn = await start();
+			untouched(text, turn);
+			assert.deepEqual(finding(turn).map((f) => f.severity), ["ok"]);
+		}
+		seed(SHIPPED);
+		routing(b.home, null);
+		const fresh = await start();
+		untouched(SHIPPED, fresh);
+		assert.deepEqual(finding(fresh).map((f) => f.severity), ["ok"]);
+	});
+
+	// Brief crash case: a restart after the intent line, or after the write, ends with one file, one backup, one done.
+	await t.test("crash", async () => {
+		seed(OLD7);
+		const { after, backup } = migrated(OLD7, await start());
+		const intent = `${JSON.stringify(journaled(M)[0])}\n`;
+		for (const stage of ["after the intent", "after the write"] as const) {
+			if (stage === "after the intent") {
+				writeFileSync(file, OLD7);
+				rmSync(backup);
+			}
+			writeFileSync(journal, intent);
+			rmSync(outbox, { force: true });
+			migrated(OLD7, await start());
+			assert.deepEqual([readFileSync(file, "utf8"), backups().length], [after, 1], stage);
+		}
+	});
 });
 
 // P16-route-rubric: the policy file itself — precedence, gates, globs, the ladder and the load-time refusals.
