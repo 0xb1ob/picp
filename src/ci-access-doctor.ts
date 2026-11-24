@@ -78,7 +78,9 @@ export function workflowWriteFindings(home: string, run: Run): DoctorFinding[] {
 	if (result.status !== 0) return [{ check, severity: "ok", what: "workflow write access unknown: gh api user failed" }];
 	const scopes = /^x-oauth-scopes:[ \t]*(.*)$/im.exec(result.stdout);
 	if (scopes === null) {
-		return [{ check, severity: "ok", what: "workflow write access not readable for this token type (fine-grained or app token): it needs Workflows: write" }];
+		const what = "workflow write access not readable for this token type (fine-grained or app token): "
+			+ "it needs Workflows: write";
+		return [{ check, severity: "ok", what }];
 	}
 	if (scopes[1]!.split(",").map((scope) => scope.trim()).includes("workflow")) {
 		return [{ check, severity: "ok", what: "forge token can write workflows (scope workflow)" }];

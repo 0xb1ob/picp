@@ -39,14 +39,17 @@ export async function startFakeWeb(t: TestContext, page: string): Promise<{ url:
 }
 
 /** `files` seed the project repo; `settingsEnv` joins the fake settings env (fake-claude's knobs); `run`'s extra env
- * joins the parent's, which the worker inherits; `mandateDefaults: "scaffold"` leaves the file to the parent's scaffold. */
+ * joins the parent's, which the worker inherits; `mandateDefaults: "scaffold"` leaves that file to the scaffold. */
 export async function nativeWorkerHome(
 	t: TestContext,
 	script: readonly ClaudeStep[],
 	opts: { files?: Record<string, string>; settingsEnv?: Record<string, string>; mandateDefaults?: "scaffold" } = {},
 ) {
 	const b = await dispatchS29(t, { files: opts.files });
-	if (opts.mandateDefaults !== "scaffold") writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS }));
+	if (opts.mandateDefaults !== "scaffold") {
+		const defaults = { ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS };
+		writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify(defaults));
+	}
 	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true, claude_ship: true }));
 	routeNativeModel(b.home);
 	// The CLI is configured, not chosen per job (cp-qmry P3): the demo planner and implementer rows run claude.

@@ -280,7 +280,8 @@ export async function codexCheckpointCommit(job: ForgeJob, options: CodexCheckpo
 	const branch = job.job_id;
 	if (!branch || ["main", options.env.CP_BASE_BRANCH?.trim()].includes(branch)) return { head: head.out, pushed: false, error: `no job branch to push (${branch || "unset"})`, ...excluded };
 	const pushed = await exec("git", [...GIT_HOOKS_OFF, "push", "-q", "origin", `HEAD:refs/heads/${branch}`], job.worktree, options.env);
-	return pushed.ok ? { head: head.out, pushed: true, ...excluded } : { head: head.out, pushed: false, error: workflowScopeRefusal(pushed.out) ?? bounded(pushed.out), ...excluded };
+	if (pushed.ok) return { head: head.out, pushed: true, ...excluded };
+	return { head: head.out, pushed: false, error: workflowScopeRefusal(pushed.out) ?? bounded(pushed.out), ...excluded };
 }
 
 /** The JSON input schemas of the six Codex forge tools, the Claude `zod` shapes' limits. */

@@ -73,7 +73,8 @@ export const SCAFFOLD_MANDATE_DEFAULTS: MandateDefaults = {
 /** The pre-2026-11 shipped `exclude_paths` default, matched exactly by the workflows migration in `src/scaffold.ts`. */
 export const LEGACY_EXCLUDE_PATHS = [".github/workflows/", "secrets/", "**/.env*"] as const;
 /** The pre-2026-11 shipped `exclude_paths` note, replaced only when a migrated home still holds it verbatim. */
-export const LEGACY_EXCLUDE_PATHS_NOTE = "paths no mandate may auto-touch regardless of allowed_actions: CI workflows and secrets";
+export const LEGACY_EXCLUDE_PATHS_NOTE =
+	"paths no mandate may auto-touch regardless of allowed_actions: CI workflows and secrets";
 
 /** Read `data/mandate-defaults.json`; the scaffold values when it does not exist yet. */
 export function loadMandateDefaults(home: string): MandateDefaults {

@@ -171,13 +171,17 @@ test("CX-7b: writes outside the profile, git and gh writes in the shell, and out
 // Scenario: under a fresh home's default exclude_paths a codex implementer edits a CI workflow and ships it
 //   Given the scaffolded defaults, When its shell rewrites .github/workflows/ci.yml and writes a/.env.local, Then
 //   git_commit refuses a/.env.local; with it removed the workflow edit commits and git_push lands it on origin/<job>.
-test("CX-7o: under fresh defaults a codex implementer commits and pushes a workflow edit; .env.local stays gated", { skip, timeout: 300_000 }, async (t) => {
-	const h = await codexWorkerHome(t, { native: { codex_ship: true }, files: FILES, ship: true, mandateDefaults: "scaffold" });
+const CX7O = "CX-7o: under fresh defaults a codex implementer ships a workflow edit; .env.local stays gated";
+test(CX7O, { skip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t, {
+		native: { codex_ship: true }, files: FILES, ship: true, mandateDefaults: "scaffold",
+	});
 	const job = await h.job("pr", "ship");
+	// As CX-7e: the shell's secret-path guard refuses a command naming .env, so node builds the name.
+	const envLocal = "const f=require('fs');f.mkdirSync('a',{recursive:true});f.writeFileSync('a/.e'+'nv.local','X=1')";
 	h.setScript({ turns: [[
 		{ kind: "shell", command: "printf 'name: ci2\\n' > .github/workflows/ci.yml" },
-		// As CX-7e: the shell's secret-path guard refuses a command naming .env, so node builds the name.
-		{ kind: "shell", command: "node -e \"const f=require('fs');f.mkdirSync('a',{recursive:true});f.writeFileSync('a/.e'+'nv.local','X=1')\"" },
+		{ kind: "shell", command: `node -e "${envLocal}"` },
 		{ kind: "tool", tool: "git_commit", arguments: { message: "ci and env" } },
 		{ kind: "shell", command: "rm -r a" },
 		{ kind: "tool", tool: "git_commit", arguments: { message: "ci" } },
@@ -187,7 +191,8 @@ test("CX-7o: under fresh defaults a codex implementer commits and pushes a workf
 	]] });
 	await h.run([job.dispatch({ task: "Rename the CI workflow." }), h.awaitEnvelope(job.id), h.pause(2)]);
 	const profile = implementerProfile(h);
-	assert.equal(Object.keys(profile).some((path) => path.includes(".github/workflows")), false, JSON.stringify(profile));
+	const workflowKeys = Object.keys(profile).filter((path) => path.includes(".github/workflows"));
+	assert.deepEqual(workflowKeys, [], JSON.stringify(profile));
 	const commits = toolResults(h, "git_commit");
 	assert.match(commits[0]?.text ?? "", /never commits an excluded path \(exclude_paths\): a\/\.env\.local\./);
 	assert.equal(commits[1]?.ok, true, commits[1]?.text);

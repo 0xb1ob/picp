@@ -28,7 +28,9 @@ export const FORGE_PR_URL = "https://github.com/picp-e2e/forge/pull/7";
  * the scripted forge `gh` first on PATH. */
 export async function codexWorkerHome(
 	t: TestContext,
-	opts: { native?: Record<string, unknown> | null; files?: Record<string, string>; ship?: boolean; mandateDefaults?: "scaffold" } = {},
+	opts: {
+		native?: Record<string, unknown> | null; files?: Record<string, string>; ship?: boolean; mandateDefaults?: "scaffold";
+	} = {},
 ) {
 	const b = await dispatchS29(t, opts.files ? { files: opts.files } : {});
 	const nativeFile = join(b.home, LAYOUT.data, "native.json");
@@ -47,7 +49,8 @@ export async function codexWorkerHome(
 	const ghLog = join(forge, "calls.log");
 	if (opts.ship) {
 		if (opts.mandateDefaults !== "scaffold") {
-			writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS }));
+			const defaults = { ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS };
+			writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify(defaults));
 		}
 		copyFileSync(FORGE_GH, join(forge, "gh"));
 		chmodSync(join(forge, "gh"), 0o755);

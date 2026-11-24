@@ -174,15 +174,19 @@ test("P8f reporter guards: a CI wait, a credential probe and a state-bearing web
 	assert.match(plain ?? "", /web_search:ran/, "a clean web call runs");
 });
 
-// Scenario: a pi worker's Bash `git push` of a workflow change that GitHub (a pre-receive hook on the scratch origin)
-//   refuses for a missing `workflow` scope comes back as the named workflow_scope_missing error, not a bare git failure.
-test("P8f reporter push: a workflow-scope push refusal in Bash is named workflow_scope_missing with the scope to add", { skip: SKIP, timeout: 300_000 }, async (t) => {
+// Scenario: a pi worker's Bash `git push` that GitHub (a pre-receive hook on the scratch origin) refuses for a missing
+//   `workflow` scope comes back as the named workflow_scope_missing error, not a bare git failure.
+const PUSH_CASE = "P8f reporter push: a workflow-scope refusal of a Bash push is named workflow_scope_missing";
+test(PUSH_CASE, { skip: SKIP, timeout: 300_000 }, async (t) => {
 	const f = await packageBench(t);
-	const refusal = "refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope";
-	const origin = (id: string) => execFileSync("git", ["remote", "get-url", "origin"], { cwd: f.post.fleet.require(id).worktree, encoding: "utf8" }).trim();
+	const refusal = "refusing to allow a Personal Access Token to create or update workflow "
+		+ "`.github/workflows/ci.yml` without `workflow` scope";
+	const git = (id: string, args: string[]) =>
+		execFileSync("git", args, { cwd: f.post.fleet.require(id).worktree, encoding: "utf8" }).trim();
 	const push = (id: string) => () => {
-		mkdirSync(join(origin(id), "hooks"), { recursive: true });
-		writeFileSync(join(origin(id), "hooks", "pre-receive"), `#!/bin/sh\necho '${refusal}' >&2\nexit 1\n`, { mode: 0o755 });
+		const hooks = join(git(id, ["remote", "get-url", "origin"]), "hooks");
+		mkdirSync(hooks, { recursive: true });
+		writeFileSync(join(hooks, "pre-receive"), `#!/bin/sh\necho '${refusal}' >&2\nexit 1\n`, { mode: 0o755 });
 		return { command: "mkdir -p .github/workflows && printf 'on: push\\n' > .github/workflows/ci.yml && git add -A && "
 			+ `git -c user.name=p8f -c user.email=p8f@test.invalid commit -qm wf && git push origin HEAD:refs/heads/${id}` };
 	};
@@ -191,7 +195,7 @@ test("P8f reporter push: a workflow-scope push refusal in Bash is named workflow
 		{ timeoutMs: 90_000, what: `${id}'s push result` })).map((row) => row.text);
 	assert.match(end ?? "", /workflow_scope_missing/);
 	assert.match(end ?? "", /`workflow` scope/);
-	const refs = execFileSync("git", ["ls-remote", "origin"], { cwd: f.post.fleet.require(id).worktree, encoding: "utf8" });
+	const refs = git(id, ["ls-remote", "origin"]);
 	assert.equal(refs.includes(`refs/heads/${id}`), false, "nothing was pushed");
 });
 

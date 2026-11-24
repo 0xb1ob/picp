@@ -44,7 +44,8 @@ function withWorktree(body: (root: string, worktree: string, job: (excludePaths?
 // `$(…)` re-scans, wrappers, link escapes); NP-2a…NP-2g in tests/e2e/native-worker-parity.test.ts pin each class e2e.
 test("implementer guards: pushes, escapes, secrets, env dumps, .git and exclusions are denied; what pi runs is allowed", async () => {
 	await withWorktree(async (root, worktree, job) => {
-		const hook = preToolUseHook(spikeGuards(job([".github/workflows/", "secrets/", "**/.env*"]), [...SECRETS, join(root, "secret")]));
+		const excluded = [".github/workflows/", "secrets/", "**/.env*"];
+		const hook = preToolUseHook(spikeGuards(job(excluded), [...SECRETS, join(root, "secret")]));
 		const bash = (command: string) => ["Bash", { command }] as const;
 		const write = (tool: string, path: string) => [tool, { file_path: path, content: "x\n" }] as const;
 		const denied: Array<readonly [string, unknown]> = [

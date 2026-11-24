@@ -25,7 +25,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { appendFileSync, chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync, chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -41,7 +43,9 @@ import { describeHome, PACKAGE_ROOT, type HomeResolution } from "./home.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { initJobsDocument, LedgerError } from "./ledger.ts";
 import { hitsNeedle, liveGrants, MandateStore } from "./mandate.ts";
-import { LEGACY_EXCLUDE_PATHS, LEGACY_EXCLUDE_PATHS_NOTE, loadMandateDefaults, SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
+import {
+	LEGACY_EXCLUDE_PATHS, LEGACY_EXCLUDE_PATHS_NOTE, loadMandateDefaults, SCAFFOLD_MANDATE_DEFAULTS,
+} from "./mandate-defaults.ts";
 import { uncoveredRoles } from "./routed-models.ts";
 import { boundedList, loadRoutingConfig } from "./routing.ts";
 
@@ -377,7 +381,8 @@ function mandateDefaultsWorkflowsStep(home: string, now: Date = new Date()): Sca
 	if (!existsSync(file)) return { step, action: "skipped", detail: `no ${LAYOUT.mandateDefaultsFile}` };
 	const record = (line: Omit<WorkflowsJournalLine, "migration" | "at">): void => {
 		mkdirSync(dirname(journalFile), { recursive: true });
-		appendFileSync(journalFile, `${JSON.stringify({ migration: WORKFLOWS_MIGRATION, at: now.toISOString(), ...line })}\n`);
+		const entry = { migration: WORKFLOWS_MIGRATION, at: now.toISOString(), ...line };
+		appendFileSync(journalFile, `${JSON.stringify(entry)}\n`);
 	};
 	let text: string, raw: { exclude_paths?: unknown; notes?: Record<string, unknown> };
 	try {
@@ -427,17 +432,20 @@ export function workflowExclusionFindings(home: string): DoctorFinding[] {
 	}
 	let grants: string[] = [];
 	try {
-		grants = liveGrants(new MandateStore(home).list()).filter((grant) => hits(grant.exclusions?.paths ?? [])).map((grant) => grant.id);
+		grants = liveGrants(new MandateStore(home).list())
+			.filter((grant) => hits(grant.exclusions?.paths ?? []))
+			.map((grant) => grant.id);
 	} catch {
 		// An unreadable mandate store is reported by its own checks.
 	}
 	const fromHome = hits(homeList);
 	if (!fromHome && grants.length === 0) return [];
 	const keep = homeList.filter((needle) => !hits([needle]));
+	const sources = [...(fromHome ? ["home exclude_paths"] : []), ...grants].join(", ");
 	return [{
 		check: "config.mandate_defaults.workflows",
 		severity: "ok",
-		what: `${WORKFLOWS} is still excluded: workers cannot edit workflow files (${[...(fromHome ? ["home exclude_paths"] : []), ...grants].join(", ")})`,
+		what: `${WORKFLOWS} is still excluded: workers cannot edit workflow files (${sources})`,
 		fix: [
 			...(fromHome ? [`cp_mandate defaults_set exclude_paths ${keep.join(",") || "(empty)"}`] : []),
 			...(grants.length ? [`revoke and reissue ${grants.join(", ")}, or let them expire`] : []),

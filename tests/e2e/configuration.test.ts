@@ -404,10 +404,10 @@ test("P16-migration: a session sweeps br_id to job_id once, leaves malformed and
 	assert.equal(finding(await doctor(again), "state.job_id_migration")?.severity, "ok", "a swept home is ok");
 });
 
-// P16-workflows-migration: a home still holding the exact old shipped exclude_paths drops .github/workflows/ once at
-// session start, with a journal and a byte-exact 0600 backup; a custom list is never rewritten and doctor names it.
+// The old shipped exclude_paths drops .github/workflows/ once, with journal and 0600 backup; a custom list is kept.
 // Inline literals, not src constants, so this file still loads against main and fails there on the first assertion.
-test("P16-workflows-migration: the old default exclude_paths drops .github/workflows/ once with a backup; a custom list is left and named by doctor", { timeout: 300_000 }, async (t) => {
+const P16W = "P16-workflows-migration: the old default drops .github/workflows/ once, backed up; a custom list is kept";
+test(P16W, { timeout: 300_000 }, async (t) => {
 	const OLD = [".github/workflows/", "secrets/", "**/.env*"];
 	const OLD_NOTE = "paths no mandate may auto-touch regardless of allowed_actions: CI workflows and secrets";
 	const r = await rig(t, "cp-p16-workflows-");
@@ -427,7 +427,8 @@ test("P16-workflows-migration: the old default exclude_paths drops .github/workf
 	};
 
 	const a = join(r.root, "home-a");
-	const before = seed(a, { ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: OLD, notes: { ...SCAFFOLD_MANDATE_DEFAULTS.notes, exclude_paths: OLD_NOTE }, spend_usd: 42 });
+	const notes = { ...SCAFFOLD_MANDATE_DEFAULTS.notes, exclude_paths: OLD_NOTE };
+	const before = seed(a, { ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: OLD, notes, spend_usd: 42 });
 	const read = () => JSON.parse(readFileSync(join(a, LAYOUT.mandateDefaultsFile), "utf8"));
 	const first = open(r, r.root, { CP_HOME: a });
 	await version(first);
@@ -440,7 +441,8 @@ test("P16-workflows-migration: the old default exclude_paths drops .github/workf
 	assert.equal(readFileSync(backup!, "utf8"), before, "the backup is byte-exact");
 	assert.equal(statSync(backup!).mode & 0o777, 0o600);
 	assert.deepEqual(journal(a), ["intent", "done"]);
-	assert.equal(finding(await doctor(first), "config.mandate_defaults.workflows"), undefined, "a migrated home has no workflows line");
+	const line = finding(await doctor(first), "config.mandate_defaults.workflows");
+	assert.equal(line, undefined, "a migrated home has no workflows line");
 	await first.close();
 	const migrated = readFileSync(join(a, LAYOUT.mandateDefaultsFile), "utf8");
 	const second = open(r, r.root, { CP_HOME: a });
