@@ -218,7 +218,7 @@ test("NP-0e: exclude_paths hold for Edit and Write; a write outside them lands",
 });
 
 // Scenario: Given a fresh home's default grant, When a native implementer edits and adds files under .github/workflows/
-//   by Edit, Write and Bash, Then they land while secrets/ and .env stay refused; and When GitHub (a pre-receive hook)
+//   by Edit, Write and Bash, Then they land while secrets/x and .env stay refused to each; and When GitHub (a hook)
 //   refuses the push for a missing workflow scope, Then git_push fails as workflow_scope_missing naming the scope.
 test("NP-0f: under fresh defaults an implementer edits CI workflows; a workflow-scope push refusal is named", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	let id = "";
@@ -236,7 +236,7 @@ test("NP-0f: under fresh defaults an implementer edits CI workflows; a workflow-
 			{ name: "Write", input: () => ({ file_path: join(wt(), "secrets", "x"), content: "k\n" }) },
 			{ name: "Edit", input: () => ({ file_path: join(wt(), ".env"), old_string: "A=1", new_string: "A=2" }) },
 		),
-		calls(bash("echo '# bash' >> .github/workflows/ci.yml")),
+		calls(bash("echo '# bash' >> .github/workflows/ci.yml"), bash("echo k > secrets/x"), bash("echo A=3 > .env")),
 		calls(bash("git add -A && git commit -q -m np0f")),
 		calls({ name: "mcp__picp__git_push", input: () => (refuseWorkflows(), {}) }),
 		calls({ name: REPORT_TOOL, input: () => blocked(id) }),
@@ -255,7 +255,8 @@ test("NP-0f: under fresh defaults an implementer edits CI workflows; a workflow-
 	assert.equal(readFileSync(join(wt(), ".github", "workflows", "new.yml"), "utf8"), "on: workflow_dispatch\n");
 	assert.equal(existsSync(join(wt(), "secrets", "x")), false);
 	assert.equal(readFileSync(join(wt(), ".env"), "utf8"), "A=1\n");
-	assert.equal(denied.count, 2, JSON.stringify(denied));
+	// Edit/Write (native-guards writeScopeGuard) and Bash (claude-bash-scope) each refuse secrets/x and .env.
+	assert.deepEqual(denied.lines.map((line) => line.split(":")[0]), ["Write", "Edit", "Bash", "Bash"], JSON.stringify(denied));
 	assert.ok(denied.lines.every((line) => / an excluded path /.test(line)), JSON.stringify(denied));
 	const pushed = results.find((result) => /git_push|workflow/.test(result) && result.startsWith("[error] ")) ?? results.join("\n---\n");
 	assert.match(pushed, /^\[error\] workflow_scope_missing: .*`workflow` scope/);
