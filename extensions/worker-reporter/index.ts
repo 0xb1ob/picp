@@ -47,6 +47,7 @@ import {
 	redactGithubTokens,
 } from "../../src/worker-credential-guard.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
+import { workflowScopeRefusal } from "../../src/workflow-scope.ts";
 import { workerHostGuard } from "../../src/worker-host-guard.ts";
 import { createEditResultEnricher, enrichSilentBashFailure } from "./edit-failures.ts";
 import { registerWorkerCompactionGuard } from "./compaction.ts";
@@ -575,6 +576,8 @@ export default function (pi: ExtensionAPI): void {
 			});
 			if (event.isError) {
 				const text = content.map((block) => (block.type === "text" ? block.text : "")).join("\n");
+				const scope = workflowScopeRefusal(text);
+				if (scope) return { content: [{ type: "text" as const, text: redactGithubTokens(`${scope}\n\n${text}`) }] };
 				const enriched = redactGithubTokens(enrichSilentBashFailure(text, event.input));
 				if (enriched !== text) return { content: [{ type: "text" as const, text: enriched }] };
 			}

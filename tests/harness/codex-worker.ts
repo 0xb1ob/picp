@@ -24,8 +24,14 @@ export const FAKE_CODEX_REF = "openai/gpt-picp-fake";
 const FORGE_GH = fileURLToPath(new URL("../fixtures/forge-gh", import.meta.url));
 export const FORGE_PR_URL = "https://github.com/picp-e2e/forge/pull/7";
 
-/** `ship` (C7b): EXCLUDE_PATHS in the mandate defaults, a commit identity and the scripted forge `gh` first on PATH. */
-export async function codexWorkerHome(t: TestContext, opts: { native?: Record<string, unknown> | null; files?: Record<string, string>; ship?: boolean } = {}) {
+/** `ship` (C7b): EXCLUDE_PATHS in the mandate defaults (unless `mandateDefaults: "scaffold"`), a commit identity and
+ * the scripted forge `gh` first on PATH. */
+export async function codexWorkerHome(
+	t: TestContext,
+	opts: {
+		native?: Record<string, unknown> | null; files?: Record<string, string>; ship?: boolean; mandateDefaults?: "scaffold";
+	} = {},
+) {
 	const b = await dispatchS29(t, opts.files ? { files: opts.files } : {});
 	const nativeFile = join(b.home, LAYOUT.data, "native.json");
 	if (opts.native !== null) writeFileSync(nativeFile, JSON.stringify(opts.native ?? { codex_research: true }));
@@ -42,7 +48,10 @@ export async function codexWorkerHome(t: TestContext, opts: { native?: Record<st
 	installCodexStub(bin, { script, stateDir: state });
 	const ghLog = join(forge, "calls.log");
 	if (opts.ship) {
-		writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS }));
+		if (opts.mandateDefaults !== "scaffold") {
+			const defaults = { ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS };
+			writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify(defaults));
+		}
 		copyFileSync(FORGE_GH, join(forge, "gh"));
 		chmodSync(join(forge, "gh"), 0o755);
 		writeFileSync(join(forge, "gitconfig"), "[user]\n\tname = codex ship e2e\n\temail = codex-ship@test.invalid\n");

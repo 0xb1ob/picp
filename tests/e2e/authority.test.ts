@@ -591,7 +591,7 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 	);
 	assert.equal(written.notes.dispatch_parallelism, "jobs under the grant that may run at once; set 1 for serial");
 	assert.deepEqual([[...written.allowed_actions].sort(), written.ask_on], [["implement", "merge", "plan", "repair", "review"], ["risk:high"]]);
-	assert.deepEqual(written.exclude_paths, [".github/workflows/", "secrets/", "**/.env*"]);
+	assert.deepEqual(written.exclude_paths, ["secrets/", "**/.env*"]);
 	for (const shown of [/expiry_hours: 8/, /spend_usd: 100/, /default admission window/]) assert.match(said("show0"), shown);
 	ok("issue0");
 	const bare = grant(first);

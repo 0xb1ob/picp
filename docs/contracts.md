@@ -3866,6 +3866,13 @@ CI readable (runs and jobs read); `CI unreadable — token lacks Actions read` f
 a denial at any of the three reads; and CI state unknown, named by category only
 (`command_failed`, `malformed`, `incomplete` …). It never echoes `gh` output.
 
+**`/doctor`'s `forge.workflow_scope`** (same module) runs `gh api -i user` once when a
+GitHub project is registered and reads only the `X-OAuth-Scopes` header: `workflow`
+listed is ok; a scopes header without it warns (fix: `gh auth refresh -h github.com
+-s workflow`); no header (a fine-grained or app token) is ok, "not readable", naming
+`Workflows: write`. A push GitHub refuses for that scope or permission fails as
+`workflow_scope_missing`, naming what to add (`docs/native-drivers.md`).
+
 **Where this home cannot read the verdict at all** — `unreadable`, or a CI
 state it cannot read for the branch — the per-PR, per-head-sha human
 checkpoint survives as the named fallback, exactly as it worked before this
@@ -4874,8 +4881,11 @@ through a three-tier ladder, `resolveMandateGrant`: an explicit argument on the
 named project's `data/projects.json` entry, then the home's
 `data/mandate-defaults.json` (scaffolded once by `scaffoldHome` with
 conservative values — 8h expiry, $100, 10M non-cached tokens (`token_ceiling` 100M), 3-job cap, 3 jobs at once,
-every action including merge, `ask_on: [risk:high]`, and `.github/workflows/`,
-`secrets/`, `**/.env*` excluded — and never rewritten after). A mandate that
+every action including merge, `ask_on: [risk:high]`, and `secrets/`, `**/.env*`
+excluded — and never rewritten after, except that a home whose list is exactly the
+old default (`.github/workflows/`, `secrets/`, `**/.env*`) drops the workflows entry
+once at session start (`mandate-defaults-workflows-v1`; journal and 0600 backup
+under `state/.migrations/`)). A mandate that
 names more than one project only takes a project tier when every named project
 agrees; disagreement falls through to home. Every resolved field's source
 (`explicit` | `project` | `home`) is written onto the issued mandate
@@ -9679,6 +9689,20 @@ journaled in `state/routing-migrations.jsonl` (`intent` with the rows and the fi
 sha256, then `done`, or `covered`/`failed`); a `done` or `covered` line makes it a no-op forever, so a
 row the operator deletes later stays deleted, and doctor's `config.routing.unrouted`
 names the roles that left uncovered.
+
+**Workers may edit workflow files by default.** The shipped `exclude_paths` default is
+`secrets/`, `**/.env*`; it used to also hold `.github/workflows/`. The scaffold step
+`mandate-defaults.workflows` runs the one-time migration `mandate-defaults-workflows-v1`:
+a `data/mandate-defaults.json` whose `exclude_paths` is exactly the old default, in
+order, gets a 0600 backup under `state/.migrations/backups/mandate-defaults-workflows-v1/`,
+then `intent`, an atomic write without the workflows entry (the `exclude_paths` note
+too, when it is still the shipped one; every other key kept), then `done`, journaled
+in `state/.migrations/mandate-defaults-workflows-v1.jsonl`. Any other list is the
+operator's: journaled `skipped` and never rewritten. A `done` or `skipped` line makes
+it a no-op forever; restore by copying the backup back. Grants, continuation grants
+and schedule templates issued under the old default keep their exclusions until they
+expire or are revoked; while the home default or any live grant still excludes
+`.github/workflows/`, doctor's `config.mandate_defaults.workflows` (ok) names where.
 
 The ported rubric (command-post `reports/model-routing.md`) becomes `rubric[]`
 rows on `role`/`project`/`scope`/`risk`, first match wins, with the ported

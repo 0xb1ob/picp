@@ -747,6 +747,38 @@ test(
 	},
 );
 
+// Scenario: forge.workflow_scope reads only X-OAuth-Scopes: no `workflow` warns, `workflow` is ok, no header is "not
+//   readable"; gh's body never echoes, and a home with no GitHub project never asks.
+const SCOPE_CASE = "landing: /doctor forge.workflow_scope says if the token may push workflow edits, never echoing gh";
+test(SCOPE_CASE, { timeout: 300_000 }, async (t) => {
+	const s = await startStack(t, { project: false });
+	await s.post.registry.register({ name: "lab", clone_url: "https://gitlab.com/o/lab.git", delivery: "pr" });
+	const scopeOf = async () => (await s.post.doctor()).findings.find((f) => f.check === "forge.workflow_scope");
+	assert.equal(await scopeOf(), undefined, "a GitLab-only home has no workflow scope line");
+	assert.equal(s.ghCalls().some((call) => call.startsWith("api -i user")), false, "and never asks gh");
+	await s.post.registry.register({ name: "ci", clone_url: "https://github.com/o/ci", delivery: "pr" });
+	const secret = "sentinel-credential-value";
+	const user = (header: string) => ({
+		stdout: `HTTP/2.0 200 OK\n${header}Content-Type: application/json\n\n{"login":"${secret}"}`,
+	});
+	const replies = [user("X-Oauth-Scopes: repo, read:org\n"), user("X-Oauth-Scopes: repo, workflow\n"), user("")];
+	s.setGh({ routes: [
+		{ match: "/actions/workflows", replies: [json({ total_count: 0, workflows: [] })] },
+		{ match: "api -i user", replies },
+	] });
+	const classic = await scopeOf();
+	assert.equal(classic?.severity, "warn", JSON.stringify(classic));
+	assert.match(classic?.what ?? "", /no workflow scope/);
+	assert.match(classic?.fix ?? "", /gh auth refresh -h github\.com -s workflow/);
+	const scoped = await scopeOf();
+	assert.deepEqual([scoped?.severity, scoped?.what], ["ok", "forge token can write workflows (scope workflow)"]);
+	const fine = await scopeOf();
+	assert.equal(fine?.severity, "ok");
+	assert.match(fine?.what ?? "", /not readable.*Workflows: write/);
+	assert.equal(s.ghCalls().filter((call) => call.startsWith("api -i user")).length, 3);
+	assert.doesNotMatch(JSON.stringify([classic, scoped, fine]), new RegExp(secret), "never prints what gh printed");
+});
+
 test(
 	"landing: an infra-only CI failure is claimed, then rerun once per head; a test failure, a cancel, a second attempt, a drain or an unreadable claim or job list goes to the parent",
 	{ skip: SKIP, timeout: 600_000 },

@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir, userInfo } from "node:os";
@@ -13,6 +13,7 @@ import { delimiter, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { paths } from "../../src/contracts.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
+import { MandateStore } from "../../src/mandate.ts";
 import { type ClaudeStep, type ClaudeToolUse, FAKE_CLAUDE_AUTH_TOKEN, toolResults } from "../harness/claude-mock-provider.ts";
 import { readRunEvents } from "../harness/index.ts";
 import { REAL_CLAUDE } from "../harness/native-parent.ts";
@@ -185,8 +186,9 @@ test("NP-0d: an implementer pushes only its job branch; no credential reaches th
 	assert.equal(accepted(h.b.home, id), 1);
 });
 
-// Scenario: Given the scaffold exclude_paths, When a native implementer edits .env or writes under .github/workflows/
-//   or secrets/, Then each call is refused and the files are absent or unchanged; an ordinary new file still lands.
+// Scenario: Given a custom exclude_paths naming .github/workflows/, When a native implementer edits .env or writes
+//   under .github/workflows/ or secrets/, Then each call is refused and the files are absent or unchanged; an ordinary
+//   new file still lands.
 test("NP-0e: exclude_paths hold for Edit and Write; a write outside them lands", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const wt = () => h.worktree(id);
@@ -212,6 +214,61 @@ test("NP-0e: exclude_paths hold for Edit and Write; a write outside them lands",
 	assert.equal(denied.count, 3, JSON.stringify(denied));
 	assert.ok(denied.lines.every((line) => / an excluded path /.test(line)), JSON.stringify(denied));
 	assert.equal(readFileSync(join(wt(), "src", "new.ts"), "utf8"), "export const fresh = true;\n");
+	assert.equal(accepted(h.b.home, id), 1);
+});
+
+// Scenario: Given fresh defaults, When a native implementer Edits, Writes and Bash-writes .github/workflows/, Then they
+//   land, secrets/x and .env stay refused, and a workflow-scope push refusal comes back as workflow_scope_missing.
+test("NP-0f: under fresh defaults an implementer edits CI workflows; a workflow-scope push refusal is named", {
+	skip: NATIVE, timeout: 300_000,
+}, async (t) => {
+	let id = "";
+	const wt = () => h.worktree(id);
+	const workflow = (name: string) => join(wt(), ".github", "workflows", name);
+	const refuseWorkflows = () => {
+		const origin = execFileSync("git", ["-C", h.b.clone, "remote", "get-url", "origin"], { encoding: "utf8" }).trim();
+		const refusal = "refusing to allow a Personal Access Token to create or update workflow "
+			+ "`.github/workflows/ci.yml` without `workflow` scope";
+		mkdirSync(join(origin, "hooks"), { recursive: true });
+		writeFileSync(join(origin, "hooks", "pre-receive"), `#!/bin/sh\necho '${refusal}' >&2\nexit 1\n`, { mode: 0o755 });
+	};
+	const h = await nativeWorkerHome(t, [
+		calls(
+			{ name: "Edit", input: () => ({
+				file_path: workflow("ci.yml"), old_string: "on: push", new_string: "on: [push, pull_request]",
+			}) },
+			{ name: "Write", input: () => ({ file_path: workflow("new.yml"), content: "on: workflow_dispatch\n" }) },
+			{ name: "Write", input: () => ({ file_path: join(wt(), "secrets", "x"), content: "k\n" }) },
+			{ name: "Edit", input: () => ({ file_path: join(wt(), ".env"), old_string: "A=1", new_string: "A=2" }) },
+		),
+		calls(bash("echo '# bash' >> .github/workflows/ci.yml"), bash("echo k > secrets/x"), bash("echo A=3 > .env")),
+		calls(bash("git add -A && git commit -q -m np0f")),
+		calls({ name: "mcp__picp__git_push", input: () => (refuseWorkflows(), {}) }),
+		calls({ name: REPORT_TOOL, input: () => blocked(id) }),
+		done,
+	], { mandateDefaults: "scaffold", files: { ".github/workflows/ci.yml": "on: push\n", ".env": "A=1\n" } });
+	const job = await h.job("ship");
+	id = job.id;
+	const args = { action: "issue", projects: ["demo"], objective: "edit CI", job_ids: [id] };
+	const issue = { kind: "tool_calls" as const, calls: [{ name: "cp_mandate", args }] };
+	const ends = await h.run([issue, job.dispatch("Edit the CI workflow."), h.awaitEnvelope(id)]);
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const grant = new MandateStore(h.b.home).list().find((mandate) => mandate.job_ids?.includes(id));
+	assert.deepEqual(grant?.exclusions?.paths, ["secrets/", "**/.env*"], JSON.stringify(grant));
+	const results = toolResults(h.claude.requests);
+	const denied = await h.denials(id);
+	assert.equal(readFileSync(workflow("ci.yml"), "utf8"), "on: [push, pull_request]\n# bash\n", results.join("\n---\n"));
+	assert.equal(readFileSync(workflow("new.yml"), "utf8"), "on: workflow_dispatch\n");
+	assert.equal(existsSync(join(wt(), "secrets", "x")), false);
+	assert.equal(readFileSync(join(wt(), ".env"), "utf8"), "A=1\n");
+	// Edit/Write (native-guards writeScopeGuard) and Bash (claude-bash-scope) each refuse secrets/x and .env.
+	const tools = denied.lines.map((line) => line.split(":")[0]);
+	assert.deepEqual(tools, ["Write", "Edit", "Bash", "Bash"], JSON.stringify(denied));
+	assert.ok(denied.lines.every((line) => / an excluded path /.test(line)), JSON.stringify(denied));
+	const pushed = results.find((result) => result.includes("refusing to allow")) ?? results.join("\n---\n");
+	assert.match(pushed, /^\[error\] workflow_scope_missing: .*`workflow` scope/);
+	assert.doesNotMatch(pushed, /^\[error\] git_push failed/);
+	assert.equal(h.originRefs()[`refs/heads/${id}`], undefined, "nothing was pushed");
 	assert.equal(accepted(h.b.home, id), 1);
 });
 
@@ -479,9 +536,9 @@ test("NP-2f: secret and env-dump shapes stay denied", { skip: NATIVE, timeout: 3
 	assert.equal(accepted(h.b.home, id), 1);
 });
 
-// Scenario: Given the scaffold exclude_paths, When a native implementer's Bash redirects, tees, copies or checks out
-//   into .github/workflows/, secrets/ or .env*, Then each is refused and the files are absent or unchanged; a write
-//   to src/ lands. Negative control: without the destination check, the workflow files exist.
+// Scenario: Given a custom exclude_paths naming .github/workflows/, When a native implementer's Bash redirects, tees,
+//   copies or checks out into .github/workflows/, secrets/ or .env*, Then each is refused and the files are absent or
+//   unchanged; a write to src/ lands. Negative control: without the destination check, the workflow files exist.
 test("NP-2g: Bash honours exclude_paths", { skip: NATIVE, timeout: 300_000 }, async (t) => {
 	let id = "";
 	const wt = () => h.worktree(id);

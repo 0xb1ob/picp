@@ -19,7 +19,9 @@ import { readFleet, readRunEvents, routeDriver, type ScriptStep, waitFor } from 
 import { REAL_CLAUDE } from "./native-parent.ts";
 
 export { NATIVE } from "./native-parent.ts";
-export const EXCLUDE_PATHS = [".github/workflows/", "secrets/", "**/.env*"];
+// An operator's custom list, not the old shipped default, so the workflows migration leaves it and the exclusion
+// mechanics tests keep proving a configured `.github/workflows/` exclusion still binds.
+export const EXCLUDE_PATHS = [".github/workflows/", "secrets/", "**/.env*", "private/"];
 
 type Tool = { toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } };
 
@@ -37,10 +39,17 @@ export async function startFakeWeb(t: TestContext, page: string): Promise<{ url:
 }
 
 /** `files` seed the project repo; `settingsEnv` joins the fake settings env (fake-claude's knobs); `run`'s extra env
- * joins the parent's, which the worker inherits. */
-export async function nativeWorkerHome(t: TestContext, script: readonly ClaudeStep[], opts: { files?: Record<string, string>; settingsEnv?: Record<string, string> } = {}) {
+ * joins the parent's, which the worker inherits; `mandateDefaults: "scaffold"` leaves that file to the scaffold. */
+export async function nativeWorkerHome(
+	t: TestContext,
+	script: readonly ClaudeStep[],
+	opts: { files?: Record<string, string>; settingsEnv?: Record<string, string>; mandateDefaults?: "scaffold" } = {},
+) {
 	const b = await dispatchS29(t, { files: opts.files });
-	writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS }));
+	if (opts.mandateDefaults !== "scaffold") {
+		const defaults = { ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: EXCLUDE_PATHS };
+		writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify(defaults));
+	}
 	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true, claude_ship: true }));
 	routeNativeModel(b.home);
 	// The CLI is configured, not chosen per job (cp-qmry P3): the demo planner and implementer rows run claude.

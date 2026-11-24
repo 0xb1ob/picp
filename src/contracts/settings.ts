@@ -178,7 +178,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		dispatch_parallelism: { file_key: "dispatch_parallelism", type: "integer", minimum: 1, maximum: 32, default: 3, label: "Dispatch parallelism", help: "Jobs under a grant that may run at once; 1 is serial." },
 		allowed_actions: { file_key: "allowed_actions", type: "enum_list", enum: [...MANDATE_ACTIONS], min_items: 1, max_items: 8, default: [...MANDATE_ACTIONS], label: "Allowed actions", help: "Actions a new grant may auto-decide." },
 		ask_on: { file_key: "ask_on", type: "enum_list", enum: [...MANDATE_ASK_ON], max_items: 16, default: ["risk:high"], label: "Ask on", help: "Still ask the operator for these inside an active grant." },
-		exclude_paths: { file_key: "exclude_paths", type: "string_list", max_items: 32, max_length: 200, default: [".github/workflows/", "secrets/", "**/.env*"], label: "Excluded paths", help: "Paths no grant may auto-touch." },
+		exclude_paths: { file_key: "exclude_paths", type: "string_list", max_items: 32, max_length: 200, default: ["secrets/", "**/.env*"], label: "Excluded paths", help: "Paths no grant may auto-touch." },
 	}),
 	...group("budgets", "budgets", { applies: "next_dispatch", on_invalid: "refuse" }, {
 		per_job_tokens: { file_key: "per_job_tokens", type: "integer", minimum: 1, default: DEFAULT_BUDGET_CONFIG.per_job_tokens, label: "Per-job token budget", help: "Token budget a dispatched job starts with." },

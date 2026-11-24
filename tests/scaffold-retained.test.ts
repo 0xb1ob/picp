@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { LAYOUT } from "../src/contracts.ts";
+import { LEGACY_EXCLUDE_PATHS } from "../src/mandate-defaults.ts";
 import { scaffoldHome } from "../src/scaffold.ts";
 import { createScratchHome } from "./harness/index.ts";
 
@@ -43,4 +44,10 @@ test("the ledger step can be turned off for a home that will never dispatch", (t
 	const report = scaffoldHome({ home: home.path, env: { CP_HOME: home.path }, ledger: false });
 	assert.ok(!report.steps.some((step) => step.step === "ledger"));
 	assert.ok(!existsSync(join(home.path, LAYOUT.jobsFile)));
+});
+
+// No entry point exposes the constant's literal; P16-workflows-migration keeps an inline copy so it fails on main.
+// This pins the two together so the migration's match and its e2e fixture cannot drift.
+test("the legacy exclude_paths constant equals P16-workflows-migration's inline fixture", () => {
+	assert.deepEqual(LEGACY_EXCLUDE_PATHS, [".github/workflows/", "secrets/", "**/.env*"]);
 });
