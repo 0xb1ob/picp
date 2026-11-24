@@ -581,7 +581,10 @@ page says "Loading the model list…" or "Model list unavailable". Screenshots: 
 CLI switches (cp-settings-cli-model-effort; docs/contracts.md §Settings catalog, CLI keys). *Model routing* opens with a
 **Workers CLI** select (pi or Claude CLI; "(rows disagree)" with the split named when rows differ). Each rubric row
 shows a human label over its id: Planner, Small implementer, Implementer, and for homes scaffolded before cp-4iyy Small ship, Big ship, Risky (any job), Risky ship, Reviews, Big research,
-Native research. Any other id shows alone. With Claude CLI drafted, each row's model select lists only the
+Native research. Those older rows show only while a home keeps an edited earlier rubric. An unedited one is replaced
+with the current rows at the next session start, each keeping its model, fallbacks, thinking and CLI
+(`routing-template-v1`). For an edited one, `/doctor` `config.routing.template` names the differences and the manual
+reset, because this page neither adds nor removes rows. Any other id shows alone. With Claude CLI drafted, each row's model select lists only the
 models matching the session's `drivers.claude_model`. A current value outside it stays selected as "<id> (not a
 Claude model)". The thinking select lists `drivers.efforts.claude`; fallbacks keep pi's whole list. Each row that
 cannot run native gets an inline alert, and one section alert names them all ("These rules need a new model, effort

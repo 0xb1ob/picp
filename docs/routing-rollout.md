@@ -38,6 +38,9 @@ not candidates passed over by the capacity comparison.
 
 cp-4iyy collapsed the template to these rows plus `planner-default`: the earlier `risky-any`, `research-big`,
 `risky-ship` and `big-ship` rows are gone, and risk still gates dispatch but no longer picks a planner's model.
+A home whose `data/routing.json` still has the earlier rows moves to these rows once, at the next session start
+(`routing-template-v1`, contracts.md §Routing config). Each surviving row keeps its own model, fallbacks, thinking,
+driver and note; the dropped rows are named once in a recovery notice and kept in `data/routing.json.bak-<UTC>`.
 
 Profiles (`profiles/*.md`) name no model since R1 PR4; a profile's `thinking` is the
 effort only where the row names none. Planning, ops and QA, at every scope and risk, resolve from the template's
@@ -101,7 +104,9 @@ auth pi actually has.
 
 `data/routing.json` is machine-local and gitignored: merging the PR changes the
 *template*, never a live home. Copy-once means an existing file is never
-touched. Adopting the new matrix is therefore an explicit operator step.
+re-copied. A file that still has an earlier shipped template's rows is replaced
+once, automatically, at the next session start (`routing-template-v1`). The steps
+below are for a rubric that `/doctor` names under `config.routing.template` as edited.
 
 1. **Preconditions.** The PR is merged and this home is running that build. You
    do **not** need to drain live workers: routing is resolved once per dispatch
@@ -162,7 +167,8 @@ its conversation or thinking state. The next spawn re-scores independently.
 
 ## What this change does not do
 
-- It does not migrate anyone's `data/routing.json`, automatically or otherwise.
+- The template change itself migrates nothing; the one automatic migration is
+  `routing-template-v1` (above), and it never rewrites an edited rubric.
 - It does not touch credentials or re-route running or held workers. A
   missing admin key uses static order; a configured but unreadable gateway
   uses waiting-worker fleet estimates, or static order if the fleet is unavailable.
@@ -187,6 +193,10 @@ the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-driv
      "fallbacks": ["<the pi research model>"], "thinking": "high", "driver": "claude" }
    ```
 
+   A `native-research` row added this way does not stop `routing-template-v1`. An otherwise unedited earlier shipped
+   rubric is still replaced, the row is dropped, and its model and driver are named in the notice and kept in the
+   backup.
+
    Back up `data/routing.json` first (`cp -p data/routing.json data/routing.json.bak-<stamp>`), then check it with
    `/doctor`: `models.planner` reports `driver=claude <model>, never pi; pi lane (unused) …`.
 2. **The switch.** Dashboard Settings → Native workers, or `data/native.json` `{"claude_research": true}`. Only local
@@ -204,7 +214,7 @@ the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-driv
 
 ## Claude CLI for ship and review workers (the flip)
 
-The operator does this by hand. picp never edits the home's data files. The mechanism and the concurrency rules are in
+The operator does this by hand. picp never flips drivers or switches for you. The mechanism and the concurrency rules are in
 [native-drivers.md](native-drivers.md#native-concurrency-and-the-flip-n4i).
 
 1. **Back up** both files with dated copies: `cp data/routing.json data/routing.json.<date>.bak` and

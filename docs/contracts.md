@@ -9614,9 +9614,8 @@ its single location (cp-u3i2). `scaffoldHome`'s `routing.default` step — the s
 `data/routing.json` **once**: only when that file does not already exist. The
 copy is a step in `ScaffoldReport.steps` (`created` the first time, `present`
 ever after), so it is visible in the same log a fresh home already prints; an
-operator's existing `data/routing.json`, however it got there, is never
-touched again — this is the *only* write the scaffold ever makes to a routing
-decision. A home whose package root ships no template (an old install) gets a
+existing `data/routing.json` changes afterwards only through the two journaled
+one-time migrations below, `role-defaults-v1` and `routing-template-v1`. A home whose package root ships no template (an old install) gets a
 `skipped` step and behaves exactly as before: `DEFAULT_ROUTING_CONFIG`'s
 in-code fallback is what fires, because a missing file still means "no policy
 configured yet", copy-once or not.
@@ -9678,7 +9677,8 @@ which matched every `cp_ask` too and set one effort for both, and let ordinary
 planning fall through to the profile's model. R1 PR4 took `model`/`fallbacks` out
 of profiles, so that fall-through became the `planner-default` row, effort-free.
 
-**An existing `data/routing.json` keeps every row it has, byte for byte.** The
+**An existing `data/routing.json` keeps every row it has, except one replacement
+of an unedited earlier shipped rubric (`routing-template-v1`, below).** The
 scaffold's `routing.default` step is copy-once. The `routing.roles` step then runs the
 one-time migration `role-defaults-v1`: for each role some scope/risk cell of which no
 project-free row covers (the cells the old profile fall-through served), it appends that
@@ -9689,6 +9689,48 @@ journaled in `state/routing-migrations.jsonl` (`intent` with the rows and the fi
 sha256, then `done`, or `covered`/`failed`); a `done` or `covered` line makes it a no-op forever, so a
 row the operator deletes later stays deleted, and doctor's `config.routing.unrouted`
 names the roles that left uncovered.
+
+**`routing-template-v1` (once, after `role-defaults-v1`).** The `routing.template` scaffold
+step replaces a `data/routing.json` that still has an earlier shipped template's row
+structure with the current template.
+
+*Structure.*
+- The rubric ids, in order, are a shipped version's (ea63179 or 8dd7d2c).
+- Each row's `role`, `scope`, `risk` and `project` equal that version's.
+- `schema_version` is 1, `allow` is `["*/*"]`, and there is no other top-level key.
+- One `native-research` row in the routing-rollout recipe shape (planner, scope `["S"]`,
+  `driver: "claude"`) may sit anywhere, and rows `role-defaults-v1` appended may follow.
+
+*Carried values.* `model`, `fallbacks`, `thinking`, `driver` and `note` are free: the new
+rows keep them as they were.
+- The carry map: `reviews` <- `reviews`, `implementer-small` <- `small-ship`,
+  `implementer-default` <- `big-ship`, `planner-default` <- `planner-default`.
+- An absent key or an empty list stays as it was, and scope and risk come from the template.
+- Only a value the Settings row checks refuse (a non-Claude model or effort on a claude row,
+  likewise for codex) falls back to the template's value for that field.
+- `risky-any`, `risky-ship`, `research-big` and `native-research` are dropped; their values
+  survive in the backup and the notice.
+
+*Steps.* The step takes `state/settings.lock` and journals an `intent` in
+`state/routing-migrations.jsonl`, with the new bytes, the backup path, the notice and both
+sha256. It then:
+1. copies the file byte for byte, mode kept, to `data/routing.json.bak-<UTC>`;
+2. renames the new file in;
+3. queues one durable `recovery` wake (id `routing-template-v1:<sha256 prefix>`) naming the
+   backup, the new ids, every dropped row with its model and driver, and every fallback;
+4. journals `done`.
+
+The wake is the one report: the step is quiet in the session-start scaffold notice. Only if
+the wake cannot be queued does the scaffold notice carry the full text instead.
+
+*Recovery.* A restart after a crash at any point resumes from the intent to the same file, one
+backup and one notice. A `done` line makes the step a no-op forever, so restoring the backup
+is permanent.
+
+*Edited rubrics.* Any other rubric is never written. `/doctor` `config.routing.template` names
+each difference. It is `warn` while retired shipped ids remain, otherwise `ok`, and never
+`error`. It also gives the manual reset: back up, then copy the package's
+`defaults/routing.default.json` over `data/routing.json`.
 
 **Workers may edit workflow files by default.** The shipped `exclude_paths` default is
 `secrets/`, `**/.env*`; it used to also hold `.github/workflows/`. The scaffold step
@@ -9884,7 +9926,11 @@ gets `enabled: false` and loses `interval_min`. An unreadable `daemon.json` is 4
 and all restores skip non-editable fields. A restore never creates an absent owner file.
 `models.parent`, `models.operator`, `models.parent_thinking` and `models.operator_thinking` delete the key. `models.rubric` (`shipped_rubric`) puts
 back the shipped `defaults/routing.default.json` model, fallbacks and thinking on every row
-whose `id` the template has; a hand-added row and every other row field stay. An unreadable
+whose `id` the template has; a hand-added row and every other row field stay. Restore never
+adds, removes or renames rows. A rubric still on an earlier template's rows is replaced once by
+`routing-template-v1` at session start. One that doctor names as edited
+(`config.routing.template`) is reset by hand: back up, then copy the package's
+`defaults/routing.default.json` over `data/routing.json`. An unreadable
 template is 409 and restores nothing. `models.parent_driver` and `models.operator_driver` delete the key (pi). `workers.driver` restores `pi`, as
 below.
 
