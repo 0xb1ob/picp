@@ -56,7 +56,7 @@ export const SCAFFOLD_MANDATE_DEFAULTS: MandateDefaults = {
 	dispatch_parallelism: 3,
 	allowed_actions: ["plan", "implement", "review", "repair", "merge"],
 	ask_on: ["risk:high"],
-	exclude_paths: [".github/workflows/", "secrets/", "**/.env*"],
+	exclude_paths: ["secrets/", "**/.env*"],
 	notes: {
 		expiry_hours: "default admission window for new work; proven unfinished named work retains its original scope and remaining limits; explicit expiry remains a completion deadline",
 		spend_usd: "USD spend cap across every job the grant covers, before it pauses and escalates",
@@ -66,9 +66,14 @@ export const SCAFFOLD_MANDATE_DEFAULTS: MandateDefaults = {
 		dispatch_parallelism: "jobs under the grant that may run at once; set 1 for serial",
 		allowed_actions: "every action a mandate may auto-decide; merge is granted by default and is gated only by the repository's own rules and ask_on — add ask_on: [\"risk:high\",\"merge\"] to require a human look before merge",
 		ask_on: "still asks the operator for these even inside an active mandate; risk:high is the one this ships with",
-		exclude_paths: "paths no mandate may auto-touch regardless of allowed_actions: CI workflows and secrets",
+		exclude_paths: "paths no mandate may auto-touch regardless of allowed_actions: secrets and env files",
 	},
 };
+
+/** The pre-2026-11 shipped `exclude_paths` default, matched exactly by the workflows migration in `src/scaffold.ts`. */
+export const LEGACY_EXCLUDE_PATHS = [".github/workflows/", "secrets/", "**/.env*"] as const;
+/** The pre-2026-11 shipped `exclude_paths` note, replaced only when a migrated home still holds it verbatim. */
+export const LEGACY_EXCLUDE_PATHS_NOTE = "paths no mandate may auto-touch regardless of allowed_actions: CI workflows and secrets";
 
 /** Read `data/mandate-defaults.json`; the scaffold values when it does not exist yet. */
 export function loadMandateDefaults(home: string): MandateDefaults {

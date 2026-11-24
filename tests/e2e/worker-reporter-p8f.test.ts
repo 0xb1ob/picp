@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { GATE_REVIEW_ITEM_MAX, VERDICT_RAW_FILE } from "../../extensions/worker-reporter/index.ts";
@@ -172,6 +172,27 @@ test("P8f reporter guards: a CI wait, a credential probe and a state-bearing web
 	assert.doesNotMatch(state ?? "", /web_search:ran/, "a web call carrying command-post state never runs");
 	assert.match(state ?? "", /command-post state never leaves the host|\.pi-command-post/);
 	assert.match(plain ?? "", /web_search:ran/, "a clean web call runs");
+});
+
+// Scenario: a pi worker's Bash `git push` of a workflow change that GitHub (a pre-receive hook on the scratch origin)
+//   refuses for a missing `workflow` scope comes back as the named workflow_scope_missing error, not a bare git failure.
+test("P8f reporter push: a workflow-scope push refusal in Bash is named workflow_scope_missing with the scope to add", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const f = await packageBench(t);
+	const refusal = "refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope";
+	const origin = (id: string) => execFileSync("git", ["remote", "get-url", "origin"], { cwd: f.post.fleet.require(id).worktree, encoding: "utf8" }).trim();
+	const push = (id: string) => () => {
+		mkdirSync(join(origin(id), "hooks"), { recursive: true });
+		writeFileSync(join(origin(id), "hooks", "pre-receive"), `#!/bin/sh\necho '${refusal}' >&2\nexit 1\n`, { mode: 0o755 });
+		return { command: "mkdir -p .github/workflows && printf 'on: push\\n' > .github/workflows/ci.yml && git add -A && "
+			+ `git -c user.name=p8f -c user.email=p8f@test.invalid commit -qm wf && git push origin HEAD:refs/heads/${id}` };
+	};
+	const id = await dispatch(f, "push", "ship", "pr", (jobId) => [call("bash", push(jobId)), HANG]);
+	const [end] = (await waitFor(() => toolEnds(join(f.home, paths.eventsFile(id))), (rows) => rows.length >= 1,
+		{ timeoutMs: 90_000, what: `${id}'s push result` })).map((row) => row.text);
+	assert.match(end ?? "", /workflow_scope_missing/);
+	assert.match(end ?? "", /`workflow` scope/);
+	const refs = execFileSync("git", ["ls-remote", "origin"], { cwd: f.post.fleet.require(id).worktree, encoding: "utf8" });
+	assert.equal(refs.includes(`refs/heads/${id}`), false, "nothing was pushed");
 });
 
 test("P8f reporter verdicts: a gate reviewer files one schema-valid verdict, over-long items are clamped with the original kept, a malformed verdict is repaired in-run, and an exhausted repair is an operational gate", { skip: SKIP, timeout: 300_000 }, async (t) => {

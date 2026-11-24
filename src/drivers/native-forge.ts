@@ -7,6 +7,7 @@ import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:c
 import { existsSync, mkdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { hitsNeedle } from "../mandate.ts";
+import { workflowScopeRefusal } from "../workflow-scope.ts";
 import { exec, FORGE_PR_FILE, type ForgeJob, type RecordedPr, recordedPr } from "./native-gh-read.ts";
 
 export const TITLE_MAX = 256;
@@ -74,6 +75,8 @@ export function forgeWrites(job: ForgeJob, env: NodeJS.ProcessEnv = process.env,
 				const merge = options.hooksOff ? `git_merge {ref: "origin/${branch}"}` : `\`git merge origin/${branch}\``;
 				return refuse(`git_push: HEAD is not a fast-forward of origin/${branch}, and it never forces. git_fetch, ${merge}, then push again.\n${pushed.out}`);
 			}
+			const scope = pushed.ok ? undefined : workflowScopeRefusal(pushed.out);
+			if (scope) return reply(`${scope}\n${pushed.out}`, true);
 			return reply(pushed.ok ? `Pushed HEAD to origin/${branch}.\n${pushed.out}` : `git_push failed:\n${pushed.out}`, !pushed.ok);
 		},
 		async fetch(args) {
@@ -222,7 +225,7 @@ export function checkpointCommit(worktree: string, branch: string, env: NodeJS.P
 		git(["push", "-q", "origin", `HEAD:refs/heads/${branch}`]);
 		return { head, pushed: true };
 	} catch (error) {
-		return { head, pushed: false, error: bounded(error) };
+		return { head, pushed: false, error: workflowScopeRefusal(String((error as Error).message)) ?? bounded(error) };
 	}
 }
 
@@ -277,7 +280,7 @@ export async function codexCheckpointCommit(job: ForgeJob, options: CodexCheckpo
 	const branch = job.job_id;
 	if (!branch || ["main", options.env.CP_BASE_BRANCH?.trim()].includes(branch)) return { head: head.out, pushed: false, error: `no job branch to push (${branch || "unset"})`, ...excluded };
 	const pushed = await exec("git", [...GIT_HOOKS_OFF, "push", "-q", "origin", `HEAD:refs/heads/${branch}`], job.worktree, options.env);
-	return pushed.ok ? { head: head.out, pushed: true, ...excluded } : { head: head.out, pushed: false, error: bounded(pushed.out), ...excluded };
+	return pushed.ok ? { head: head.out, pushed: true, ...excluded } : { head: head.out, pushed: false, error: workflowScopeRefusal(pushed.out) ?? bounded(pushed.out), ...excluded };
 }
 
 /** The JSON input schemas of the six Codex forge tools, the Claude `zod` shapes' limits. */

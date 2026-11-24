@@ -61,6 +61,34 @@ export function ciAccessFindings(home: string, run: Run): DoctorFinding[] {
 	return findings;
 }
 
+/**
+ * `forge.workflow_scope`: whether gh's token may push `.github/workflows/` changes, read only from the
+ * `X-OAuth-Scopes` header of `gh api -i user`. Only with a GitHub project registered; never prints gh output.
+ */
+export function workflowWriteFindings(home: string, run: Run): DoctorFinding[] {
+	try {
+		const projects = new ProjectRegistry({ home }).list().filter((project) => !project.archived);
+		if (!projects.some((project) => githubRepoFromCloneUrl(project.clone_url))) return [];
+	} catch {
+		return []; // already reported by models.projects
+	}
+	const check = "forge.workflow_scope";
+	const result = run("gh", ["api", "-i", "user"], home);
+	if (result.status === null && /\bENOENT\b/.test(result.stderr)) return []; // host.gh already says gh is missing
+	if (result.status !== 0) return [{ check, severity: "ok", what: "workflow write access unknown: gh api user failed" }];
+	const scopes = /^x-oauth-scopes:[ \t]*(.*)$/im.exec(result.stdout);
+	if (scopes === null) {
+		return [{ check, severity: "ok", what: "workflow write access not readable for this token type (fine-grained or app token): it needs Workflows: write" }];
+	}
+	if (scopes[1]!.split(",").map((scope) => scope.trim()).includes("workflow")) {
+		return [{ check, severity: "ok", what: "forge token can write workflows (scope workflow)" }];
+	}
+	return [{
+		check, severity: "warn", what: "forge token cannot push .github/workflows/ changes (no workflow scope)",
+		fix: "gh auth refresh -h github.com -s workflow, or add the workflow scope to the classic token, then re-run /doctor",
+	}];
+}
+
 /** One project's `ci.<name>` finding; undefined when the remote is not GitHub, `gh_missing` when gh is absent. */
 export function ciAccessFinding(home: string, run: Run, name: string, cloneUrl: string): DoctorFinding | "gh_missing" | undefined {
 	const repo = githubRepoFromCloneUrl(cloneUrl);

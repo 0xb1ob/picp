@@ -26,7 +26,7 @@ export function schedulePolicyView(stateDir: string, id: string): SchedulePolicy
   try {
    const dataDir = join(dirname(stateDir),"data");
    const defaultsFile = join(dataDir,"mandate-defaults.json"), projectsFile = join(dataDir,"projects.json");
-   const defaults = existsSync(defaultsFile) ? JSON.parse(readFileSync(defaultsFile,"utf8")) : {token_ceiling:100_000_000,exclude_paths:[".github/workflows/","secrets/","**/.env*"]};
+   const defaults = existsSync(defaultsFile) ? JSON.parse(readFileSync(defaultsFile,"utf8")) : {token_ceiling:100_000_000,exclude_paths:["secrets/","**/.env*"]};
    const projects = existsSync(projectsFile) ? JSON.parse(readFileSync(projectsFile,"utf8")).projects : [];
    if (!Array.isArray(projects)) throw new Error("projects.json must hold projects");
    const project = projects.find((p: {name:string})=>p.name === schedule.project);

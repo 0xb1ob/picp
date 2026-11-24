@@ -587,7 +587,9 @@ reaches this yet.
 `report_result`. They run in the claude-worker process, which holds the inherited worker env, so no credential enters
 the CLI child; the lockdown expects them for the implementer only. `git_push` pushes `HEAD` to `origin/<CP_JOB_ID>` in
 the worktree and refuses `force`, main, the base branch (`CP_BASE_BRANCH`) and any other branch by name; a rejected
-non-fast-forward push is refused by name too, never retried forced. `git_fetch` fetches `origin` in the worktree and
+non-fast-forward push is refused by name too, never retried forced. A push GitHub refuses because the token lacks the
+`workflow` scope (classic) or `Workflows: write` (fine-grained, GitHub App) fails as `workflow_scope_missing`, naming
+what to add; so do the freeze checkpoints' pushes and a pi worker's Bash `git push` (`src/workflow-scope.ts`). `git_fetch` fetches `origin` in the worktree and
 refuses any other `cwd`, the canonical clone included. `pr_create` opens a draft from the job branch (to
 `CP_BASE_BRANCH` when set, else the repository's default) and records it in the run dir; a second call returns that
 URL. `pr_edit` edits the title and/or body of that PR and refuses any other number. `gh_read` runs `pr view|checks`

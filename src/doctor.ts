@@ -65,7 +65,7 @@ import { DEFAULT_PARENT_COMPACT_TOKENS, parentContextStatus, parentSettings, sta
 import { viewerFindings } from "./viewer/doctor-check.ts";
 import { pushFindings } from "./push/status.ts";
 import { storageFindings } from "./storage.ts";
-import { ciAccessFindings } from "./ci-access-doctor.ts";
+import { ciAccessFindings, workflowWriteFindings } from "./ci-access-doctor.ts";
 import { jobIdMigrationFinding } from "./state-migrations.ts";
 import { detectBudgetClamp, resolveJobBudget } from "./worker-manager.ts";
 import { ROLE_PACKAGES, WORKER_PACKAGES_LOADED_AT } from "./worker-packages.ts";
@@ -77,7 +77,7 @@ import { jobsFile } from "./ledger.ts";
 import { describeRuntime } from "./mode.ts";
 import { listProfiles } from "./profiles.ts";
 import { ProjectRegistry } from "./projects.ts";
-import { resolveLedgerPrefix, routingCoverageFindings } from "./scaffold.ts";
+import { resolveLedgerPrefix, routingCoverageFindings, workflowExclusionFindings } from "./scaffold.ts";
 import { routedModels } from "./routed-models.ts";
 import {
 	boundedList,
@@ -321,6 +321,7 @@ export class Doctor {
 			...pushFindings(this.#options.home, this.#now()),
 			...storageFindings(this.#options.home, this.#run),
 			...ciAccessFindings(this.#options.home, this.#run),
+			...workflowWriteFindings(this.#options.home, this.#run),
 		];
 		// The one place every finding passes before the contract sees it: no source check, present or
 		// future, can turn a long path, message or list into a crashed diagnosis (doctor-caps.ts).
@@ -1386,7 +1387,7 @@ export class Doctor {
 
 	/** The job_id -> job_id sweep (spec 2026-09-04, PR 1): has this home been moved? */
 	#migrations(): DoctorFinding[] {
-		return [jobIdMigrationFinding(this.#options.home)];
+		return [jobIdMigrationFinding(this.#options.home), ...workflowExclusionFindings(this.#options.home)];
 	}
 
 	// -- worktree pool ------------------------------------------------------

@@ -25,7 +25,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -40,7 +40,8 @@ import {
 import { describeHome, PACKAGE_ROOT, type HomeResolution } from "./home.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { initJobsDocument, LedgerError } from "./ledger.ts";
-import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
+import { hitsNeedle, liveGrants, MandateStore } from "./mandate.ts";
+import { LEGACY_EXCLUDE_PATHS, LEGACY_EXCLUDE_PATHS_NOTE, loadMandateDefaults, SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
 import { uncoveredRoles } from "./routed-models.ts";
 import { boundedList, loadRoutingConfig } from "./routing.ts";
 
@@ -135,6 +136,7 @@ export function scaffoldHome(options: ScaffoldOptions = {}): ScaffoldReport {
 	steps.push(routingDefaultStep(home, options.packageRoot ?? PACKAGE_ROOT));
 	steps.push(routingRoleDefaultsStep(home, options.packageRoot ?? PACKAGE_ROOT));
 	steps.push(mandateDefaultsStep(home));
+	steps.push(mandateDefaultsWorkflowsStep(home));
 	if (options.ledger !== false) steps.push(ledgerStep(home, env));
 
 	return {
@@ -333,6 +335,114 @@ function mandateDefaultsStep(home: string): ScaffoldStep {
 	} catch (error) {
 		return { step: "mandate-defaults", action: "failed", detail: (error as Error).message };
 	}
+}
+
+const WORKFLOWS_MIGRATION = "mandate-defaults-workflows-v1";
+const WORKFLOWS = ".github/workflows/";
+
+/** One `state/.migrations/mandate-defaults-workflows-v1.jsonl` line. */
+interface WorkflowsJournalLine {
+	migration: string;
+	at: string;
+	outcome: "intent" | "done" | "skipped";
+	backup?: string;
+	before_sha256?: string;
+	after_sha256?: string;
+	reason?: string;
+}
+
+function readWorkflowsJournal(file: string): WorkflowsJournalLine[] {
+	if (!existsSync(file)) return [];
+	return readFileSync(file, "utf8").split("\n").flatMap((line) => {
+		try {
+			const parsed = JSON.parse(line) as WorkflowsJournalLine;
+			return parsed?.migration === WORKFLOWS_MIGRATION ? [parsed] : [];
+		} catch {
+			return [];
+		}
+	});
+}
+
+/**
+ * Once per home: a `data/mandate-defaults.json` whose `exclude_paths` is exactly the old shipped default drops
+ * `.github/workflows/` (backup 0600 → intent → atomic write → done). Any other list is the operator's: journaled
+ * `skipped` and never rewritten.
+ */
+function mandateDefaultsWorkflowsStep(home: string, now: Date = new Date()): ScaffoldStep {
+	const step = "mandate-defaults.workflows";
+	const journalFile = join(home, LAYOUT.migrationsDir, `${WORKFLOWS_MIGRATION}.jsonl`);
+	const journal = readWorkflowsJournal(journalFile);
+	if (journal.some((line) => line.outcome === "done" || line.outcome === "skipped")) return { step, action: "present" };
+	const file = join(home, LAYOUT.mandateDefaultsFile);
+	if (!existsSync(file)) return { step, action: "skipped", detail: `no ${LAYOUT.mandateDefaultsFile}` };
+	const record = (line: Omit<WorkflowsJournalLine, "migration" | "at">): void => {
+		mkdirSync(dirname(journalFile), { recursive: true });
+		appendFileSync(journalFile, `${JSON.stringify({ migration: WORKFLOWS_MIGRATION, at: now.toISOString(), ...line })}\n`);
+	};
+	let text: string, raw: { exclude_paths?: unknown; notes?: Record<string, unknown> };
+	try {
+		text = readFileSync(file, "utf8");
+		raw = JSON.parse(text);
+	} catch (error) {
+		return { step, action: "skipped", detail: `${(error as Error).message.split("\n")[0]} (doctor reports it)` };
+	}
+	try {
+		const paths = raw.exclude_paths;
+		if (journal.some((line) => line.outcome === "intent") && Array.isArray(paths) && !paths.includes(WORKFLOWS)) {
+			record({ outcome: "done", after_sha256: sha256(text) });
+			return { step, action: "created", detail: `finished an interrupted drop of ${WORKFLOWS} from ${file}` };
+		}
+		if (!isDeepStrictEqual(paths, [...LEGACY_EXCLUDE_PATHS])) {
+			record({ outcome: "skipped", reason: "exclude_paths is not the old shipped default; left as is" });
+			return { step, action: "present" };
+		}
+		const dir = join(home, LAYOUT.migrationsDir, "backups", WORKFLOWS_MIGRATION);
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		const backup = join(dir, `mandate-defaults.${now.toISOString().replace(/:/g, "-")}.json`);
+		copyFileSync(file, backup, constants.COPYFILE_EXCL);
+		chmodSync(backup, 0o600);
+		if (sha256(readFileSync(backup, "utf8")) !== sha256(text)) {
+			return { step, action: "failed", detail: `backup verification failed: ${backup}; ${file} left as is` };
+		}
+		record({ outcome: "intent", backup, before_sha256: sha256(text) });
+		const notes = raw.notes?.exclude_paths === LEGACY_EXCLUDE_PATHS_NOTE
+			? { notes: { ...raw.notes, exclude_paths: SCAFFOLD_MANDATE_DEFAULTS.notes.exclude_paths } } : {};
+		atomicWriteJson(file, { ...raw, exclude_paths: LEGACY_EXCLUDE_PATHS.filter((path) => path !== WORKFLOWS), ...notes });
+		record({ outcome: "done", after_sha256: sha256(readFileSync(file, "utf8")) });
+		return { step, action: "created", detail: `dropped ${WORKFLOWS} from exclude_paths in ${file} (backup ${backup})` };
+	} catch (error) {
+		return { step, action: "failed", detail: (error as Error).message };
+	}
+}
+
+/** Doctor: an info line while the home default or a live grant still excludes `.github/workflows/`. */
+export function workflowExclusionFindings(home: string): DoctorFinding[] {
+	const hits = (needles: readonly string[]) =>
+		needles.some((needle) => hitsNeedle(`${WORKFLOWS}ci.yml`, needle) || hitsNeedle(WORKFLOWS, needle));
+	let homeList: readonly string[] = [];
+	try {
+		homeList = loadMandateDefaults(home).exclude_paths;
+	} catch {
+		// An unreadable defaults file is config.mandate_defaults' finding, not this one.
+	}
+	let grants: string[] = [];
+	try {
+		grants = liveGrants(new MandateStore(home).list()).filter((grant) => hits(grant.exclusions?.paths ?? [])).map((grant) => grant.id);
+	} catch {
+		// An unreadable mandate store is reported by its own checks.
+	}
+	const fromHome = hits(homeList);
+	if (!fromHome && grants.length === 0) return [];
+	const keep = homeList.filter((needle) => !hits([needle]));
+	return [{
+		check: "config.mandate_defaults.workflows",
+		severity: "ok",
+		what: `${WORKFLOWS} is still excluded: workers cannot edit workflow files (${[...(fromHome ? ["home exclude_paths"] : []), ...grants].join(", ")})`,
+		fix: [
+			...(fromHome ? [`cp_mandate defaults_set exclude_paths ${keep.join(",") || "(empty)"}`] : []),
+			...(grants.length ? [`revoke and reissue ${grants.join(", ")}, or let them expire`] : []),
+		].join("; "),
+	}];
 }
 
 /**

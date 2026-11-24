@@ -404,6 +404,64 @@ test("P16-migration: a session sweeps br_id to job_id once, leaves malformed and
 	assert.equal(finding(await doctor(again), "state.job_id_migration")?.severity, "ok", "a swept home is ok");
 });
 
+// P16-workflows-migration: a home still holding the exact old shipped exclude_paths drops .github/workflows/ once at
+// session start, with a journal and a byte-exact 0600 backup; a custom list is never rewritten and doctor names it.
+// Inline literals, not src constants, so this file still loads against main and fails there on the first assertion.
+test("P16-workflows-migration: the old default exclude_paths drops .github/workflows/ once with a backup; a custom list is left and named by doctor", { timeout: 300_000 }, async (t) => {
+	const OLD = [".github/workflows/", "secrets/", "**/.env*"];
+	const OLD_NOTE = "paths no mandate may auto-touch regardless of allowed_actions: CI workflows and secrets";
+	const r = await rig(t, "cp-p16-workflows-");
+	const seed = (home: string, value: object): string => {
+		const text = JSON.stringify(value, null, 2);
+		mkdirSync(join(home, LAYOUT.data), { recursive: true });
+		writeFileSync(join(home, LAYOUT.mandateDefaultsFile), text);
+		return text;
+	};
+	const journal = (home: string): string[] => {
+		const file = join(home, LAYOUT.migrationsDir, "mandate-defaults-workflows-v1.jsonl");
+		return existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line).outcome) : [];
+	};
+	const backups = (home: string): string[] => {
+		const dir = join(home, LAYOUT.migrationsDir, "backups", "mandate-defaults-workflows-v1");
+		return existsSync(dir) ? readdirSync(dir).map((name) => join(dir, name)) : [];
+	};
+
+	const a = join(r.root, "home-a");
+	const before = seed(a, { ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: OLD, notes: { ...SCAFFOLD_MANDATE_DEFAULTS.notes, exclude_paths: OLD_NOTE }, spend_usd: 42 });
+	const read = () => JSON.parse(readFileSync(join(a, LAYOUT.mandateDefaultsFile), "utf8"));
+	const first = open(r, r.root, { CP_HOME: a });
+	await version(first);
+	assert.deepEqual(read().exclude_paths, ["secrets/", "**/.env*"]);
+	assert.equal(read().spend_usd, 42);
+	assert.match(read().notes.exclude_paths, /secrets and env files/);
+	assert.doesNotMatch(read().notes.exclude_paths, /CI workflows/);
+	const [backup, ...extra] = backups(a);
+	assert.equal(extra.length, 0, "exactly one backup");
+	assert.equal(readFileSync(backup!, "utf8"), before, "the backup is byte-exact");
+	assert.equal(statSync(backup!).mode & 0o777, 0o600);
+	assert.deepEqual(journal(a), ["intent", "done"]);
+	assert.equal(finding(await doctor(first), "config.mandate_defaults.workflows"), undefined, "a migrated home has no workflows line");
+	await first.close();
+	const migrated = readFileSync(join(a, LAYOUT.mandateDefaultsFile), "utf8");
+	const second = open(r, r.root, { CP_HOME: a });
+	await version(second);
+	assert.equal(readFileSync(join(a, LAYOUT.mandateDefaultsFile), "utf8"), migrated, "a second start rewrites nothing");
+	assert.deepEqual(journal(a), ["intent", "done"]);
+	assert.deepEqual(backups(a), [backup]);
+	await second.close();
+
+	const b = join(r.root, "home-b");
+	const custom = seed(b, { ...SCAFFOLD_MANDATE_DEFAULTS, exclude_paths: [".github/workflows/", "secrets/"] });
+	const other = open(r, r.root, { CP_HOME: b });
+	await version(other);
+	assert.equal(readFileSync(join(b, LAYOUT.mandateDefaultsFile), "utf8"), custom, "a custom list is byte-identical");
+	assert.deepEqual(journal(b), ["skipped"]);
+	assert.deepEqual(backups(b), []);
+	const named = finding(await doctor(other), "config.mandate_defaults.workflows");
+	assert.equal(named?.severity, "ok", JSON.stringify(named));
+	assert.match(named?.what ?? "", /\.github\/workflows\/.*home exclude_paths/);
+});
+
 // P16-user-context: user-context.test.ts through the model request a real parent sends after session_start.
 test("P16-user-context: USER.md beside the package's AGENTS.md reaches the model once with its precedence, truncated when runaway, and absent, empty or unreadable files send nothing", { timeout: 300_000 }, async (t) => {
 	const r = await rig(t, "cp-p16-user-");
