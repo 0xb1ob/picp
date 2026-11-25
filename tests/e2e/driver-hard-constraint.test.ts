@@ -491,3 +491,23 @@ test(QMRY, { skip: ciSkip, timeout: 300_000 }, async (t) => {
 	}
 	assert.deepEqual(fakeSpawns(h.state).filter((each) => each.argv[0] === "app-server"), [], "no app-server started");
 });
+
+// Scenario (#873 T7 / #874 R2 on codex, cp-1nrn): Given a codex planner row with a pi fallback and a free codex slot,
+//   When cp_pipeline start runs, Then it is refused by name (codex_research takes delivery local or answer only), so
+//   nothing queues and nothing runs on pi or codex: no fleet record, no dispatch-queue entry, no app-server.
+const T7C = "T7-codex: cp_pipeline start on a codex planner row refuses its planner by name, never queued and never pi";
+test(T7C, { skip: ciSkip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t);
+	codexRow(h);
+	const start = { action: "start", title: "t7 codex pipeline", task: "Add a line to README.md.", project: "demo" };
+	const [end] = (await h.run([step("cp_pipeline", start)])).filter((each) => each.toolName === "cp_pipeline");
+	assert.equal(end?.isError, true, text(end));
+	const ineligible = /cannot run on the Codex CLI driver: only research \(role planner, delivery local or answer\)/;
+	assert.match(text(end), ineligible);
+	assert.match(text(end), /this is research\/planner\/pipeline/);
+	const fleet = join(h.b.home, LAYOUT.fleetFile);
+	const records = existsSync(fleet) ? (JSON.parse(readFileSync(fleet, "utf8")) as { jobs: unknown[] }).jobs : [];
+	assert.deepEqual(records, [], "a pipeline job took a lease");
+	assert.deepEqual(dispatchQueue(h), [], "the refused planner was queued");
+	assert.deepEqual(fakeSpawns(h.state).filter((each) => each.argv[0] === "app-server"), [], "no app-server started");
+});
