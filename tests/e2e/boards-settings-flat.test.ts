@@ -22,7 +22,7 @@ test("BS-flat: on a flat home a save moves the listener to what the session wrot
 	{ timeout: 120_000 }, async (t) => {
 		const home = scratch.path;
 		const data = join(home, LAYOUT.data), stateDir = join(home, LAYOUT.state);
-		assert.equal(data, join(home, "data"), "the flat layout: the home is its own runtime root");
+		assert.equal(LAYOUT.data, "data", "the flat layout: the home is its own runtime root");
 		mkdirSync(data, { recursive: true });
 		mkdirSync(stateDir, { recursive: true });
 		const viewer = await startViewer(t, { home });
