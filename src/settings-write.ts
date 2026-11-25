@@ -43,6 +43,7 @@ import { atomicWriteText, durableAppend } from "./json-store.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
 import { operatorCompactDefault } from "./operator-compact.ts";
 import { claudeEfforts, routingRowRefusals } from "./routing-row-checks.ts";
+import { validateDaemonConfig } from "./service/daemon-files.ts";
 import { readSettings } from "./settings.ts";
 import { acquireSettingsLock } from "./settings-lock.ts";
 import { CODEX_CLASSES } from "./worker-driver.ts";
@@ -99,6 +100,10 @@ export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "de
 	"workers.native_codex_ship": "delete",
 	"workers.native_codex_review": "delete",
 	"workers.driver": "default",
+	"boards.port": "delete",
+	"boards.host": "delete",
+	"boards.index": "delete",
+	"boards.public_url": "delete",
 });
 
 /** What cp-install writes to `data/update.json` (src/service/install.ts step 7). */
@@ -192,6 +197,9 @@ function baseDocument(owner: SettingFileOwner, path: string): Record<string, unk
 			throw new Refusal(409, `${path} is absent: no rubric rows, so every worker route is refused; nothing to edit`);
 		case "capacity":
 			throw new Refusal(409, `${path} is absent: configure the gateway with cp-install --gateway-url first`);
+		case "daemon":
+			throw new Refusal(409, `${path} is absent: boards are set on a cp-install home;`
+				+ " a hand-run cp-view reads CP_BOARDS_PORT/CP_BOARDS_HOST/CP_BOARDS_INDEX");
 		default:
 			return {};
 	}
@@ -271,6 +279,7 @@ function shippedRouting(seams: SettingsWriteSeams): unknown {
 function readBackValue(field: SettingField, action: "set" | "delete", value: SettingValue, env: NodeJS.ProcessEnv): SettingValue {
 	if (field.type === "rubric") return normalizeLegacyRoles(clone(value));
 	if (field.type === "model_ref" && action === "delete") return env[field.env as string]?.trim() || null;
+	if (field.type === "ip" && action === "delete") return field.default; // an unset bind address reads as its default
 	return value;
 }
 
@@ -387,6 +396,28 @@ function refuseNative(role: "parent" | "operator", doc: Record<string, unknown>,
 	if (errors.length) throw new Refusal(400, `the Claude CLI ${role} needs an anthropic/claude-… model and a Claude effort`, errors);
 }
 
+const BOARDS_KEYS = ["boards_port", "boards_host", "boards_index"] as const;
+
+/** `boards_*` last in cp-install's order (its rerun reads the same text); never the dashboard port; a valid file. */
+function settleBoards(doc: Record<string, unknown>, path: string): void {
+	for (const key of BOARDS_KEYS) {
+		if (!(key in doc)) continue;
+		const value = doc[key];
+		delete doc[key];
+		doc[key] = value;
+	}
+	if (doc.boards_port !== undefined && doc.boards_port === doc.port) {
+		const port = String(doc.boards_port);
+		const why = `boards.port: ${port} is the dashboard port (its port key); pick another port`;
+		throw new Refusal(400, "invalid setting value", [why]);
+	}
+	try {
+		validateDaemonConfig(doc);
+	} catch (error) {
+		throw new Refusal(400, `${path} would violate its owner schema`, [message(error)]);
+	}
+}
+
 /** The keys a request names, checked: unknown 400, not editable 403. Section/all skip non-editable fields. */
 function resolveKeys(request: SettingsWriteRequest): SettingKey[] {
 	if (request.mode === "restore" && request.keys === undefined) {
@@ -468,7 +499,8 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			let value: SettingValue;
 			if (request.mode === "set") {
 				value = request.changes[field.key] as SettingValue;
-				if ((field.type === "model_ref" || field.type === "thinking_level" || field.type === "url") && value === null) action = "delete"; // unset, never a stored null
+				// Unset, never a stored null.
+				if (["model_ref", "thinking_level", "url", "port", "ip"].includes(field.type) && value === null) action = "delete";
 				// A codex switch off is absent, so a home that turned codex off again holds no codex key (C1).
 				if (field.owner === "native" && CODEX_SWITCH_KEYS.includes(fileKey) && value === false) action = "delete";
 				if (field.type === "rubric") value = mergeRubric(present.value, value as unknown as Record<string, unknown>[]) as SettingValue;
@@ -509,6 +541,7 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 		}
 		if (owner === "routing" && changes.length) refuseRoutingRows(home, normalizeLegacyRoles(clone(doc)) as unknown as RoutingConfig, JSON.parse(before) as Record<string, unknown>);
 		if ((owner === "parent" || owner === "operator") && changes.some((change) => NATIVE_KEYS[owner].includes(change.key))) refuseNative(owner, doc, context.env);
+		if (owner === "daemon" && changes.length) settleBoards(doc, status.path);
 		if (!changes.length || JSON.stringify(doc) === before) continue;
 		let mode: number | undefined;
 		try {

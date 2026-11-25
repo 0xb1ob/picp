@@ -37,6 +37,7 @@ import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 import { HERDR_TIMEOUT_MS, HERDR_WORKSPACE_LABEL, herdrCommand, herdrServerArgv, herdrServerRunning, type Launcher, OPERATOR_TMUX_SESSION, onPath, operatorWrapperPath, tmuxLaunch } from "./launchers.ts";
 import type { ControlCommandBody, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
+import type { BoardsListener } from "./boards-server.ts";
 import { appendControlAudit, appendInboxLine, appendScheduleControlLine } from "./control-audit.ts";
 import {
 	CONTROL_BODY_MAX_BYTES, CONTROL_PROTOCOL, CONTROL_RATE_LIMIT, CONTROL_RATE_WINDOW_MS, CONTROL_TEXT_MAX, type ControlKind, type ControlRecord,
@@ -111,6 +112,7 @@ export interface ControlRouteOptions {
 	uploadLimiter?: ControlLimiter;
 	operatorStart?: OperatorStart;
 	log?: (line: string) => void;
+	boards?: BoardsListener;
 }
 
 export interface ControlRouteResult {

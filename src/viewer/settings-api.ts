@@ -7,13 +7,17 @@
  *
  * Refusal order: the shared chain (`guarded`: method, --require-tailnet, rate, opt-out, Origin, Sec-Fetch-Site, JSON,
  * size), then the body shape (400), `If-Match` (required unless `dry_run`: missing 428, malformed 400), a live session
- * (409 `offline`), its CSRF token (403), then the frame. Each refusal here is one `refused` line (kind `settings`)
+ * (409 `offline`), its CSRF token (403), then a boards port or host set: the dashboard's port (400) and a port another
+ * process holds (409, a real bind probe), then the frame. Each refusal here is one `refused` line (kind `settings`)
  * through `guarded`'s refuse; the session's own outcomes pass through with their status and its audit is the record.
+ * An applied boards port, host or index change moves this viewer's boards listener; the reply's `boards` says where.
  */
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
-import type { ModelApplyRow, ModelList, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse } from "./api-types.ts";
+import type {
+	BoardsListenerState, ModelApplyRow, ModelList, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse,
+} from "./api-types.ts";
 import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, mayWrite, readAllowed, tokenMatches } from "./control-api.ts";
 import { readControlConfig, readControlRecord } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
@@ -77,12 +81,17 @@ export function handleSettingsWrite(req: IncomingMessage, options: ControlRouteO
 		const session = operatorSession(options.stateDir);
 		if (record.state !== "ok" || !session.running) return refuse(409, `no operator session is running (${session.reason}); start it to change settings`, undefined, { state: "offline" });
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the page");
+		const bind = body.frame.mode === "set" ? await options.boards?.refusal(body.frame.changes) : undefined;
+		if (bind) return refuse(bind.status, bind.reason, undefined, { state: "refused", errors: [bind.reason] });
 		const reply = await controlRequest(record.record, "settings_apply", {
 			...body.frame, expected_revision: ifMatch.state === "ok" ? ifMatch.revision : null, dry_run: body.dry_run, request_id: body.request_id, peer: peer?.slice(0, 64) ?? null,
 		});
 		if (reply.ok) {
 			const result = reply.result as SettingsWriteResponse;
-			if (isObject(result) && PASS_THROUGH.has(result.status)) return { status: result.status, body: result };
+			if (isObject(result) && PASS_THROUGH.has(result.status)) {
+				const moved = result.state === "applied" && result.changes?.some((row) => BOARDS_LISTENER_KEYS.includes(row.key));
+				return { status: result.status, body: moved ? { ...result, boards: await followBoards(options) } : result };
+			}
 			return refuse(502, `the session answered with an unexpected settings status (${String(isObject(result) ? result.status : result)})`);
 		}
 		// An older cp-bridge has no settings op: our refused line is the only record.
@@ -91,8 +100,26 @@ export function handleSettingsWrite(req: IncomingMessage, options: ControlRouteO
 	});
 }
 
-function settingsBase(now: Date): SettingsResponse {
-	return { generated_at: now.toISOString(), enabled: false, running: false, supported: false, writable: false, reason: null, snapshot: null, catalog: null, audit: [] };
+/** The Settings keys whose applied change moves the boards listener. */
+const BOARDS_LISTENER_KEYS: readonly string[] = ["boards.port", "boards.host", "boards.index"];
+
+/** After an applied boards change: where this viewer's listener is now. Never fails the write that already landed. */
+async function followBoards(options: ControlRouteOptions): Promise<BoardsListenerState> {
+	if (!options.boards) {
+		return { state: "failed", error: "this viewer runs no boards listener; cp-daemon reload applies the saved settings" };
+	}
+	try {
+		return await options.boards.reload();
+	} catch (error) {
+		return { state: "failed", error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+function settingsBase(now: Date, options: ControlRouteOptions): SettingsResponse {
+	return {
+		generated_at: now.toISOString(), enabled: false, running: false, supported: false, writable: false, reason: null,
+		snapshot: null, catalog: null, audit: [], boards_listener: options.boards?.status() ?? null,
+	};
 }
 
 const APPLY_TAIL_BYTES = 16_384;
@@ -135,22 +162,28 @@ export function handleSettingsModels(req: IncomingMessage, options: ControlRoute
 export async function handleSettingsStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): Promise<ControlRouteResult> {
 	if (!readAllowed(req, options)) return { status: 403, body: { error: "Settings are served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
-	if (config.state !== "on") return { status: 200, body: { ...settingsBase(now), reason: `Dashboard control is off: ${config.reason}` } };
+	const base = settingsBase(now, options);
+	if (config.state !== "on") {
+		return { status: 200, body: { ...base, reason: `Dashboard control is off: ${config.reason}` } };
+	}
 	const record = readControlRecord(options.stateDir);
 	const session = operatorSession(options.stateDir);
 	if (record.state !== "ok" || !session.running) {
-		return { status: 200, body: { ...settingsBase(now), enabled: true, reason: `Operator session offline: ${session.reason}` } };
+		return { status: 200, body: { ...base, enabled: true, reason: `Operator session offline: ${session.reason}` } };
 	}
 	const reply = await controlRequest(record.record, "settings_get", {});
 	if (!reply.ok) {
-		if (reply.status === 400 && /^unknown op/.test(reply.error)) return { status: 200, body: { ...settingsBase(now), enabled: true, running: true, reason: SETTINGS_PREDATE } };
-		return { status: 200, body: { ...settingsBase(now), enabled: true, reason: reply.error.replace(/^session not running/, "Session not running") } };
+		if (reply.status === 400 && /^unknown op/.test(reply.error)) {
+			return { status: 200, body: { ...base, enabled: true, running: true, reason: SETTINGS_PREDATE } };
+		}
+		const reason = reply.error.replace(/^session not running/, "Session not running");
+		return { status: 200, body: { ...base, enabled: true, reason } };
 	}
 	const result = reply.result as Partial<SettingsResponse>;
 	return {
 		status: 200,
 		body: {
-			...settingsBase(now), enabled: true, running: true, supported: true, writable: mayWrite(req),
+			...base, enabled: true, running: true, supported: true, writable: mayWrite(req),
 			snapshot: isObject(result?.snapshot) ? (result.snapshot as SettingsResponse["snapshot"]) : null,
 			catalog: Array.isArray(result?.catalog) ? result.catalog : null,
 			audit: Array.isArray(result?.audit) ? result.audit : [],

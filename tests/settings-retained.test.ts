@@ -33,6 +33,7 @@ import { operatorCompactThreshold, operatorDriverSetting, operatorModelSetting, 
 import { parentDriverSetting, parentModelSetting, parentSettings, parentThinkingSetting } from "../src/parent-context.ts";
 import { loadCapacityConfig } from "../src/quota.ts";
 import { DEFAULT_ROUTING_CONFIG } from "../src/routing.ts";
+import { readDaemonConfig } from "../src/service/daemon-files.ts";
 import { readUpdateConfig } from "../src/service/update.ts";
 import { loadViewerConfig } from "../src/viewer/host-config.ts";
 import { publicUrlError as viewerPublicUrlError } from "../src/viewer/public-url.ts";
@@ -53,8 +54,13 @@ const OWNER_FILE: Record<SettingFileOwner, string> = {
 	routing: LAYOUT.routingFile,
 	viewer: `${LAYOUT.data}/viewer.json`,
 	native: `${LAYOUT.data}/native.json`,
+	daemon: `${LAYOUT.data}/daemon.json`,
 };
 const CAPACITY_MIN = { url: "https://gw.example/", path: "/x" };
+const DAEMON_BASE = {
+	schema_version: 1, generated_by: "cp-install", backend: "detached", node: "/usr/bin/node", app: "/opt/cp",
+	home: "/home/cp", path: "/usr/bin", port: 8766,
+};
 
 function scratch(t: TestContext): string {
 	const home = createScratchHome();
@@ -69,10 +75,10 @@ const write = (home: string, owner: SettingFileOwner, body: unknown) =>
 const fieldOf = (key: SettingKey) => SETTING_FIELDS.find((field) => field.key === key) as SettingField;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("(a) catalog: 42 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
-	assert.equal(SETTING_KEYS.length, 42);
+test("(a) catalog: 46 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
+	assert.equal(SETTING_KEYS.length, 46);
 	assert.deepEqual(SETTING_FIELDS.map((field) => field.key), [...SETTING_KEYS]);
-	assert.equal(new Set(SETTING_KEYS).size, 42);
+	assert.equal(new Set(SETTING_KEYS).size, 46);
 	assert.ok(Object.isFrozen(SETTING_FIELDS));
 	for (const field of SETTING_FIELDS) {
 		assert.ok(field.key.startsWith(`${field.section}.`), `${field.key} sits in section ${field.section}`);
@@ -126,6 +132,11 @@ function probes(field: SettingField): unknown[] {
 			return [null, "https://dash.example.test/", "http://127.0.0.1:8766/p/", "https://u:p@x.test/", "https://@x.test/", "https://x.test/?q=1", "https://x.test/#f", "ftp://x.test/", "/boards", "", 5, true];
 		case "driver":
 			return ["pi", "claude", "native", "", null, 5, true];
+		case "port":
+			return [null, 1, 65535, 0, 65536, 1.5, "8767", true];
+		case "ip":
+			return ["127.0.0.1", "0.0.0.0", "::", "::1", "100.64.0.1", "fd7a:115c:a1e0::1", "FD7A::1", "::ffff:10.0.0.1", "1::",
+				"example.com", "1.2.3", "256.1.1.1", "01.2.3.4", "fe80::1%eth0", "[::1]", "1:2", "", null, 5];
 	}
 }
 
@@ -174,9 +185,16 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 			return typeof config !== "string" && config[field.file_key as "enabled"] === value;
 		},
 		viewer: (field, value) => {
-			const key = field.file_key as "strict_host" | "public_url";
+			const key = field.file_key as "strict_host" | "public_url" | "boards_public_url";
 			write(home, "viewer", { [key]: value });
 			return accepts(() => loadViewerConfig(ownerFile(home, "viewer"))[key], value);
+		},
+		// A null port or bind address is the key's absence, which is how Settings writes it.
+		daemon: (field, value) => {
+			const key = field.file_key as "boards_port" | "boards_host" | "boards_index";
+			const absent = (field.type === "port" || field.type === "ip") && value === null;
+			write(home, "daemon", { ...DAEMON_BASE, ...(absent ? {} : { [key]: value }) });
+			return accepts(() => readDaemonConfig(ownerFile(home, "daemon"))?.[key] ?? null, value);
 		},
 		native: (field, value) => (write(home, "native", { [field.file_key as string]: value }), accepts(() => loadNativeConfig(ownerFile(home, "native"))[field.file_key as "claude_research"], value)),
 	};

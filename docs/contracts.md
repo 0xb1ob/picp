@@ -6565,7 +6565,8 @@ restores the order without it. It is read when a link is built (no restart) and 
 the Host and Origin guards, push and pairing ignore it.
 
 **Boards listener (`boards_port`, opt-in, `src/viewer/boards-server.ts`).** With `data/daemon.json` `boards_port` (or
-`CP_BOARDS_PORT`) set, the viewer opens a second listener on `boards_host` (`CP_BOARDS_HOST`, an IP address, default
+`CP_BOARDS_PORT`) set, and live after a Settings → Boards save (§Settings writes), the viewer opens a second listener
+on `boards_host` (`CP_BOARDS_HOST`, an IP address, default
 `127.0.0.1`; a wildcard or public address is allowed there, never for the dashboard). It answers only `GET`/`HEAD` of
 `/boards/board.css`, `/boards/<slug>/…` and the bare-slug 308, through the same `resolveBoardFile` confinement under
 `BOARD_CSP`; every other path and method is 404 under `BOARD_CSP`, and it never reaches the dashboard dispatcher, so no
@@ -9812,7 +9813,7 @@ reports `config.budget.<profile>`.
 ## Settings catalog
 
 `src/contracts/settings.ts` is the single list of the home's per-machine settings:
-`SETTING_KEYS` and `SETTING_FIELDS` (42 fields, frozen). Each field names its section,
+`SETTING_KEYS` and `SETTING_FIELDS` (46 fields, frozen). Each field names its section,
 its owner file (or env var), its type and range, its code default, when it applies,
 what the consumer does with an invalid value (`on_invalid`), whether a later writer may
 edit it, and a label and help line. `validateSettingValue(key, value)` checks one value
@@ -9877,6 +9878,16 @@ the key (absent is off), so with every codex switch off the file holds no codex 
 it. No write checks the Codex CLI: selection refuses by name and `/doctor` explains. `workers.driver` never sets them,
 and `codex_max_concurrent` has no catalog field.
 
+**Boards keys (cp-7c4n).** `boards.port`, `boards.host` and `boards.index` are `data/daemon.json` `boards_port` (type
+`port`: an integer 1-65535, or null), `boards_host` (type `ip`, default `127.0.0.1`; `ipAddressError` agrees with
+`isIP` and refuses a zone id) and `boards_index` (default `false`), owner `daemon`, applies `boards_listener`;
+`boards.public_url` is `data/viewer.json` `boards_public_url` (owner `viewer`, type `url`). A null port, and every
+restore, deletes the key (off); a null bind address deletes `boards_host`, which reads back as `127.0.0.1`. A set
+on an absent `data/daemon.json` is 409 naming cp-install; a `boards_port` equal to
+the file's `port` is 400 (`boards.port: <p> is the dashboard port`); the whole file must still pass
+`validateDaemonConfig`. The `boards_*` keys are written last in cp-install's order, so a cp-install rerun reads the
+same text.
+
 **Live apply (cp-settings-model-apply, slice 1).** A `models.parent` or `models.parent_thinking` write switches the
 running parent in place at its next idle point: never a restart, a drain or a `restartSafety` read, and the parent and
 host pids stay. The host compares `data/parent.json` with the values it last saw (at start or at the last apply) on a
@@ -9927,7 +9938,13 @@ status passes through: 200, 400 (shape or range, with per-key `errors`), 403 (a 
 such as `models.allow` or `sessions.tool_call_cap`), 409 (lock busy, invalid owner, absent
 `capacity.json`), 412 (stale, with the fresh snapshot), 500 (rolled back) and 503 (audit
 unwritable). An older bridge answers `unknown op`, which becomes 409 unsupported. `dry_run`
-stands in for a separate validate route.
+stands in for a separate validate route. A set naming `boards.port` or `boards.host` is checked by the viewer after the
+CSRF token, on `data/daemon.json` merged with the changes: this dashboard's own port is 400, and a port a real bind
+probe finds held on that address is 409 (`boards.port <p> on <host> is in use or unavailable here (<code>)`), each with
+`{state: "refused", errors}` and nothing forwarded. After an applied boards port, host or index change the viewer
+re-reads `data/daemon.json` and starts, stops or moves its boards listener in place; the reply adds `boards`
+(`{state: "off" | "listening" | "failed", host?, port?, index?, error?}`), and `GET /api/settings` carries the live
+`boards_listener`. A failed move never fails the write that landed.
 
 **Restore table** (`RESTORE_ACTIONS`): `grants.*`, `budgets.*`, `sessions.wall_clock_seconds`
 and `sessions.parent_compact_at_tokens` write the catalog default, because their owners

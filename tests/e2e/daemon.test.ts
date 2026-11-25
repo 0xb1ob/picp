@@ -417,9 +417,13 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	assert.match(status(), new RegExp(`^parent: running pid ${parent!.pid}, 0 restart\\(s\\)\nviewer: running pid ${viewer!.pid}, 0 restart\\(s\\)\nhealth: idle, next ${due(180_000)}\nupdate: idle, next ${due(600_000)}$`, "m"));
 	assert.deepEqual(r.starts("device-notify"), []);
 
-	// The viewer is restarted 10 s after any exit.
+	// The viewer is restarted 10 s after any exit, with the boards_* keys data/daemon.json holds then (a Settings save),
+	// not the copy this inner loaded at its start.
+	r.config({ boards_port: 8767, boards_index: true });
 	process.kill(viewer!.pid, "SIGKILL");
 	await r.until("the viewer restart", () => r.starts("viewer").length === 2);
+	const respawned = roleEnv(r.starts("viewer")[1]!.env);
+	assert.deepEqual(respawned, { ...core, CP_BOARDS_PORT: "8767", CP_BOARDS_INDEX: "1", CP_DAEMON_ROLE: "viewer" });
 	const viewerExit = stamp(new RegExp(`viewer pid ${viewer!.pid} exited \\(SIGKILL\\); restart 1 in 10s`));
 	const viewerBack = stamp(new RegExp(`viewer started pid ${r.starts("viewer")[1]!.pid}`));
 	assert.ok(viewerBack - viewerExit >= 9_000 && viewerBack - viewerExit < 16_000, `${viewerBack - viewerExit} ms`);

@@ -48,7 +48,8 @@ No operator unit (cp-rrye): the dashboard's Start session / Resume last session 
 the generated `cp-operator.service` / `cp-operator-resume.service` an older install wrote, never stopping them
 (on a legacy home only at M1's success, §Migration).
 
-The configuration is one file, `data/daemon.json` (0600, written only by cp-install): `{schema_version,
+The configuration is one file, `data/daemon.json` (0600, written by cp-install; Settings → Boards writes only its
+`boards_*` keys): `{schema_version,
 generated_by, backend, node, app, home, path, port, viewer_host?, parent_model?, worker_memory_max?, boards_port?,
 boards_host?, boards_index?}`. The children get only
 `CP_HOME`, `CP_MODE=multi`, the installing `PATH`, `CP_VIEWER_PORT`, `CP_VIEWER_HOST` when a host is pinned
@@ -216,10 +217,20 @@ tunnel or tailnet, board links are relative (`/boards/<slug>/`) and the wake-up 
 The viewer can serve the published boards on a second port, apart from the dashboard, so that port alone can be opened
 to a wider network while the dashboard port stays private. It is off unless `boards_port` is set.
 
-- **Enable.** Add the keys to `data/daemon.json` by hand, then `cp-daemon reload`:
+- **Enable in Settings.** Settings → Boards edits the four keys: the port (empty is off), the bind address, the
+  `/boards/` index switch and the public URL. A save is refused by name, with nothing written, for the dashboard's own
+  port, a bad IP or URL, a port another process already holds on that address, or a missing control token. It writes
+  only those keys (the rest of `data/daemon.json` and `data/viewer.json` stays as it was, in cp-install's text) through
+  the Settings write path and its `data/settings-audit.jsonl` record, then moves the boards listener in the running
+  viewer: it starts, stops or moves without restarting the dashboard listener or the parent, and the save's notice
+  says where it is now. Moving the bind from loopback or a private address to a wildcard or public one asks for
+  confirmation first ("Boards will be reachable on all interfaces"). The write needs an operator session that runs
+  this version (one `/reload`); a viewer cp-daemon restarts later reads the saved keys too.
+- **Enable by hand.** Add the keys to `data/daemon.json`, then `cp-daemon reload`:
   `"boards_port": 8767, "boards_host": "0.0.0.0"` and, optionally, `"boards_index": true`. `boards_host` is an IP
   address (default `127.0.0.1`); unlike the dashboard's, a wildcard (`0.0.0.0`, `::`) or public address is allowed.
   A hand-run viewer reads `CP_BOARDS_PORT`, `CP_BOARDS_HOST` and `CP_BOARDS_INDEX=1`; a bad value stops `cp-view`.
+  Settings refuses the boards keys on a home with no `data/daemon.json` (409, naming cp-install).
 - **What it serves.** Only `GET`/`HEAD` of `/boards/board.css`, `/boards/<slug>/…` and the bare-slug redirect, with the
   dashboard's confinement and `BOARD_CSP`. Everything else is 404 there: the app, `/api/*`, the stream, the control,
   upload, device, pair and push routes and job reports. No cookie is read or set, and any Host is answered.
@@ -233,7 +244,8 @@ to a wider network while the dashboard port stays private. It is off unless `boa
 - **Exposure warning.** Every published board is readable by anyone who can reach that port, with no login: response
   reports (`report-<hash>`) and schedule results included. Anything a job writes into a board is visible, and job-id
   slugs are guessable. Opening the port in a firewall or router is your own step; this changes no firewall rule.
-  Turning it off is removing the keys and `cp-daemon reload`.
+  Turning it off is clearing the port in Settings → Boards, or removing the keys and `cp-daemon reload`. The Settings
+  page shows this warning beside the fields; its write routes are served on the dashboard port only (404 here).
 
 ### 3c. The models
 
