@@ -324,7 +324,7 @@ export function settingValueSchema(field: SettingField): TSchema {
 		case "port":
 			return Type.Union([Type.Integer(bounds), Type.Null()]);
 		case "ip":
-			return Type.String({ minLength: 1, maxLength: 45 });
+			return Type.Union([Type.String({ minLength: 1, maxLength: 45 }), Type.Null()]);
 	}
 }
 
@@ -358,7 +358,7 @@ export function validateSettingValue(key: string, value: unknown): ValidationRes
 	const checked = validate<SettingValue>(settingValueSchema(field), value);
 	const why = !checked.ok ? undefined
 		: field.type === "url" && value !== null ? publicUrlError(value)
-		: field.type === "ip" ? ipAddressError(value as string)
+		: field.type === "ip" && value !== null ? ipAddressError(value as string)
 		: undefined;
 	return why ? { ok: false, errors: [`${key} ${why}`] } : checked;
 }

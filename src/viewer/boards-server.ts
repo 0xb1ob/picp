@@ -6,13 +6,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { createServer as createNetServer, isIP } from "node:net";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { BoardsListenerState } from "./api-types.ts";
 import { escapeHtml } from "./app-page.ts";
 import { type BoardsAddress, boardsAddress } from "./bind-host.ts";
 import { BOARD_CSP, type Board, type BoardWarn, listBoards, onceWarner } from "./boards.ts";
 import { hostHeaderFor, send, serveBoard } from "./server.ts";
-import type { ViewerState } from "./sessions.ts";
+import { runtimeRoot, type ViewerState } from "./sessions.ts";
 
 const CSP = { "content-security-policy": BOARD_CSP };
 
@@ -53,8 +53,11 @@ export function createBoardsServer(state: ViewerState, index: () => boolean, log
 	return createServer((req, res) => boardsHandle(req, res, own, index(), warn));
 }
 
-/** `data/daemon.json` beside the state dir (cp-daemon's `daemonPaths`); the viewer imports no daemon module. */
-export const daemonConfigFile = (stateDir: string): string => join(dirname(stateDir), "data", "daemon.json");
+/**
+ * `<runtime root>/data/daemon.json` of `home`: the file `daemonPaths(home)` and the settings session (its layout from
+ * `configureLayout(mode, home)`) both name, by the one runtime-root rule; never derived from a passed state dir.
+ */
+export const daemonConfigFile = (home: string): string => join(runtimeRoot(home), "data", "daemon.json");
 
 /** The `boards_*` keys of `data/daemon.json`; `address` absent when no port is set. */
 export interface DaemonBoards { address?: BoardsAddress; host: string }
@@ -63,8 +66,8 @@ export interface DaemonBoards { address?: BoardsAddress; host: string }
  * `data/daemon.json`'s boards keys under `boardsAddress`'s rules, the ones cp-daemon's `boardsEnv` hands the viewer.
  * Undefined when the file is absent; an unreadable file or a bad key throws, naming the file.
  */
-export function readDaemonBoards(stateDir: string): DaemonBoards | undefined {
-	const file = daemonConfigFile(stateDir);
+export function readDaemonBoards(home: string): DaemonBoards | undefined {
+	const file = daemonConfigFile(home);
 	let raw: unknown;
 	try {
 		raw = JSON.parse(readFileSync(file, "utf8"));
@@ -177,23 +180,24 @@ export function boardsListener(
 				Promise.resolve({ state: "failed", error: `${why.split(state.home).join("<home>")}; the listener is unchanged` });
 			let boards: DaemonBoards | undefined;
 			try {
-				boards = readDaemonBoards(state.stateDir);
+				boards = readDaemonBoards(state.home);
 			} catch (error) {
 				return failed((error as Error).message);
 			}
-			return boards ? apply(boards.address) : failed(`${daemonConfigFile(state.stateDir)} is absent`);
+			return boards ? apply(boards.address) : failed(`${daemonConfigFile(state.home)} is absent`);
 		},
 		refusal: async (changes) => {
 			if (!("boards.port" in changes) && !("boards.host" in changes)) return undefined;
 			let boards: DaemonBoards | undefined;
 			try {
-				boards = readDaemonBoards(state.stateDir);
+				boards = readDaemonBoards(state.home);
 			} catch {
 				return undefined;
 			}
 			if (!boards) return undefined;
 			const port = "boards.port" in changes ? changes["boards.port"] : boards.address?.port;
-			const host = "boards.host" in changes ? changes["boards.host"] : boards.host;
+			// A cleared host (null) deletes the key, which binds the default.
+			const host = "boards.host" in changes ? (changes["boards.host"] ?? "127.0.0.1") : boards.host;
 			if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) return undefined;
 			if (typeof host !== "string" || isIP(host) === 0 || host.includes("%")) return undefined;
 			if (port === dashboardPort) {

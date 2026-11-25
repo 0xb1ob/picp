@@ -279,6 +279,7 @@ function shippedRouting(seams: SettingsWriteSeams): unknown {
 function readBackValue(field: SettingField, action: "set" | "delete", value: SettingValue, env: NodeJS.ProcessEnv): SettingValue {
 	if (field.type === "rubric") return normalizeLegacyRoles(clone(value));
 	if (field.type === "model_ref" && action === "delete") return env[field.env as string]?.trim() || null;
+	if (field.type === "ip" && action === "delete") return field.default; // an unset bind address reads as its default
 	return value;
 }
 
@@ -499,7 +500,7 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			if (request.mode === "set") {
 				value = request.changes[field.key] as SettingValue;
 				// Unset, never a stored null.
-				if (["model_ref", "thinking_level", "url", "port"].includes(field.type) && value === null) action = "delete";
+				if (["model_ref", "thinking_level", "url", "port", "ip"].includes(field.type) && value === null) action = "delete";
 				// A codex switch off is absent, so a home that turned codex off again holds no codex key (C1).
 				if (field.owner === "native" && CODEX_SWITCH_KEYS.includes(fileKey) && value === false) action = "delete";
 				if (field.type === "rubric") value = mergeRubric(present.value, value as unknown as Record<string, unknown>[]) as SettingValue;

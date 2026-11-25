@@ -9882,7 +9882,8 @@ and `codex_max_concurrent` has no catalog field.
 `port`: an integer 1-65535, or null), `boards_host` (type `ip`, default `127.0.0.1`; `ipAddressError` agrees with
 `isIP` and refuses a zone id) and `boards_index` (default `false`), owner `daemon`, applies `boards_listener`;
 `boards.public_url` is `data/viewer.json` `boards_public_url` (owner `viewer`, type `url`). A null port, and every
-restore, deletes the key (off). A set on an absent `data/daemon.json` is 409 naming cp-install; a `boards_port` equal to
+restore, deletes the key (off); a null bind address deletes `boards_host`, which reads back as `127.0.0.1`. A set
+on an absent `data/daemon.json` is 409 naming cp-install; a `boards_port` equal to
 the file's `port` is 400 (`boards.port: <p> is the dashboard port`); the whole file must still pass
 `validateDaemonConfig`. The `boards_*` keys are written last in cp-install's order, so a cp-install rerun reads the
 same text.

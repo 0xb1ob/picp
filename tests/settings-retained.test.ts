@@ -189,10 +189,11 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 			write(home, "viewer", { [key]: value });
 			return accepts(() => loadViewerConfig(ownerFile(home, "viewer"))[key], value);
 		},
-		// A null port is the key's absence, which is how Settings writes it.
+		// A null port or bind address is the key's absence, which is how Settings writes it.
 		daemon: (field, value) => {
 			const key = field.file_key as "boards_port" | "boards_host" | "boards_index";
-			write(home, "daemon", { ...DAEMON_BASE, ...(field.type === "port" && value === null ? {} : { [key]: value }) });
+			const absent = (field.type === "port" || field.type === "ip") && value === null;
+			write(home, "daemon", { ...DAEMON_BASE, ...(absent ? {} : { [key]: value }) });
 			return accepts(() => readDaemonConfig(ownerFile(home, "daemon"))?.[key] ?? null, value);
 		},
 		native: (field, value) => (write(home, "native", { [field.file_key as string]: value }), accepts(() => loadNativeConfig(ownerFile(home, "native"))[field.file_key as "claude_research"], value)),

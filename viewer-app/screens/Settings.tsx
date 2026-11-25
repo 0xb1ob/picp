@@ -248,7 +248,7 @@ function Field({field, value, source, error, set, disabled, models, choices}: {f
    : field.type === "ip"
    ? <input id={id} type="text" inputMode="decimal" spellcheck={false} autoComplete="off" placeholder="127.0.0.1"
     value={typeof value === "string" ? value : ""} aria-invalid={error ? true : undefined} disabled={disabled}
-    onInput={event => set(event.currentTarget.value.trim())}/>
+    onInput={event => set(event.currentTarget.value.trim() || null)}/>
    : field.type === "boolean"
    ? <div class="settings-checks"><label><input id={id} type="checkbox" checked={value === true} disabled={disabled} onChange={event => set(event.currentTarget.checked)}/>{value === true ? "On" : "Off"}</label></div>
    : <input id={id} type="number" value={typeof value === "number" ? String(value) : ""}

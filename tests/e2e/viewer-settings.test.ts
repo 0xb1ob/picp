@@ -655,10 +655,6 @@ test("P20-settings-boards: state, warning and hints; save and clear report the l
 	await notice(/^Saved · 1 change · Boards listener off$/);
 	assert.deepEqual(ui.posts()[1]?.json.changes, { "boards.port": null }, "an empty port sends null");
 
-	await ui.enter(host, "");
-	assert.match(boards.querySelector("[role=alert]")?.textContent ?? "", /^A bind address is required/);
-	const save = [...boards.querySelectorAll("button")].find((b) => b.textContent === "Save")!;
-	assert.ok(save.hasAttribute("disabled"), "an empty bind address blocks Save");
 	await ui.enter(host, "0.0.0.0");
 	ui.tab.decline();
 	await ui.press(boards, "Save");
@@ -669,6 +665,31 @@ test("P20-settings-boards: state, warning and hints; save and clear report the l
 	await until(() => ui.posts().length, (n) => n === 3, "the confirmed save");
 	assert.deepEqual([ui.posts()[2]?.status, ui.posts()[2]?.json.changes], [200, { "boards.host": "0.0.0.0" }]);
 	await notice(/^Saved · 1 change · Boards listener off$/);
+
+	// An emptied bind address is a delete: the key goes and the 127.0.0.1 default is back.
+	await until(() => (host as HTMLInputElement).value, (value) => value === "0.0.0.0", "the re-read host");
+	await ui.enter(host, "");
+	await ui.press(boards, "Save");
+	await until(() => ui.posts().length, (n) => n === 4, "the clearing save");
+	assert.deepEqual([ui.posts()[3]?.status, ui.posts()[3]?.json.changes], [200, { "boards.host": null }]);
+	const bind = (await ui.snapshot()).fields.find((f) => f.key === "boards.host");
+	assert.deepEqual(bind?.value, "127.0.0.1", "read back as the default");
+	const daemon = JSON.parse(readFileSync(join(ui.view.home, LAYOUT.data, "daemon.json"), "utf8")) as Line;
+	assert.equal("boards_host" in daemon, false, "a delete, never a stored empty address");
+});
+
+// Review 1: with no data/daemon.json only the public URL is the page's to set, so Restore clears just that key.
+test("P20-settings-boards-absent: with no daemon.json, Boards restores only boards.public_url",
+	{ timeout: 120_000 }, async (t) => {
+	const ui = await settingsTab(t);
+	const boards = ui.section("Boards");
+	assert.deepEqual([...boards.querySelectorAll("input")].map((input) => input.id), ["setting-boards-public_url"]);
+	await ui.press(boards, "Restore defaults");
+	assert.equal(ui.tab.confirms.at(-1), "Clear the boards public URL?");
+	await until(() => ui.posts().length, (n) => n === 1, "the restore");
+	assert.deepEqual([ui.posts()[0]?.path, ui.posts()[0]?.status, ui.posts()[0]?.json.keys], [
+		"/api/settings/restore", 200, ["boards.public_url"],
+	]);
 });
 
 test("P20-settings-readonly: no control token is read only with every control disabled; an absent routing.json is one line, no rubric controls", { timeout: 120_000 }, async (t) => {
