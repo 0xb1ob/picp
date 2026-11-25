@@ -72,7 +72,10 @@ test("the Settings payload answers while the model list is still loading", { tim
 	assert.deepEqual([list.pi.models, list.pi.loading, list.pi.listed_at, list.claude.loading], [null, true, null, true]);
 	const tab = await h.view.open("#settings");
 	const ui = await page(tab);
-	assert.deepEqual(tab.$$("section.settings-section > h2").map((h2) => h2.textContent).slice(0, 6), ["Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Dashboard address", "Native workers"]);
+	assert.deepEqual(tab.$$("section.settings-section > h2").map((h2) => h2.textContent).slice(0, 7), [
+		"Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Dashboard address", "Boards",
+		"Native workers",
+	]);
 	assert.deepEqual(tab.$$(".settings-models").map((el) => [el.closest("section")?.getAttribute("aria-label"), el.getAttribute("data-models"), el.querySelector("p[role=status]")?.textContent]), [
 		["Model routing", "loading", "Loading the model list…"],
 		["Parent and operator models", "loading", "Loading the model list…"],

@@ -381,7 +381,9 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
    {VIEWER.map(field)}
   </Section>
   <Section title="Boards" help={BOARDS_WARNING} keys={boardsKeys} drafts={drafts} setDrafts={setDrafts} view={view}
-   restore={{section: "boards"}} restoreText="Turn the boards listener off and clear its address, index and public URL?"
+   restore={daemonAbsent ? {keys: boardsKeys} : {section: "boards"}}
+   restoreText={daemonAbsent ? "Clear the boards public URL?"
+    : "Turn the boards listener off and clear its address, index and public URL?"}
    disabled={disabled} invalid={invalid(BOARDS)} confirmSave={boardsConfirm}>
    <p class="settings-meta settings-boards-state" role="status">{boardsSaved} · {boardsLive}</p>
    {daemonAbsent && <p class="settings-readonly">

@@ -113,8 +113,10 @@ export async function writeSettings(fetch: Fetch, token: string, revision: strin
 export const valueOf = (status: SettingsResponse, drafts: Drafts, key: SettingKey): SettingValue | undefined =>
  key in drafts ? drafts[key] : status.snapshot?.fields.find(field => field.key === key)?.value;
 export const fieldOf = (status: SettingsResponse, key: SettingKey): SettingField | undefined => status.catalog?.find(field => field.key === key);
-/** Why a drafted number breaks its catalog bounds (an invalid parent threshold would disable compaction), or null. */
+/** Why a drafted number breaks its catalog bounds (an invalid parent threshold would disable compaction), or null.
+ * An emptied bind address is flagged too: it has no off value, so Save stays blocked until one is typed. */
 export function fieldError(field: SettingField, value: SettingValue | undefined): string | null {
+ if (field.type === "ip") return value === "" ? "A bind address is required: 127.0.0.1 keeps it on this machine" : null;
  if (!["integer", "number", "nullable_number", "port"].includes(field.type)) return null;
  const optional = field.type === "nullable_number" || field.type === "port";
  if (value === null || value === undefined) return optional ? null : "A value is required";

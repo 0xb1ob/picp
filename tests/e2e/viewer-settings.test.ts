@@ -655,6 +655,10 @@ test("P20-settings-boards: state, warning and hints; save and clear report the l
 	await notice(/^Saved · 1 change · Boards listener off$/);
 	assert.deepEqual(ui.posts()[1]?.json.changes, { "boards.port": null }, "an empty port sends null");
 
+	await ui.enter(host, "");
+	assert.match(boards.querySelector("[role=alert]")?.textContent ?? "", /^A bind address is required/);
+	const save = [...boards.querySelectorAll("button")].find((b) => b.textContent === "Save")!;
+	assert.ok(save.hasAttribute("disabled"), "an empty bind address blocks Save");
 	await ui.enter(host, "0.0.0.0");
 	ui.tab.decline();
 	await ui.press(boards, "Save");
