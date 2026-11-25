@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 import { hitsNeedle } from "../mandate.ts";
 import { workflowScopeRefusal } from "../workflow-scope.ts";
 import { exec, FORGE_PR_FILE, type ForgeJob, type RecordedPr, recordedPr } from "./native-gh-read.ts";
+import { workerSigning } from "./worker-signing.ts";
 
 export const TITLE_MAX = 256;
 export const BODY_MAX = 60_000;
@@ -127,11 +128,14 @@ export function commitIdentityEnv(worktree: string, env: NodeJS.ProcessEnv = pro
 }
 
 const GIT_ENV_ALLOW = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] as const;
-/** RR2: commit and merge may run a filter the repository's config names, so they get no credential and no HOME. */
-export function gitEnv(env: NodeJS.ProcessEnv, identity: Record<string, string>): NodeJS.ProcessEnv {
+/** RR2: commit and merge may run a filter the repository's config names, so they get no credential and no HOME;
+ * only the host's signing keys and GnuPG home when the host signs (worker-signing.ts). */
+export function gitEnv(
+	env: NodeJS.ProcessEnv, identity: Record<string, string>, signing: Record<string, string> = {},
+): NodeJS.ProcessEnv {
 	const kept: NodeJS.ProcessEnv = {};
 	for (const key of GIT_ENV_ALLOW) if (env[key] !== undefined) kept[key] = env[key];
-	return { ...kept, ...identity };
+	return { ...kept, ...identity, ...signing };
 }
 
 export interface CommitOptions {
@@ -164,7 +168,7 @@ export async function gitCommit(job: ForgeJob, args: { message: string }, option
 	} catch (error) {
 		return refuse(`git_commit: ${(error as Error).message}.`);
 	}
-	const env = gitEnv(options.env, identity);
+	const env = gitEnv(options.env, identity, workerSigning(options.env, job.worktree).env);
 	const git = (more: string[]) => exec("git", [...(options.hooksOff ? GIT_HOOKS_OFF : []), ...more], job.worktree, env);
 	const added = await git(["add", "-A"]);
 	if (!added.ok) return reply(`git_commit failed at git add -A:\n${added.out}`, true);
@@ -195,7 +199,9 @@ export async function gitMerge(job: ForgeJob, args: { ref: string }, options: Om
 	} catch (error) {
 		return refuse(`git_merge: ${(error as Error).message}.`);
 	}
-	const merged = await exec("git", [...(options.hooksOff ? GIT_HOOKS_OFF : []), "merge", "--no-edit", args.ref], job.worktree, gitEnv(options.env, identity));
+	const env = gitEnv(options.env, identity, workerSigning(options.env, job.worktree).env);
+	const merge = [...(options.hooksOff ? GIT_HOOKS_OFF : []), "merge", "--no-edit", args.ref];
+	const merged = await exec("git", merge, job.worktree, env);
 	if (merged.ok) return reply(`Merged ${args.ref}.\n${merged.out}`, false);
 	const conflict = /CONFLICT|Automatic merge failed/.test(merged.out);
 	return reply(conflict ? `git_merge stopped on conflicts; fix the files with the shell, then git_commit concludes the merge.\n${merged.out}` : `git_merge failed:\n${merged.out}`, true);
@@ -212,7 +218,10 @@ export function checkpointCommit(worktree: string, branch: string, env: NodeJS.P
 	let head: string;
 	let git: (args: string[]) => string;
 	try {
-		const options: ExecFileSyncOptionsWithStringEncoding = { cwd: worktree, env: { ...env, ...commitIdentityEnv(worktree) }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
+		const gitEnvironment = { ...env, ...commitIdentityEnv(worktree), ...workerSigning(env, worktree).env };
+		const options: ExecFileSyncOptionsWithStringEncoding = {
+			cwd: worktree, env: gitEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+		};
 		git = (args) => execFileSync("git", args, options).trim();
 		git(["add", "-A"]);
 		if (git(["status", "--porcelain"]) !== "") git(["commit", "-q", "-m", "WIP: freeze checkpoint"]);
@@ -250,7 +259,8 @@ export async function codexCheckpointCommit(job: ForgeJob, options: CodexCheckpo
 	} catch (error) {
 		return { error: bounded((error as Error).message) };
 	}
-	const git = (more: string[]) => exec("git", [...GIT_HOOKS_OFF, ...more], job.worktree, gitEnv(options.env, identity));
+	const env = gitEnv(options.env, identity, workerSigning(options.env, job.worktree).env);
+	const git = (more: string[]) => exec("git", [...GIT_HOOKS_OFF, ...more], job.worktree, env);
 	const added = await git(["add", "-A"]);
 	if (!added.ok) return { error: bounded(added.out) };
 	const hits = await gatedPaths(git, options.excluded);

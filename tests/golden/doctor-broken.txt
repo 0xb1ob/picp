@@ -1,4 +1,4 @@
-DOCTOR BROKEN · 3 error · 6 warn · 36 ok (at 2026-08-27T12:00:00Z)
+DOCTOR BROKEN · 3 error · 6 warn · 39 ok (at 2026-08-27T12:00:00Z)
 home: <HOME>
 package: <PKG>
 
@@ -42,6 +42,9 @@ package: <PKG>
     fix: install the Codex CLI, then run `codex update`
 ✓ [codex.workers] Codex workers: every codex switch off (shipped default)
     codex_research off, codex_ship off, codex_review off; codex_max_concurrent 1; no rubric row names codex
+✓ [signing.pi] pi workers: commits unsigned; the host does not sign (commit.gpgsign and tag.gpgsign are not true)
+✓ [signing.claude] Claude CLI workers: commits unsigned; the host does not sign (commit.gpgsign and tag.gpgsign are not true)
+✓ [signing.codex] Codex workers: commits unsigned; the host does not sign (commit.gpgsign and tag.gpgsign are not true)
 ✓ [session.tools] parent session tools not recorded (not a live parent)
 ✓ [package.worker_reporter] worker-reporter extension present
 ✓ [package.profiles] 5 profile(s) load and validate

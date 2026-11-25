@@ -264,6 +264,8 @@ export interface SpikeRunOptions {
 	/** WP3: named variables merged after the built child env (`nativeWorkerChildEnv`); never a whole host env.
 	 * An undefined value unsets a built key (WP7: GIT_SSH_COMMAND for `ops`). */
 	childEnv?: Record<string, string | undefined>;
+	/** Paths every guard refuses beside the Claude settings, best effort (the git signing key). */
+	secretFiles?: readonly string[];
 	/** The operator's Claude settings path, which claude itself reads and picp never opens; null passes none. */
 	userSettings?: string | null;
 	model?: string;
@@ -357,7 +359,8 @@ async function runInScratch(
 	if (!relative(resolve(options.job.worktree), scratch).startsWith("..")) throw new ClaudeSpikeError("scratch dir is inside the worktree");
 	const dirs = { home: join(scratch, "home"), configDir: join(scratch, "config"), tmp: join(scratch, "tmp") };
 	const settingsPath = options.userSettings === undefined ? operatorClaudeSettings() : options.userSettings;
-	const secrets = secretPaths(settingsPath, [homedir(), userInfo().homedir]);
+	const homes = [homedir(), userInfo().homedir];
+	const secrets = [...secretPaths(settingsPath, homes), ...(options.secretFiles ?? [])];
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const state: ReportState = { refusals: [], attempts: 0 };
 	const native = nativeRole(options.job.role);

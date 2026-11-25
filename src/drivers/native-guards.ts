@@ -99,7 +99,7 @@ export function spikeGuards(
 			const paths = call.name === "find" ? [call.input.path, call.input.pattern] : call.name === "read" || call.name === "grep" ? [call.input.path] : [];
 			const secret = paths.find((path) => typeof path === "string" && secretPathIn(path, job.worktree, secrets));
 			const who = { research: "a research worker", implementer: "an implementer", reviewer: "a reviewer" }[native];
-			return secret === undefined ? undefined : `Refused: ${who} never reads the Claude settings, its config, /proc or /dev/fd (${String(secret)}).`;
+			return secret === undefined ? undefined : `Refused: ${who} never reads the Claude settings, its config, the git signing key, /proc or /dev/fd (${String(secret)}).`;
 		},
 		(call) => workerHostGuard(call.name, call.input, job.runDir),
 	];
