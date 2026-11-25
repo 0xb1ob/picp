@@ -98,7 +98,7 @@ test("implementer guards: pushes, escapes, secrets, env dumps, .git and exclusio
 			"push HEAD to this job's branch with git_push. pi's guards and these scope checks are the only limits; everything else runs.");
 		assert.match(await reason("Bash", { command: "gh pr view 1" }), /`gh` \(no credentials in this run; read GitHub with the gh_read tool\) is denied; open and edit this job's PR with pr_create and pr_edit\./);
 		assert.match(await reason("Bash", { command: "echo x > .github/workflows/x" }), /Bash writing to an excluded path \(.*matches \.github\/workflows\/\) is denied/);
-		assert.match(await reason("Bash", { command: "cat *" }), /Bash a secret path \(settings, Claude config, \/proc or \/dev\/fd\) is denied/);
+		assert.match(await reason("Bash", { command: "cat *" }), /Bash a secret path \(settings, Claude config, the git signing key, \/proc or \/dev\/fd\) is denied/);
 		assert.match(await reason("Bash", { command: "env" }), /Bash an environment dump \(`env`\) is denied/);
 		assert.match(await reason("Bash", { command: "cd /usr && git commit -m x" }), /Bash running git outside this worktree \(\/usr\) is denied/);
 		assert.match(await reason("Bash", { command: "git switch main" }), /onto a second branch is denied; this job works on cp-ship-unit only/);
