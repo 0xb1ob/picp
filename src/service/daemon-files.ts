@@ -82,7 +82,7 @@ export interface DaemonConfig {
 	parent_model?: string;
 	/** Each worker's own systemd scope `MemoryMax` (systemd backend only); hand-set, kept by cp-install. */
 	worker_memory_max?: string;
-	/** The opt-in boards-only listener (hand-set, kept by cp-install): port, bind IP (a wildcard allowed), `/boards/` index. */
+	/** The opt-in boards-only listener, hand-set and kept by cp-install: port, bind IP (wildcard allowed), index. */
 	boards_port?: number;
 	boards_host?: string;
 	boards_index?: boolean;

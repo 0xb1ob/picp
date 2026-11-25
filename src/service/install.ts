@@ -416,7 +416,6 @@ async function progress<T>(ports: InstallPorts, on: boolean, name: string, work:
 	}
 }
 
-/** The last lines of a real run: `ready:` only after cp-daemon's readiness and a passing /doctor, else `incomplete:`. */
 /** The hand-set `boards_*` keys of the previous data/daemon.json, kept like `worker_memory_max`. */
 function keptBoards(previous: DaemonConfig | undefined): Pick<DaemonConfig, "boards_port" | "boards_host" | "boards_index"> {
 	if (!previous) return {};
@@ -424,6 +423,7 @@ function keptBoards(previous: DaemonConfig | undefined): Pick<DaemonConfig, "boa
 	return { ...(boards_port !== undefined ? { boards_port } : {}), ...(boards_host !== undefined ? { boards_host } : {}), ...(boards_index !== undefined ? { boards_index } : {}) };
 }
 
+/** The last lines of a real run: `ready:` only after cp-daemon's readiness and a passing /doctor, else `incomplete:`. */
 function summary(ports: InstallPorts, o: { ready: boolean; noStart: boolean; host: string | undefined; port: number; later: readonly string[]; rerun: string }): void {
 	const url = o.host === undefined ? undefined : `http://${o.host.includes(":") ? `[${o.host}]` : o.host}:${o.port}/`;
 	if (o.ready) ports.log(`ready: cp-daemon runs and /doctor passed; ${url ? `the dashboard: ${url}` : "the dashboard has no address yet (viewer-host below)"}; the operator session: cp-operator`);
