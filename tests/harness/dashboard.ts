@@ -27,7 +27,7 @@ export async function until<T>(read: () => T | Promise<T>, ok: (value: T) => boo
 	throw new Error(`timed out waiting for ${what}; last = ${typeof last === "string" ? last : JSON.stringify(last)}`);
 }
 
-const freePort = (): Promise<number> => new Promise((done) => {
+export const freePort = (): Promise<number> => new Promise((done) => {
 	const probe = createServer().listen(0, "127.0.0.1", () => {
 		const { port } = probe.address() as AddressInfo;
 		probe.close(() => done(port));

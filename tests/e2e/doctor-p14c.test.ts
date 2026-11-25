@@ -402,6 +402,20 @@ test("P14-doctor-fleet: fleet records, the parent lock, the worktree pool, the v
 	writeFileSync(viewerFile, '{"public_url": "https://dash.example.test/?a=1"}');
 	assert.match(JSON.stringify(one(await p.doctor(), "viewer-host")), /"warn".*public_url must be http\(s\).*\\"public_url\\": \\"https:/);
 
+	// The boards-only listener: off with no data/daemon.json; on names its bind address and that boards are public there;
+	// a boards_port equal to the dashboard's warns (cp-view skips it). The cp-txbb write below replaces this config.
+	assert.deepEqual(all(await p.doctor(), "boards").map((f) => [f.severity, f.what]), [["ok", "boards listener: off (no boards_port in data/daemon.json or CP_BOARDS_PORT); boards are served only by the dashboard"]]);
+	const boardsConfig = { schema_version: 1, generated_by: "cp-install", backend: "detached", node: process.execPath, app: h, home: h, path: "/bin", port: 7300 };
+	mkdirSync(dirname(daemonPaths(h).config), { recursive: true });
+	writeFileSync(daemonPaths(h).config, JSON.stringify({ ...boardsConfig, boards_port: 7301, boards_host: "0.0.0.0" }));
+	const boardsOn = await p.doctor();
+	assert.equal(one(boardsOn, "boards")?.severity, "ok");
+	assert.match(one(boardsOn, "boards")?.what ?? "", /^boards listener: on 0\.0\.0\.0:7301, apart from the dashboard \(7300\): every published board is public .*index off$/);
+	assert.ok(validateDoctorReport(boardsOn).ok, "the report stays on contract");
+	writeFileSync(daemonPaths(h).config, JSON.stringify({ ...boardsConfig, boards_port: 7300 }));
+	const clash = one(await p.doctor(), "boards");
+	assert.deepEqual([clash?.severity, /is the dashboard port/.test(clash?.what ?? ""), /boards_port/.test(clash?.fix ?? "")], ["warn", true, true]);
+
 	// cp-txbb: a cp-daemon home with the legacy units left over still produces a valid report.
 	const unitDir = join(h, "xdg", "systemd/user");
 	mkdirSync(unitDir, { recursive: true });
