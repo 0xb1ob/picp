@@ -415,6 +415,42 @@ test("P24b MCP access: /doctor warns mcp.native for each MCP server the native C
 	assert.deepEqual(["pass show", "/x"].filter((value) => JSON.stringify(warn).includes(value)), [], "no config value is printed");
 });
 
+// Scenario (cp-1nrn): Given codex_research on and mcp.json servers wd (cwd), a-b, `bad name!`, au (auth) and ok, When
+//   /doctor --json runs, Then one mcp.codex warn names `bad name!` and au (skipped) and a-b (loaded, unusable: U3), not
+//   wd (Codex loads cwd), prints no config value, and no mcp.native line appears. Control: codex_research off, no line.
+const P24C = "P24c MCP access: /doctor warns mcp.codex for each MCP server a Codex planner cannot use, "
+	+ "never a config value";
+test(P24C, { timeout: 300_000 }, async (t) => {
+	const p = await mcpParent(t);
+	const nativeFile = join(p.home, LAYOUT.data, "native.json");
+	mkdirSync(join(p.home, LAYOUT.data), { recursive: true });
+	const names = ["wd", "a-b", "bad name!", "au", "ok"];
+	p.servers({
+		wd: { command: "z", cwd: "/p24c/cwd" }, "a-b": { command: "z" }, "bad name!": { command: "z" },
+		au: { command: "z", auth: { token: "p24c-auth-value" } }, ok: { command: "z" },
+	});
+	const listed = names.map((name) => ({ name, enabled: true, state: "connected", tools: [] }));
+	p.answer(JSON.stringify({ servers: listed, errors: [] }));
+	const of = (report: DoctorReport, check: string) => report.findings.filter((finding) => finding.check === check);
+	assert.deepEqual(of(await p.doctor(), "mcp.codex"), [], "no mcp.codex while codex_research is off");
+	writeFileSync(nativeFile, JSON.stringify({ codex_research: true }));
+	const report = await p.doctor();
+	const [warn, ...more] = of(report, "mcp.codex");
+	assert.equal(more.length, 0);
+	assert.deepEqual([warn?.severity, Boolean(warn?.fix)], ["warn", true]);
+	assert.equal(warn?.what, "codex planners: 3 MCP server(s) not loaded or unusable");
+	assert.deepEqual(String(warn?.detail).split("\n"), [
+		"MCP server bad name! not loaded: the Codex CLI takes server names of letters, digits, _ and - only",
+		"MCP server au not loaded: \"auth\" has no Codex CLI equivalent",
+		"MCP server a-b loaded but unusable: the Codex CLI spells - as _ in tool names, so picp refuses its calls (U3)",
+	]);
+	const printed = ["p24c-auth-value", "/p24c/cwd"].filter((value) => JSON.stringify(report).includes(value));
+	assert.deepEqual(printed, [], "no config value is printed");
+	assert.deepEqual(of(report, "mcp.native"), [], "the Claude switches are off");
+	const by = /; codex planners: servers from \S+\/mcp\.json; codex implementers and reviewers get none \(R3\)$/;
+	assert.match(String(of(report, "mcp.workers")[0]?.detail), by);
+});
+
 // -- pi-lens ---------------------------------------------------------------------
 
 const LENS_FLAGS = ["--no-read-guard", "--no-lazy-tools", "--no-lens-context"];

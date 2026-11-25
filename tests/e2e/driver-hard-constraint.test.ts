@@ -4,15 +4,15 @@
  * (mock model) with fake-codex and the fake `systemd-run` at the boundary (tests/harness/codex-worker.ts).
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { type FailureClass, isoTimestamp, LAYOUT, MINIMAL_PLAN_SUMMARY, paths, type QualityReport, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { recoveryDigest, recoveryJson } from "../../src/gate-recovery.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
 import { readRecoveryAttempts } from "../../src/recovery.ts";
-import { fakePrompts } from "../harness/codex-mock.ts";
+import { fakePrompts, fakeSpawns } from "../harness/codex-mock.ts";
 import { FAKE_NATIVE_MODEL } from "../harness/claude-mock-provider.ts";
 import { codexWorkerHome, FAKE_CODEX_REF } from "../harness/codex-worker.ts";
 import { readRunEvents, REPO_ROOT, treehouseAvailable, waitFor } from "../harness/index.ts";
@@ -253,6 +253,9 @@ test("T6: a pipeline advance whose codex implementer finds the slot full waits f
 	const ship = await waitFor(() => h.record(started.ship_id), (record) => record?.worker.driver === "codex", { timeoutMs: 120_000, what: "the implementer on codex" });
 	assert.deepEqual([ship?.worker.role, ship?.worker.model, ship?.routing?.driver], ["implementer", FAKE_CODEX_REF, "codex"]);
 	assert.match(ship?.routing?.driver_reason ?? "", new RegExp(`override ${FAKE_CODEX_REF}`), "the replay ran with the pin");
+	// The fleet record lands mid-replay; the drain removes the entry only once the replay returns.
+	const drained = { timeoutMs: 30_000, what: "the replayed advance leaving the native wait queue" };
+	await waitFor(() => post.nativeWait.list().length, (left) => left === 0, drained);
 	assert.deepEqual(post.nativeWait.list(), []);
 });
 
@@ -372,4 +375,142 @@ test("R3-recovery-gate: a recovery gate on a full codex queues with its attempt 
 	assert.equal(readdirSync(runDir).some((name) => /^gate-\d+\.json$/.test(name)), false, "no reviewer decided");
 	assert.equal(h.b.provider.requests("r3g-pi").length, 0, "a reviewer ran on pi");
 	assert.deepEqual(waitEntries(h), []);
+});
+
+const dispatchQueue = (h: H): Array<{ job_id: string }> => {
+	const file = join(h.b.home, LAYOUT.dispatchQueueFile);
+	if (!existsSync(file)) return [];
+	return (JSON.parse(readFileSync(file, "utf8")) as { entries: Array<{ job_id: string }> }).entries;
+};
+/** The job's fleet record; none before any job took a lease (no fleet file yet). */
+const fleetRecord = (h: H, id: string) => (existsSync(join(h.b.home, LAYOUT.fleetFile)) ? h.record(id) : undefined);
+
+// Scenario (T9-T11 on codex, cp-1nrn): Given a held codex pr author at the default codex_max_concurrent 1, When
+//   cp_review runs on a codex reviews row, Then the reviewer borrows the author's slot (routing names it) and a verdict
+//   lands; a cp_send to the author meanwhile queues naming the borrowed slot and an unrelated codex job queues with no
+//   borrow; after the verdict the send reaches the author's own thread on codex while the unrelated job still waits.
+const T9C = "T9c: a held codex author lends its slot to its own codex reviewer; "
+	+ "a send waits for the verdict, an unrelated job keeps waiting";
+test(T9C, { skip: ciSkip, timeout: 420_000 }, async (t) => {
+	const native = { codex_research: true, codex_ship: true, codex_review: true };
+	const h = await codexWorkerHome(t, { native, ship: true });
+	h.reviewsRow(h.b.provider.addScript("t9c-pi", [{ kind: "text", text: "unused" }]));
+	const [author, other] = [await h.job("pr", "ship"), await h.job()];
+	const blocked = {
+		job_id: author.id, kind: "ship", status: "blocked", summary: "T9c change pushed.",
+		blockers: ["the e2e case ends here"],
+	};
+	const message = "T10 follow-up: report once more.";
+	const tool = (name: string, args: unknown) => ({ kind: "tool" as const, tool: name, arguments: args });
+	h.setScript({ turns: [
+		[
+			{ kind: "shell", command: "printf 't9c\\n' > t9c.txt" }, tool("git_commit", { message: "t9c" }),
+			tool("git_push", {}), tool("report_result", blocked), { kind: "message", text: "Reported." },
+		],
+		// The reviewer holds its verdict while the parent sends to the author and dispatches the unrelated job.
+		[
+			{ kind: "hold", marker: "reviewing", forMs: 8_000 }, tool("report_verdict", VOTE(author.id)),
+			{ kind: "message", text: "Reviewed." },
+		],
+		[{ kind: "message", text: "Follow-up handled." }],
+	] });
+	const unrelatedTask = {
+		job_id: other.id, task: "Report what README.md says.", model: FAKE_CODEX_REF, driver: "codex",
+	};
+	const ends = await h.run([
+		author.dispatch({ task: "Add t9c.txt, commit, push and report." }), h.awaitEnvelope(author.id),
+		h.waitEvent(author.id, '"type":"native_run"', 1),
+		step("cp_review", { job_id: author.id }), step("cp_send", { job_id: author.id, message }),
+		step("cp_dispatch", unrelatedTask),
+		h.waitEvent(author.id, '"type":"native_run"', 2), h.pause(2),
+	]);
+	const review = ends.find((end) => end.toolName === "cp_review");
+	assert.notEqual(review?.isError, true, text(review));
+	const { routed, result } = await h.reviewRun(author.id);
+	const slot = new RegExp(`driver=codex slot="reviewer using held author's slot ${author.id}"`);
+	assert.match(String(routed?.line), slot, JSON.stringify(routed));
+	const reason = new RegExp(`^borrowed: reviewer using held author's slot \\(${author.id}\\)`);
+	assert.match(String(routed?.driver_reason), reason);
+	assert.equal(result.verdict, "pass", JSON.stringify(result));
+	const sent = ends.find((end) => end.toolName === "cp_send");
+	assert.notEqual(sent?.isError, true, text(sent));
+	assert.equal(sent?.result.details?.receipt, "queued", text(sent));
+	const borrowed = /^waiting for Codex CLI capacity: its reviewer is using the held author's slot \(/;
+	assert.match(String(sent?.result.details?.waiting), borrowed);
+	const names = (end: End, id: string) => JSON.stringify(end.result.details ?? {}).includes(id);
+	const unrelated = ends.find((end) => end.toolName === "cp_dispatch" && names(end, other.id));
+	const queued = [unrelated?.result.details?.state, unrelated?.result.details?.waiting];
+	assert.deepEqual(queued, ["queued", "waiting for Codex CLI capacity"], text(unrelated));
+	const delivered = fakePrompts(h.state).filter((each) => each.text.includes(message));
+	assert.equal(delivered.length, 1, "the follow-up was delivered once, after the verdict");
+	assert.equal(delivered[0]?.threadId, h.session(author.id).thread_id, "on the author's own codex thread");
+	assert.equal(h.record(author.id)?.worker.driver, "codex");
+	assert.equal(h.record(other.id), undefined, "the unrelated job never borrowed and never ran on another CLI");
+	assert.ok(dispatchQueue(h).some((entry) => entry.job_id === other.id), JSON.stringify(dispatchQueue(h)));
+});
+
+/** PATH without any `codex`: links to the other tools of a dir holding one (treehouse among them), then the rest. */
+function pathWithoutCodex(h: H): string {
+	const tools = join(h.root, "no-codex-tools");
+	mkdirSync(tools);
+	const dirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+	for (const dir of dirs.filter((each) => existsSync(join(each, "codex")))) {
+		for (const name of readdirSync(dir).filter((each) => each !== "codex")) {
+			try {
+				symlinkSync(join(dir, name), join(tools, name));
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			}
+		}
+	}
+	return [tools, ...dirs.filter((dir) => !existsSync(join(dir, "codex")))].join(delimiter);
+}
+
+// Scenario (#869 refusals on codex, cp-1nrn): Given a codex planner row with a pi fallback, When a job is dispatched
+//   with no codex on PATH, and another with codex signed out, Then each refuses naming its reason (never pi): no fleet
+//   record, no run dir, no app-server. The Claude counterpart is "claude refusals" in the -claude test file.
+const QMRY = "CX-qmry-refusals: on a codex row a missing Codex CLI and a signed-out codex each refuse by name "
+	+ "and never run pi";
+test(QMRY, { skip: ciSkip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t);
+	codexRow(h);
+	const [missing, signedOut] = [await h.job(), await h.job()];
+	const once = { task: "Report what README.md says.", queue: false, when_ready: false };
+	const dispatched = (ends: End[]) => ends.filter((end) => end.toolName === "cp_dispatch");
+	const withoutCodex = { PATH: pathWithoutCodex(h) };
+	const [noCli] = dispatched(await h.run([step("cp_dispatch", { job_id: missing.id, ...once })], withoutCodex));
+	h.setScript({ knobs: { loginStatus: 1 }, turns: [] });
+	await h.b.closeParents();
+	const [noAuth] = dispatched(await h.run([step("cp_dispatch", { job_id: signedOut.id, ...once })]));
+	const cases = [
+		[noCli, missing.id, /cannot run on the Codex CLI driver: codex is not on PATH/],
+		[noAuth, signedOut.id, /cannot run on the Codex CLI driver: codex is not signed in/],
+	] as const;
+	for (const [end, id, reason] of cases) {
+		assert.equal(end?.isError, true, text(end));
+		assert.match(text(end), reason);
+		assert.equal(fleetRecord(h, id), undefined, `${id} ran on another CLI`);
+		assert.equal(existsSync(join(h.b.home, paths.runDir(id))), false, `${id} has a run`);
+	}
+	assert.deepEqual(fakeSpawns(h.state).filter((each) => each.argv[0] === "app-server"), [], "no app-server started");
+});
+
+// Scenario (#873 T7 / #874 R2 on codex, cp-1nrn): Given a codex planner row with a pi fallback and a free codex slot,
+//   When cp_pipeline start runs, Then it is refused by name (codex_research takes delivery local or answer only), so
+//   nothing queues and nothing runs on pi or codex: no fleet record, no dispatch-queue entry, no app-server.
+const T7C = "T7-codex: cp_pipeline start on a codex planner row refuses its planner by name, never queued and never pi";
+test(T7C, { skip: ciSkip, timeout: 300_000 }, async (t) => {
+	const h = await codexWorkerHome(t);
+	codexRow(h);
+	const start = { action: "start", title: "t7 codex pipeline", task: "Add a line to README.md.", project: "demo" };
+	const [end] = (await h.run([step("cp_pipeline", start)])).filter((each) => each.toolName === "cp_pipeline");
+	assert.equal(end?.isError, true, text(end));
+	const ineligible = /cannot run on the Codex CLI driver: only research \(role planner, delivery local or answer\)/;
+	assert.match(text(end), ineligible);
+	assert.match(text(end), /this is research\/planner\/pipeline/);
+	const fleet = join(h.b.home, LAYOUT.fleetFile);
+	const records = existsSync(fleet) ? (JSON.parse(readFileSync(fleet, "utf8")) as { jobs: unknown[] }).jobs : [];
+	assert.deepEqual(records, [], "a pipeline job took a lease");
+	assert.deepEqual(dispatchQueue(h), [], "the refused planner was queued");
+	assert.deepEqual(fakeSpawns(h.state).filter((each) => each.argv[0] === "app-server"), [], "no app-server started");
 });

@@ -15,7 +15,9 @@ import {
 	readNativeSession, readNativeUnreviewed, removeNativeScratch, returnClaim, settleClaim, writeNativeSession,
 } from "./claude-followup.ts";
 import { startIdlePrompt } from "./claude-lifecycle.ts";
-import { implementerArtifactPath, implementerExclusions, nativeWorkerChildEnv } from "./claude-roles.ts";
+import {
+	implementerArtifactPath, implementerExclusions, nativeWorkerChildEnv, plannerReadOwners,
+} from "./claude-roles.ts";
 import { nativeTranscriptFile } from "./claude-transcript.ts";
 import { nativeDenials } from "./claude-usage.ts";
 import { OBSERVATION_EVENT } from "./claude-observation.ts";
@@ -212,6 +214,8 @@ async function turn(prompt: string): Promise<Turn> {
 	// C8 (e): read roots are a ship toolchain aid; a planner never reads the variable.
 	const readRoots = ship ? absoluteDirs(READ_ROOTS_ENV) : [];
 	const excludePaths = ship ? implementerExclusions(env.CP_HOME ?? "") : undefined;
+	// WP8 (G1): read each turn, before the app-server starts, so an invalid grant fails the turn closed.
+	const ghReadOwners = !ship && !reviewer ? plannerReadOwners(env.CP_HOME ?? "") : undefined;
 	const fresh = resuming ? await movedSession(worktree) : undefined;
 	if (fresh !== undefined) {
 		resuming = false;
@@ -235,6 +239,7 @@ async function turn(prompt: string): Promise<Turn> {
 			job: {
 				job_id: jobId, kind: ship ? "ship" : "research", role: ship ? "implementer" : reviewer ? "gate-reviewer" : "planner", delivery: env.CP_DELIVERY as Delivery, runDir, worktree,
 				...(artifactPath ? { artifactPath } : {}), ...(excludePaths ? { excludePaths } : {}),
+				...(ghReadOwners ? { ghReadOwners } : {}),
 			},
 			prompt, ...(env.CP_CODEX_MODEL ? { model: env.CP_CODEX_MODEL } : {}), systemPrompt, hostEnv: env, timeoutMs: RUN_TIMEOUT_MS, signal: abort.signal,
 			scratchDir: session.scratch_dir, control, childEnv: workerChildEnv(), ...(user?.mcp.names.length ? { mcp: user.mcp } : {}), ...(skills.length > 0 ? { skillDirs: skills } : {}),
