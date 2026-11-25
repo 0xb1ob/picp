@@ -1784,8 +1784,9 @@ each server `codexMcpConfig` skips and each hyphen-named server it loads whose t
 config value; `mcp.workers` names the Codex planner's servers and that implementers and reviewers get none (R3).
 
 **Known limit.** Dynamic tools are fixed at `thread/start` (`thread/resume` carries none), so a Codex thread started
-before this build keeps its old tool set when resumed; there is no migration.
+before this build keeps its old tool set when resumed; there is no migration. #873 T7 and #874 R2 (a pipeline planner
+queued on a full CLI keeps `fetch:false`) have no Codex counterpart: `codex_research` takes delivery local or answer
+only, so a pipeline's planner on a codex row is refused by name before any queue, never run on pi.
 
 Cases: CXF-1…CXF-4 in `tests/e2e/codex-forge-parity.test.ts`; CX-7a and CX-7j in `tests/e2e/codex-ship.test.ts`;
-T7/R2-codex, T9c and CX-qmry-refusals in `tests/e2e/driver-hard-constraint.test.ts`; P24c in
-`tests/e2e/host-compatibility.test.ts`.
+T9c and CX-qmry-refusals in `tests/e2e/driver-hard-constraint.test.ts`; P24c in `tests/e2e/host-compatibility.test.ts`.
