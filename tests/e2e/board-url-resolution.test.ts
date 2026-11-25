@@ -76,6 +76,16 @@ test("board-url-resolution: tunnel beats public_url beats the pinned host, for i
 		assert.equal(refused.status, 400, value);
 		assert.match(refused.errors?.join("\n") ?? "", reason, value);
 	}
+	// (g) boards_public_url (the boards-only listener) beats even the live tunnel, for intake and responseReportUrl; a bad
+	// value voids only its own step (the tunnel again), and public_url keeps working beside it.
+	const viewerJson = join(dataDir, "viewer.json");
+	writeFileSync(viewerJson, JSON.stringify({ public_url: "https://dash.example.test/", boards_public_url: "https://boards.example.test/x/" }));
+	assert.equal(await intake("cp-boards"), "https://boards.example.test/x/boards/cp-boards/");
+	assert.equal(responseReportUrl(home.path, "cp-boards").url, "https://boards.example.test/x/boards/cp-boards/");
+	writeFileSync(viewerJson, JSON.stringify({ public_url: "https://dash.example.test/", boards_public_url: "ftp://x" }));
+	assert.equal(responseReportUrl(home.path, "cp-boards").url, "https://amber-otter.trycloudflare.com/boards/cp-boards/");
+	writeFileSync(viewerJson, JSON.stringify({ public_url: "https://dash.example.test/" }));
+	assert.equal(responseReportUrl(home.path, "cp-boards").url, "https://amber-otter.trycloudflare.com/boards/cp-boards/", "removing the key restores the tunnel");
 	// Deleting it restores today's behaviour: the configured host again.
 	writeFileSync(tunnelConfigFile(dataDir), JSON.stringify({ schema_version: 1, enabled: false, mode: "quick", port: 40123, binary: "/opt/cf/cloudflared", revision: 2 }));
 	assert.equal(set({ "viewer.public_url": null }).state, "applied");

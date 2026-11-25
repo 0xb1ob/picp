@@ -47,7 +47,8 @@ function parseUnit(text: string): { env: Record<string, string>; argv: string[] 
 test("childEnv/childArgv equal the legacy units' Environment=/ExecStart= words, and leak nothing from the shell", () => {
 	const unitFor = { parent: "cp-parent.service", viewer: "cp-view.service", health: "cp-health.service", update: "cp-update.service" } as const;
 	const base = { HOME: "/home/u", USER: "u", LOGNAME: "u" };
-	for (const extra of [{}, { viewerHost: "100.64.0.7", parentModel: "anthropic/claude-x 100%$" }]) {
+	for (const extra of [{}, { viewerHost: "100.64.0.7", parentModel: "anthropic/claude-x 100%$" },
+		{ viewerHost: "100.64.0.7", parentModel: "m", boardsPort: 7301, boardsHost: "0.0.0.0", boardsIndex: true }]) {
 		const input = { node: "/opt/node/bin/node", app: "/srv/app", home: "/home/u/.pi-command-post", path: "/usr/bin:/home/u/.fnm/fnm_multishells/1/bin:/bin", port: 7300, ...extra };
 		const units = renderUnits(input);
 		const config: DaemonConfig = {
@@ -60,6 +61,7 @@ test("childEnv/childArgv equal the legacy units' Environment=/ExecStart= words, 
 			path: unitPath(input.node, input.path),
 			port: input.port,
 			...("viewerHost" in extra ? { viewer_host: extra.viewerHost, parent_model: extra.parentModel } : {}),
+			...("boardsPort" in extra ? { boards_port: extra.boardsPort, boards_host: extra.boardsHost, boards_index: extra.boardsIndex } : {}),
 		};
 		for (const role of ["parent", "viewer", "health", "update"] as const) {
 			const unit = parseUnit(units[unitFor[role]] as string);
@@ -75,6 +77,10 @@ test("childEnv/childArgv equal the legacy units' Environment=/ExecStart= words, 
 	const config = validateDaemonConfig({ schema_version: 1, generated_by: "cp-install", backend: "detached", node: "/n", app: "/a", home: "/h", path: "/bin", port: 1 });
 	const leaked = childEnv(config, "parent", { HOME: "/home/u" });
 	assert.equal("ANTHROPIC_API_KEY" in leaked, false);
+	const minimal = { schema_version: 1, generated_by: "cp-install", backend: "detached", node: "/n", app: "/a", home: "/h", path: "/bin", port: 1 };
+	assert.throws(() => validateDaemonConfig({ ...minimal, boards_host: "example.com" }), /field boards_host/);
+	assert.throws(() => validateDaemonConfig({ ...minimal, boards_port: 0 }), /field boards_port/);
+	assert.deepEqual(Object.keys(childEnv(validateDaemonConfig(minimal), "viewer", {})).filter((key) => key.startsWith("CP_BOARDS")), [], "unset: no boards env");
 });
 
 

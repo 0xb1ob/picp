@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, readFileSync, renameSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { isIP } from "node:net";
 import { basename, join, resolve } from "node:path";
 
 /** Bumped when the outer↔inner IPC changes; an inner on a different protocol exits 78. */
@@ -81,6 +82,10 @@ export interface DaemonConfig {
 	parent_model?: string;
 	/** Each worker's own systemd scope `MemoryMax` (systemd backend only); hand-set, kept by cp-install. */
 	worker_memory_max?: string;
+	/** The opt-in boards-only listener, hand-set and kept by cp-install: port, bind IP (wildcard allowed), index. */
+	boards_port?: number;
+	boards_host?: string;
+	boards_index?: boolean;
 }
 
 export const DEFAULT_WORKER_MEMORY_MAX = "6G";
@@ -100,6 +105,9 @@ export function validateDaemonConfig(raw: unknown): DaemonConfig {
 	if (!Number.isInteger(value.port) || (value.port as number) < 1 || (value.port as number) > 65535) bad("port", "an integer 1-65535");
 	for (const field of ["viewer_host", "parent_model"]) if (value[field] !== undefined && (typeof value[field] !== "string" || (value[field] as string).length === 0)) bad(field, "a non-empty string when present");
 	if (value.worker_memory_max !== undefined && !/^\d+[KMGT]?$/.test(String(value.worker_memory_max))) bad("worker_memory_max", 'a size like "6G" when present');
+	if (value.boards_port !== undefined && (!Number.isInteger(value.boards_port) || (value.boards_port as number) < 1 || (value.boards_port as number) > 65535)) bad("boards_port", "an integer 1-65535 when present");
+	if (value.boards_host !== undefined && (typeof value.boards_host !== "string" || isIP(value.boards_host) === 0 || value.boards_host.includes("%"))) bad("boards_host", "an IP address when present");
+	if (value.boards_index !== undefined && typeof value.boards_index !== "boolean") bad("boards_index", "true or false when present");
 	return {
 		schema_version: 1,
 		generated_by: "cp-install",
@@ -112,6 +120,9 @@ export function validateDaemonConfig(raw: unknown): DaemonConfig {
 		...(value.viewer_host ? { viewer_host: value.viewer_host as string } : {}),
 		...(value.parent_model ? { parent_model: value.parent_model as string } : {}),
 		...(value.worker_memory_max ? { worker_memory_max: value.worker_memory_max as string } : {}),
+		...(value.boards_port !== undefined ? { boards_port: value.boards_port as number } : {}),
+		...(value.boards_host !== undefined ? { boards_host: value.boards_host as string } : {}),
+		...(value.boards_index !== undefined ? { boards_index: value.boards_index as boolean } : {}),
 	};
 }
 
@@ -154,6 +165,12 @@ export function baseEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 	return out;
 }
 
+/** The viewer's `CP_BOARDS_*` (src/viewer/bind-host.ts `boardsAddress`); none when `boards_port` is unset. */
+function boardsEnv(config: DaemonConfig): Record<string, string> {
+	if (config.boards_port === undefined) return {};
+	return { CP_BOARDS_PORT: String(config.boards_port), ...(config.boards_host ? { CP_BOARDS_HOST: config.boards_host } : {}), ...(config.boards_index ? { CP_BOARDS_INDEX: "1" } : {}) };
+}
+
 /** A role's env: the base, plus exactly what its legacy unit's `Environment=` carried, plus the daemon markers. */
 export function childEnv(config: DaemonConfig, role: Role, base: Record<string, string>): Record<string, string> {
 	const host: Record<string, string> = config.viewer_host ? { CP_VIEWER_HOST: config.viewer_host } : {};
@@ -163,7 +180,7 @@ export function childEnv(config: DaemonConfig, role: Role, base: Record<string, 
 		case "parent":
 			return { ...base, ...core, ...port, ...host, ...(config.parent_model ? { CP_PARENT_MODEL: config.parent_model } : {}), ...(config.backend === "systemd" ? { CP_WORKER_MEMORY_MAX: config.worker_memory_max ?? DEFAULT_WORKER_MEMORY_MAX } : {}) };
 		case "viewer":
-			return { ...base, ...core, ...host, CP_DAEMON_ROLE: "viewer" };
+			return { ...base, ...core, ...host, ...boardsEnv(config), CP_DAEMON_ROLE: "viewer" };
 		case "device-notify":
 			return { ...base, ...core, CP_DAEMON_ROLE: "device-notify" };
 		case "health":

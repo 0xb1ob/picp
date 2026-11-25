@@ -6549,7 +6549,9 @@ the configured list only — read per request, no restart; an invalid file fails
 
 **Board links (`viewer.public_url`, `src/viewer/board-link.ts`).** One resolver builds every served board's link — the
 `delivery: board` receipt and wake-up line intake writes, and `responseReportUrl` (`cp_parent answer`, research answer
-cards, schedule results) — in this order: (1) the running tunnel origin when `wantedListener` holds for its config;
+cards, schedule results) — in this order: (0) `data/viewer.json` `boards_public_url`, the boards-only listener's public
+origin (validated like `public_url` but on its own: a bad one voids only this step, never `public_url`, and the reverse);
+(1) the running tunnel origin when `wantedListener` holds for its config;
 (2) `viewer.public_url`; (3) an explicit viewer host, `CP_VIEWER_HOST` or `data/daemon.json` `viewer_host`, loopback
 included because it was configured; (4) the tailnet IPv4 (`tailscale ip -4`); (5) otherwise the relative
 `/boards/<slug>/` plus one note naming the remedy (Settings → Dashboard address → Public URL, or `cp-install --viewer-host <ip>`),
@@ -6561,6 +6563,18 @@ built. Anything else is refused with a reason; a hand-edited bad value voids onl
 and `/doctor` warns), while `strict_host` is still read from the file and a bad one still fails closed. Deleting it
 restores the order without it. It is read when a link is built (no restart) and only builds links: the bind address,
 the Host and Origin guards, push and pairing ignore it.
+
+**Boards listener (`boards_port`, opt-in, `src/viewer/boards-server.ts`).** With `data/daemon.json` `boards_port` (or
+`CP_BOARDS_PORT`) set, the viewer opens a second listener on `boards_host` (`CP_BOARDS_HOST`, an IP address, default
+`127.0.0.1`; a wildcard or public address is allowed there, never for the dashboard). It answers only `GET`/`HEAD` of
+`/boards/board.css`, `/boards/<slug>/…` and the bare-slug 308, through the same `resolveBoardFile` confinement under
+`BOARD_CSP`; every other path and method is 404 under `BOARD_CSP`, and it never reaches the dashboard dispatcher, so no
+API, stream, control, upload, device, pair, push or report route, and no cookie. It answers any Host and ignores
+`viewer.strict_host`: it serves only static pages declared public, with no auth or write route, behind whatever name
+the human picks. The `/boards/` list is served only with `boards_index: true` (`CP_BOARDS_INDEX=1`): titles, dates and
+descriptions, HTML-escaped, never job ids. A port equal to the dashboard's, or a listen error, is logged and skipped,
+and the dashboard keeps serving; `/doctor` `[boards]` states the bind address and warns on that clash. The dashboard
+port keeps serving `/boards/` unchanged.
 
 **Two ways in, one effect: a user message.** The composer's text, or one click on a decision card, is delivered
 into the session with `pi.sendUserMessage` — exactly what the human could type at the CLI, and nothing more. Text

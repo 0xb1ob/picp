@@ -39,6 +39,23 @@ export function bindHostRefusal(address: string): string | undefined {
 	return "public or non-unicast address: the dashboard serves write controls";
 }
 
+export interface BoardsAddress { port: number; host: string; index: boolean }
+
+/**
+ * The boards-only listener's address (`CP_BOARDS_PORT`/`CP_BOARDS_HOST`/`CP_BOARDS_INDEX`), undefined when the port is
+ * unset. Unlike `bindHostRefusal`, a wildcard or public address is allowed: boards are public; a bad value throws.
+ */
+export function boardsAddress(env: NodeJS.ProcessEnv = process.env): BoardsAddress | undefined {
+	if (env.CP_BOARDS_PORT === undefined || env.CP_BOARDS_PORT === "") return undefined;
+	const port = Number(env.CP_BOARDS_PORT);
+	if (!/^\d+$/.test(env.CP_BOARDS_PORT) || port < 1 || port > 65535) throw new Error(`CP_BOARDS_PORT must be 1-65535, got ${env.CP_BOARDS_PORT}`);
+	const host = env.CP_BOARDS_HOST || "127.0.0.1";
+	if (isIP(host) === 0 || host.includes("%")) throw new Error(`CP_BOARDS_HOST must be an IP address (0.0.0.0 or :: binds every interface), got ${host}`);
+	const index = env.CP_BOARDS_INDEX;
+	if (index !== undefined && index !== "" && index !== "0" && index !== "1") throw new Error(`CP_BOARDS_INDEX must be 0 or 1, got ${index}`);
+	return { port, host, index: index === "1" };
+}
+
 export interface LocalAddress { address: string; iface: string; family: 4 | 6 }
 
 /** Every acceptable address on this machine's interfaces (link-local and the rest dropped), in interface order. */

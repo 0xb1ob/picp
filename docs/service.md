@@ -49,9 +49,11 @@ the generated `cp-operator.service` / `cp-operator-resume.service` an older inst
 (on a legacy home only at M1's success, §Migration).
 
 The configuration is one file, `data/daemon.json` (0600, written only by cp-install): `{schema_version,
-generated_by, backend, node, app, home, path, port, viewer_host?, parent_model?, worker_memory_max?}`. The children get only
+generated_by, backend, node, app, home, path, port, viewer_host?, parent_model?, worker_memory_max?, boards_port?,
+boards_host?, boards_index?}`. The children get only
 `CP_HOME`, `CP_MODE=multi`, the installing `PATH`, `CP_VIEWER_PORT`, `CP_VIEWER_HOST` when a host is pinned
-(step 3b) and `CP_PARENT_MODEL` when pinned (step 3c) — never a secret — plus `HOME`, `USER`, `LOGNAME` and,
+(step 3b), `CP_PARENT_MODEL` when pinned (step 3c) and, for the viewer only, `CP_BOARDS_PORT`/`CP_BOARDS_HOST`/
+`CP_BOARDS_INDEX` when `boards_port` is set (§Boards on their own port) — never a secret — plus `HOME`, `USER`, `LOGNAME` and,
 when cp-daemon itself has them, `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` (the user manager gave the
 legacy units these implicitly; a git/gh credential helper may need the session bus). Nothing else from the
 starting shell passes.
@@ -208,6 +210,30 @@ when a link is built and changes nothing else. Keep `viewer.strict_host` off so 
 The proxy must forward to the viewer's bind address and port, and, when the dashboard sits at a sub-path
 (`https://host/apps/cp/`), strip that prefix before forwarding: the viewer serves from `/`. Without a public URL,
 tunnel or tailnet, board links are relative (`/boards/<slug>/`) and the wake-up names this remedy; nothing is refused.
+
+### Boards on their own port (opt-in)
+
+The viewer can serve the published boards on a second port, apart from the dashboard, so that port alone can be opened
+to a wider network while the dashboard port stays private. It is off unless `boards_port` is set.
+
+- **Enable.** Add the keys to `data/daemon.json` by hand, then `cp-daemon reload`:
+  `"boards_port": 8767, "boards_host": "0.0.0.0"` and, optionally, `"boards_index": true`. `boards_host` is an IP
+  address (default `127.0.0.1`); unlike the dashboard's, a wildcard (`0.0.0.0`, `::`) or public address is allowed.
+  A hand-run viewer reads `CP_BOARDS_PORT`, `CP_BOARDS_HOST` and `CP_BOARDS_INDEX=1`; a bad value stops `cp-view`.
+- **What it serves.** Only `GET`/`HEAD` of `/boards/board.css`, `/boards/<slug>/…` and the bare-slug redirect, with the
+  dashboard's confinement and `BOARD_CSP`. Everything else is 404 there: the app, `/api/*`, the stream, the control,
+  upload, device, pair and push routes and job reports. No cookie is read or set, and any Host is answered.
+  The `/boards/` list of every board is served only with `boards_index: true`; by default a board is reachable only by
+  its slug URL. The dashboard port keeps serving `/boards/` exactly as before.
+- **Links.** `data/viewer.json` `{"boards_public_url": "https://boards.example.test/"}` makes board and report links
+  use that origin; it wins over the tunnel and `public_url`, and a bad value voids only its own step.
+- **cp-install** keeps the `boards_*` keys on a rerun; when it reports `data/daemon.json differs`, rerun with `--force`.
+- **Doctor.** `/doctor` `[boards]` says off, or the bind address and port and that boards are public there, and warns
+  when `boards_port` is the dashboard port (cp-view then skips the boards listener; the dashboard keeps serving).
+- **Exposure warning.** Every published board is readable by anyone who can reach that port, with no login: response
+  reports (`report-<hash>`) and schedule results included. Anything a job writes into a board is visible, and job-id
+  slugs are guessable. Opening the port in a firewall or router is your own step; this changes no firewall rule.
+  Turning it off is removing the keys and `cp-daemon reload`.
 
 ### 3c. The models
 
