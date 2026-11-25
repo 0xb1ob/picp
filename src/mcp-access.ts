@@ -1,7 +1,7 @@
 /**
  * `/doctor` MCP lines: `mcp.operator` (`mcp.json` probed once with `pi mcp list --json`), `mcp.workers`, and (WP8)
- * `mcp.native` and `mcp.codex`, warns naming each server a native loader skips. Never prints a config value; error text is
- * scrubbed of config values and secret shapes. Kept out of doctor.ts, which sits at its ceiling.
+ * `mcp.native` and `mcp.codex`, warns naming each server a native loader skips. Never prints a config value; error
+ * text is scrubbed of config values and secret shapes. Kept out of doctor.ts, which sits at its ceiling.
  */
 import { join } from "node:path";
 import { type DoctorFinding, LAYOUT } from "./contracts.ts";
@@ -10,7 +10,9 @@ import { operatorDriverSetting } from "./operator-compact.ts";
 import { listProfiles } from "./profiles.ts";
 import { SECRET_PATTERNS } from "./secret-patterns.ts";
 import { loadNativeConfig, NATIVE_CLASSES, nativeConfigFile } from "./worker-driver.ts";
-import { agentDirOf, claudeMcpServers, codexMcpConfig, enabledServers, MCP_CALL_TOOL, readUserMcpServers } from "./worker-mcp.ts";
+import {
+	agentDirOf, claudeMcpServers, codexMcpConfig, enabledServers, MCP_CALL_TOOL, readUserMcpServers,
+} from "./worker-mcp.ts";
 
 export interface McpAccessOptions {
 	packageRoot: string;
@@ -81,8 +83,11 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 	const nativeOn = nativeWorkers(o.home);
 	const native = nativeOn ? `; native workers: servers from ${user.path} as mcp__<server>__<tool>, no OAuth sign-in under the scratch config` : "";
 	const codexOn = codexPlanners(o.home);
-	const codex = codexOn ? `; codex planners: servers from ${user.path}; codex implementers and reviewers get none (R3)` : "";
-	const by = `every worker profile (${workerProfiles.join(", ")}; implementer/ship workers and the gate, diff and quality reviewers included) via ${MCP_CALL_TOOL}, all exposed tools, no annotation filter (servers read in place from ${user.path}); the CP parent: unchanged${native}${codex}`;
+	const codex = codexOn
+		? `; codex planners: servers from ${user.path}; codex implementers and reviewers get none (R3)` : "";
+	const by = `every worker profile (${workerProfiles.join(", ")}; implementer/ship workers and the gate, diff and `
+		+ `quality reviewers included) via ${MCP_CALL_TOOL}, all exposed tools, no annotation filter (servers read in `
+		+ `place from ${user.path}); the CP parent: unchanged${native}${codex}`;
 	const finding = (check: string, severity: DoctorFinding["severity"], what: string, fix?: string, detail?: string): DoctorFinding => ({
 		check,
 		severity,
@@ -112,12 +117,15 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 		"are not loaded for the Claude CLI — docs/native-drivers.md WP5", skipped.map((line) => scrubMcpText(line, {}, 300)).join("\n"))];
 	// R3: only Codex planners load servers; a hyphenated name loads but picp's hook cannot route its tools (U3).
 	const codexMcp = codexOn ? codexMcpConfig(user, o.env ?? process.env) : undefined;
-	const codexLines = codexMcp === undefined ? [] : [...codexMcp.skipped, ...codexMcp.names.filter((name) => name.includes("-")).map((name) =>
-		`MCP server ${name} loaded but unusable: the Codex CLI spells - as _ in tool names, so picp refuses its calls (U3)`)];
+	const unusable = (codexMcp?.names ?? []).filter((name) => name.includes("-")).map((name) =>
+		`MCP server ${name} loaded but unusable: the Codex CLI spells - as _ in tool names, so picp refuses its calls (U3)`);
+	const codexLines = [...(codexMcp?.skipped ?? []), ...unusable];
 	if (codexLines.length > 0) {
-		nativeSkips.push(finding("mcp.codex", "warn", `codex planners: ${codexLines.length} MCP server(s) not loaded or unusable`,
-			"name servers with letters, digits and _ only, and use literal or $VAR values set in the parent's env; auth is not loaded " +
-			"for the Codex CLI — docs/native-drivers.md C5", codexLines.map((line) => scrubMcpText(line, {}, 300)).join("\n")));
+		const what = `codex planners: ${codexLines.length} MCP server(s) not loaded or unusable`;
+		const fix = "name servers with letters, digits and _ only, and use literal or $VAR values set in the parent's env; "
+			+ "auth is not loaded for the Codex CLI — docs/native-drivers.md C5";
+		const detail = codexLines.map((line) => scrubMcpText(line, {}, 300)).join("\n");
+		nativeSkips.push(finding("mcp.codex", "warn", what, fix, detail));
 	}
 	// cwd = the agent dir: no project `.pi/mcp.json` is read by the probe.
 	const result = o.run("pi", ["mcp", "list", "--json"], agentDir);

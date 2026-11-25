@@ -330,7 +330,8 @@ export function parseForgeArgs(name: ForgeToolName, value: unknown): Record<stri
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return `Refused: ${name} takes an object of arguments.`;
 	const a = value as Record<string, unknown>;
 	const schema = FORGE_INPUT_SCHEMAS[name] as {
-		properties: Record<string, { type: string; minLength?: number; maxLength?: number; minimum?: number }>; required?: readonly string[];
+		properties: Record<string, { type: string; minLength?: number; maxLength?: number; minimum?: number }>;
+		required?: readonly string[];
 	};
 	for (const key of Object.keys(a)) if (!(key in schema.properties)) return `Refused: ${name} \`${key}\` is not a ${name} argument.`;
 	for (const key of schema.required ?? []) if (a[key] === undefined) return `Refused: ${name} needs \`${key}\`.`;
@@ -340,7 +341,8 @@ export function parseForgeArgs(name: ForgeToolName, value: unknown): Record<stri
 		const bad = (why: string) => `Refused: ${name} \`${key}\` ${why}.`;
 		if (rule.type === "boolean" && typeof field !== "boolean") return bad("must be a boolean");
 		if (rule.type === "integer" && (typeof field !== "number" || !Number.isInteger(field))) return bad("must be an integer");
-		if (rule.type === "integer" && (field as number) < (rule.minimum ?? Number.NEGATIVE_INFINITY)) return bad(`must be ≥ ${rule.minimum}`);
+		const minimum = rule.minimum ?? Number.NEGATIVE_INFINITY;
+		if (rule.type === "integer" && (field as number) < minimum) return bad(`must be ≥ ${minimum}`);
 		if (rule.type === "string") {
 			if (typeof field !== "string") return bad("must be a string");
 			if (field.length < (rule.minLength ?? 0) || field.length > (rule.maxLength ?? Number.POSITIVE_INFINITY)) return bad(`must be ${rule.minLength ?? 0}-${rule.maxLength ?? "any"} characters`);

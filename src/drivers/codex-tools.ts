@@ -206,7 +206,9 @@ function packetDynamicTools(root: string): CodexDynamicTool[] {
 }
 
 /** A forge write as a dynamic tool: its arguments checked against FORGE_INPUT_SCHEMAS[name], its output capped. */
-function forgeTool(name: ForgeToolName, description: string, call: (args: Record<string, unknown>) => Promise<ForgeReply>): CodexDynamicTool {
+function forgeTool(
+	name: ForgeToolName, description: string, call: (args: Record<string, unknown>) => Promise<ForgeReply>,
+): CodexDynamicTool {
 	return {
 		spec: { type: "function", name, description, inputSchema: JSON.parse(JSON.stringify(FORGE_INPUT_SCHEMAS[name])) as unknown },
 		async run(args) {
@@ -228,21 +230,29 @@ function implementerForgeTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv): Codex
 	const comments = commentWrites(job, hostEnv);
 	const base = hostEnv.CP_BASE_BRANCH?.trim() || "main";
 	const tools = [
-		forgeTool("git_commit", "Commit every change in this job's worktree: `git add -A`, then `git commit -m <message>`, hooks off. A change to an excluded path is refused and unstaged. The shell cannot write .git.",
-			(args) => gitCommit(job, args as { message: string }, { excluded: job.excludePaths ?? [], env: hostEnv, hooksOff: true })),
-		forgeTool("git_merge", `Merge origin/${job.job_id} or origin/${base} into HEAD (git_fetch first). On conflicts fix the files with the shell, then git_commit.`,
+		forgeTool("git_commit", "Commit every change in this job's worktree: `git add -A`, then `git commit -m <message>`, "
+			+ "hooks off. A change to an excluded path is refused and unstaged. The shell cannot write .git.",
+			(args) => gitCommit(job, args as { message: string }, {
+				excluded: job.excludePaths ?? [], env: hostEnv, hooksOff: true,
+			})),
+		forgeTool("git_merge", `Merge origin/${job.job_id} or origin/${base} into HEAD (git_fetch first). `
+			+ "On conflicts fix the files with the shell, then git_commit.",
 			(args) => gitMerge(job, args as { ref: string }, { env: hostEnv, hooksOff: true })),
 		forgeTool("git_fetch", writes.descriptions.fetch, (args) => writes.fetch(args)),
-		forgeTool("issue_comment", comments.descriptions.issueComment, (args) => comments.issueComment(args as { issue: number; body: string })),
+		forgeTool("issue_comment", comments.descriptions.issueComment,
+			(args) => comments.issueComment(args as { issue: number; body: string })),
 	];
 	if (job.delivery !== "pr") return tools;
 	return [
 		...tools,
 		forgeTool("git_push", writes.descriptions.push, (args) => writes.push(args)),
-		forgeTool("pr_create", writes.descriptions.prCreate, (args) => writes.prCreate(args as { title: string; body: string })),
+		forgeTool("pr_create", writes.descriptions.prCreate,
+			(args) => writes.prCreate(args as { title: string; body: string })),
 		forgeTool("pr_edit", writes.descriptions.prEdit, (args) => writes.prEdit(args)),
-		forgeTool("pr_review_reply", comments.descriptions.reviewReply, (args) => comments.reviewReply(args as { comment_id: number; body: string })),
-		forgeTool("pr_thread_resolve", comments.descriptions.threadResolve, (args) => comments.threadResolve(args as { thread_id: string })),
+		forgeTool("pr_review_reply", comments.descriptions.reviewReply,
+			(args) => comments.reviewReply(args as { comment_id: number; body: string })),
+		forgeTool("pr_thread_resolve", comments.descriptions.threadResolve,
+			(args) => comments.threadResolve(args as { thread_id: string })),
 	];
 }
 

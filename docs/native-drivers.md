@@ -965,7 +965,8 @@ Every new tool runs in the claude-worker process (the in-process picp MCP server
   whose repos a planner's `gh_read` may read. No file is no grant: today's origin-only refusals hold. The worker reads
   it each planner turn (`plannerReadOwners`, `SpikeJob.ghReadOwners`); invalid JSON, an unknown key, a non-array, more
   than 50 entries or a non-owner name throws naming the file, and the turn fails closed. Implementers never carry
-  owners; a Codex planner reads the same grant each turn (cp-1nrn). `gh_read` adds `search prs|issues|commits` (query terms in `args`). Scopes are `-R`/`--repo` values on
+  owners; a Codex planner reads the same grant each turn (cp-1nrn). `gh_read` adds `search prs|issues|commits`
+  (query terms in `args`). Scopes are `-R`/`--repo` values on
   every verb but `api` (a repo: the origin or a granted owner's; `pr view|diff|checks` then need `number`),
   `--owner` and `org:`/`user:`/`owner:` qualifiers (a granted owner), `repo:` qualifiers, and `api repos/<owner>/…`
   paths, matched case-insensitively. A search needs one positive scope; one with `OR` or parentheses is refused, so a
@@ -1563,7 +1564,8 @@ and the default must come from `sessionFlags`. Any miss refuses before any turn.
 reads git and cannot write it. The implementer's thread declares `report_result` (its description names `head_sha`),
 `gh_read`, `git_commit {message}`, `git_merge {ref}` (only `origin/<job>` or `origin/<base>`), `git_fetch`,
 `issue_comment` and, for delivery `pr`, `git_push`, `pr_create`, `pr_edit`, `pr_review_reply` and `pr_thread_resolve`
-(the comment tools since cp-1nrn, under WP8 G2/G3's rules). They run in the worker process after the hook's ticket and the guard
+(the comment tools since cp-1nrn, under WP8 G2/G3's rules). They run in the worker process after the hook's ticket
+and the guard
 chain, through `src/drivers/native-forge.ts` (SDK-free; the Claude forge tools now call the same bodies, texts and argv
 unchanged). Every git call of a codex job starts with `GIT_HOOKS_OFF`; commit and merge get only PATH, the locale and
 the commit identity (no credential, no HOME). `git_commit` runs `git add -A`, then the staged-path gate: a staged path

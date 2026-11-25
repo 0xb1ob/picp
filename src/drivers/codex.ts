@@ -139,13 +139,13 @@ export const CODEX_REVIEW_ADDENDUM = [
 ].join("\n");
 
 const SHIP_TOOLS = [
-	"Codex implementer: your tools are the Codex shell, git_commit, git_merge, git_fetch, gh_read (never gh in the shell),",
-	"issue_comment (on an issue your brief names or your PR closes) and report_result; ignore any other tool names above.",
-	"The shell reads and writes this worktree only (plus the system paths and the read roots your brief names); .git",
-	"and the excluded paths are read-only and there is no network. Write files with the shell (a quoted heredoc, sed -i,",
-	"a script); apply_patch is refused, and a file is restored with `git show HEAD:<path> > <path>`. The shell never",
-	"writes git: git_commit runs `git add -A` and commits every change (an excluded path is refused), git_fetch then",
-	"git_merge {ref: \"origin/<base>\"} brings the base in.",
+	"Codex implementer: your tools are the Codex shell, git_commit, git_merge, git_fetch, gh_read (never gh in the",
+	"shell), issue_comment (on an issue your brief names or your PR closes) and report_result; ignore any other tool",
+	"names above. The shell reads and writes this worktree only (plus the system paths and the read roots your brief",
+	"names); .git and the excluded paths are read-only and there is no network. Write files with the shell (a quoted",
+	"heredoc, sed -i, a script); apply_patch is refused, and a file is restored with `git show HEAD:<path> > <path>`.",
+	"The shell never writes git: git_commit runs `git add -A` and commits every change (an excluded path is refused),",
+	"git_fetch then git_merge {ref: \"origin/<base>\"} brings the base in.",
 ];
 /** C7b: what a Codex ship implementer (delivery pr) is told after the profile body. */
 export const CODEX_SHIP_ADDENDUM = [

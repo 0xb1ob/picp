@@ -418,13 +418,19 @@ test("P24b MCP access: /doctor warns mcp.native for each MCP server the native C
 // Scenario (cp-1nrn): Given codex_research on and mcp.json servers wd (cwd), a-b, `bad name!`, au (auth) and ok, When
 //   /doctor --json runs, Then one mcp.codex warn names `bad name!` and au (skipped) and a-b (loaded, unusable: U3), not
 //   wd (Codex loads cwd), prints no config value, and no mcp.native line appears. Control: codex_research off, no line.
-test("P24c MCP access: /doctor warns mcp.codex for each MCP server a Codex planner cannot use, never a config value", { timeout: 300_000 }, async (t) => {
+const P24C = "P24c MCP access: /doctor warns mcp.codex for each MCP server a Codex planner cannot use, "
+	+ "never a config value";
+test(P24C, { timeout: 300_000 }, async (t) => {
 	const p = await mcpParent(t);
 	const nativeFile = join(p.home, LAYOUT.data, "native.json");
 	mkdirSync(join(p.home, LAYOUT.data), { recursive: true });
 	const names = ["wd", "a-b", "bad name!", "au", "ok"];
-	p.servers({ wd: { command: "z", cwd: "/p24c/cwd" }, "a-b": { command: "z" }, "bad name!": { command: "z" }, au: { command: "z", auth: { token: "p24c-auth-value" } }, ok: { command: "z" } });
-	p.answer(JSON.stringify({ servers: names.map((name) => ({ name, enabled: true, state: "connected", tools: [] })), errors: [] }));
+	p.servers({
+		wd: { command: "z", cwd: "/p24c/cwd" }, "a-b": { command: "z" }, "bad name!": { command: "z" },
+		au: { command: "z", auth: { token: "p24c-auth-value" } }, ok: { command: "z" },
+	});
+	const listed = names.map((name) => ({ name, enabled: true, state: "connected", tools: [] }));
+	p.answer(JSON.stringify({ servers: listed, errors: [] }));
 	const of = (report: DoctorReport, check: string) => report.findings.filter((finding) => finding.check === check);
 	assert.deepEqual(of(await p.doctor(), "mcp.codex"), [], "no mcp.codex while codex_research is off");
 	writeFileSync(nativeFile, JSON.stringify({ codex_research: true }));
@@ -438,9 +444,11 @@ test("P24c MCP access: /doctor warns mcp.codex for each MCP server a Codex plann
 		"MCP server au not loaded: \"auth\" has no Codex CLI equivalent",
 		"MCP server a-b loaded but unusable: the Codex CLI spells - as _ in tool names, so picp refuses its calls (U3)",
 	]);
-	assert.deepEqual(["p24c-auth-value", "/p24c/cwd"].filter((value) => JSON.stringify(report).includes(value)), [], "no config value is printed");
+	const printed = ["p24c-auth-value", "/p24c/cwd"].filter((value) => JSON.stringify(report).includes(value));
+	assert.deepEqual(printed, [], "no config value is printed");
 	assert.deepEqual(of(report, "mcp.native"), [], "the Claude switches are off");
-	assert.match(String(of(report, "mcp.workers")[0]?.detail), /; codex planners: servers from \S+\/mcp\.json; codex implementers and reviewers get none \(R3\)$/);
+	const by = /; codex planners: servers from \S+\/mcp\.json; codex implementers and reviewers get none \(R3\)$/;
+	assert.match(String(of(report, "mcp.workers")[0]?.detail), by);
 });
 
 // -- pi-lens ---------------------------------------------------------------------
