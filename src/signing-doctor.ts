@@ -32,7 +32,9 @@ function finding(driver: Driver, plan: SigningPlan): DoctorFinding {
 	if (driver === "pi") {
 		return { check, severity: "ok", what: signed, detail: "pi's git reads the host's own config" };
 	}
-	const guard = driver === "claude" ? "; Read, Grep and Bash refuse the key path, best effort only" : "";
+	const guard = driver === "claude"
+		? "; Read, Grep and Bash refuse the key path, best effort only"
+		: "; picp's tool-call guard refuses the key path, best effort only (the kernel profile is not narrowed)";
 	return {
 		check, severity: "warn", what: `${signed}; the key is reachable by the worker's shell`,
 		detail: `${REACH[plan.reach ?? "file"]}${guard}`, fix: DEDICATED,

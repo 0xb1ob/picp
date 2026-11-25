@@ -6,10 +6,11 @@ import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { type TestContext, test } from "node:test";
+import { paths } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
-import { fakeSpawns } from "../harness/codex-mock.ts";
+import { fakeExecuted, fakeHooks, fakeSpawns } from "../harness/codex-mock.ts";
 import { codexWorkerHome } from "../harness/codex-worker.ts";
-import { hasSignature, signingKey, signsConfig, verifyCommit } from "../harness/commit-signing.ts";
+import { hasSignature, signingAgent, signingKey, signsConfig, verifyCommit } from "../harness/commit-signing.ts";
 import { readRunEvents, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const skip = process.env.CI === "true" || treehouseAvailable() ? false : "needs treehouse on PATH";
@@ -136,4 +137,40 @@ test("CS-3: an unreachable signing key fails Codex git_commit by name", { skip, 
 	assert.equal(commit?.ok, false, JSON.stringify(commit));
 	assert.match(commit?.text ?? "", UNREACHABLE);
 	assert.equal(h.git(job.id, "rev-list", "--count", "origin/main..HEAD"), "0", "no commit landed");
+});
+
+// Scenario: the host signs with an agent-held key (.pub, private file gone, SSH_AUTH_SOCK set for picp): git_commit
+//   verifies through picp's signer; neither the Codex shell env (app-server) nor git_commit's env holds SSH_AUTH_SOCK
+//   or GNUPGHOME; a shell read of the key path is refused by picp's guard, best effort.
+test("CS-4: an agent key signs git_commit; the shell env gets no agent",{ skip, timeout: 300_000 }, async (t) => {
+	const h = await shipHome(t);
+	const { file, allowed } = signingKey(h.root);
+	const socket = await signingAgent(t, h.root, file);
+	appendFileSync(hostConfig(h), signsConfig(`${file}.pub`));
+	const spy = gitSpy(h);
+	const job = await h.job("local", "ship");
+	h.setScript({ turns: [[
+		{ kind: "shell", command: "printf 'four\\n' > four.txt" },
+		{ kind: "shell", command: `cat ${file}` },
+		{ kind: "tool", tool: "git_commit", arguments: { message: "cs4" } },
+		{ kind: "tool", tool: "report_result", arguments: h.shipReport(job.id, "local") },
+		{ kind: "message", text: "Reported." },
+	]] });
+	await h.run([job.dispatch({ task: "Add four.txt." }), h.awaitEnvelope(job.id)], { ...spy.env, SSH_AUTH_SOCK: socket });
+	assert.equal(commits(h)[0]?.ok, true, JSON.stringify(commits(h)));
+	const checked = verifyCommit(h.worktree(job.id), allowed);
+	assert.ok(checked.ok, checked.out);
+	assert.ok(existsSync(join(h.b.home, paths.runDir(job.id), "ssh-signer")), "picp wrote the signer");
+	const block = spy.commits().find((each) => each.args.endsWith("-m cs4"));
+	const passed = block?.names.filter((name) => SIGNER_ENV.includes(name));
+	assert.deepEqual(passed, ["GIT_CONFIG_COUNT"], JSON.stringify(block));
+	const servers = fakeSpawns(h.state).filter((each) => each.argv[0] === "app-server");
+	assert.ok(servers.length > 0, "an app-server was spawned");
+	for (const spawned of servers) {
+		assert.deepEqual(spawned.env.filter((name) => /^GIT_CONFIG_|^SSH_AUTH_SOCK$|^GNUPGHOME$/.test(name)), []);
+	}
+	const refused = fakeHooks(h.state).filter((each) => each.status === "blocked");
+	assert.equal(refused.length, 1, JSON.stringify(fakeHooks(h.state)));
+	assert.match(refused[0]?.stderr ?? "", /secret path/);
+	assert.equal(fakeExecuted(h.state).some((command) => command.includes(file)), false);
 });

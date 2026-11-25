@@ -58,6 +58,7 @@ test("DS-1: /doctor says per driver whether worker commits will be signed", { ti
 		assert.equal(finding.fix, DEDICATED);
 	}
 	assert.match(ready[1]?.detail ?? "", /best effort only/);
+	assert.match(ready[2]?.detail ?? "", /tool-call guard refuses the key path, best effort only/);
 	writeFileSync(config, `${IDENTITY}${signsConfig(join(host, "keys", "missing"))}`);
 	const broken = await doctor();
 	assert.deepEqual(checks(broken), [["signing.pi", "warn"], ["signing.claude", "warn"], ["signing.codex", "warn"]]);

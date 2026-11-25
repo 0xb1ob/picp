@@ -1007,21 +1007,23 @@ Recovery: delete `data/gh-read.json`, switch
   no credential helper, alias or include reaches a worker. A key the worktree's own config sets is not passed, so a
   repo-local `commit.gpgsign=false` wins as in plain git. openpgp and x509 add `GNUPGHOME`.
 - **Agent key.** An agent-held ssh key (`key::`, or a `.pub` path with `SSH_AUTH_SOCK` set) is reached through
-  `<run dir>/ssh-signer`, a 0700 `gpg.ssh.program` wrapper that alone exports `SSH_AUTH_SOCK`. Neither the CLI child
-  env nor the Codex `gitEnv` holds the socket. `GIT_SSH_COMMAND=false` stays: signing runs ssh-keygen, not ssh.
+  `<run dir>/ssh-signer`, a 0700 `gpg.ssh.program` wrapper that alone exports `SSH_AUTH_SOCK`. The socket is in
+  none of the Claude CLI child env, the Codex shell (app-server) env and the Codex `gitEnv`; neither shell env gets
+  `GNUPGHOME` either. `GIT_SSH_COMMAND=false` stays: signing runs ssh-keygen, not ssh.
 - **Where.** The Claude implementer's Bash git and freeze checkpoint; Codex `git_commit`, `git_merge` and checkpoint
   (worker process). The Codex app-server env is unchanged. Only the driver sets `GIT_CONFIG*`: the agent's Bash
   assignment stays refused.
 - **Key secrecy, best effort only.** The worker runs as the host's uid, so a key file, an agent socket or a GnuPG
-  home cannot be made unreadable to it. The key path joins the native secret paths (Read, Grep, Glob, Bash), a
-  lexical guard and nothing more. `/doctor` warns on `signing.claude` and `signing.codex` whenever the key is
-  reachable, with the fix "use a dedicated ssh-agent (or a gpg key) that holds only the signing key".
+  home cannot be made unreadable to it. The key path joins the native secret paths: Claude's Read, Grep, Glob and
+  Bash guards, and the same guard chain behind Codex's tool-call hook (no new guard, and the kernel profile is not
+  narrowed). That is a lexical guard and nothing more; this is ruling R2, not a defect. `/doctor` warns on
+  `signing.claude` and `signing.codex` whenever the key is reachable, with the fix "use a dedicated ssh-agent (or a gpg key) that holds only the signing key".
 - **Fail closed.** When the host signs but the key is unreachable, every signer is set to the missing program
   `/commit_signing_unavailable: <why>`. git prints `cannot exec '/commit_signing_unavailable: …'` and the commit
   fails, never landing unsigned. `/doctor` names the same reason with a fix.
 - **Read timing.** Signing is read once per worker process; a host config change applies to the next worker.
 - **Pinned by** `tests/e2e/native-commit-signing.test.ts` SG-1…SG-6, `tests/e2e/codex-commit-signing.test.ts`
-  CS-1…CS-3 and `tests/e2e/doctor-commit-signing.test.ts` DS-1.
+  CS-1…CS-4 and `tests/e2e/doctor-commit-signing.test.ts` DS-1.
 - **Recovery.** Revert, or have the host stop signing.
 
 ## Codex CLI workers (C0–C8)
