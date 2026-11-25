@@ -14,13 +14,10 @@
  */
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
-import { isIP } from "node:net";
 import { join } from "node:path";
-import { type DaemonConfig, daemonPaths, readDaemonConfig } from "../service/daemon-files.ts";
 import type {
 	BoardsListenerState, ModelApplyRow, ModelList, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse,
 } from "./api-types.ts";
-import { BOARDS_LISTENER_KEYS, probeBind } from "./boards-server.ts";
 import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, mayWrite, readAllowed, tokenMatches } from "./control-api.ts";
 import { readControlConfig, readControlRecord } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
@@ -84,7 +81,7 @@ export function handleSettingsWrite(req: IncomingMessage, options: ControlRouteO
 		const session = operatorSession(options.stateDir);
 		if (record.state !== "ok" || !session.running) return refuse(409, `no operator session is running (${session.reason}); start it to change settings`, undefined, { state: "offline" });
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the page");
-		const bind = body.frame.mode === "set" ? await boardsBindRefusal(body.frame.changes, options) : undefined;
+		const bind = body.frame.mode === "set" ? await options.boards?.refusal(body.frame.changes) : undefined;
 		if (bind) return refuse(bind.status, bind.reason, undefined, { state: "refused", errors: [bind.reason] });
 		const reply = await controlRequest(record.record, "settings_apply", {
 			...body.frame, expected_revision: ifMatch.state === "ok" ? ifMatch.revision : null, dry_run: body.dry_run, request_id: body.request_id, peer: peer?.slice(0, 64) ?? null,
@@ -103,37 +100,8 @@ export function handleSettingsWrite(req: IncomingMessage, options: ControlRouteO
 	});
 }
 
-/**
- * A set whose boards port and host (`data/daemon.json` merged with the changes) this viewer cannot take: the
- * dashboard's own port, or one a bind probe finds held. Unreadable files and bad values go on to the session's refusal.
- */
-async function boardsBindRefusal(
-	changes: Record<string, unknown>,
-	options: ControlRouteOptions,
-): Promise<{ status: number; reason: string } | undefined> {
-	if (!("boards.port" in changes) && !("boards.host" in changes)) return undefined;
-	let config: DaemonConfig | undefined;
-	try {
-		config = readDaemonConfig(daemonPaths(options.home).config);
-	} catch {
-		return undefined;
-	}
-	if (!config) return undefined;
-	const port = "boards.port" in changes ? changes["boards.port"] : config.boards_port;
-	const host = "boards.host" in changes ? changes["boards.host"] : (config.boards_host ?? "127.0.0.1");
-	if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) return undefined;
-	if (typeof host !== "string" || isIP(host) === 0 || host.includes("%")) return undefined;
-	if (port === options.port) {
-		return { status: 400, reason: `boards.port: ${port} is the dashboard port; pick another port` };
-	}
-	// The live listener's own port would read as held; a move on it closes first and reports a failed rebind.
-	const live = options.boards?.status();
-	if (live?.state === "listening" && port === live.port) return undefined;
-	const code = await probeBind(port, host);
-	if (!code) return undefined;
-	const reason = `boards.port ${port} on ${host} is in use or unavailable here (${code}); pick another port or address`;
-	return { status: 409, reason };
-}
+/** The Settings keys whose applied change moves the boards listener. */
+const BOARDS_LISTENER_KEYS: readonly string[] = ["boards.port", "boards.host", "boards.index"];
 
 /** After an applied boards change: where this viewer's listener is now. Never fails the write that already landed. */
 async function followBoards(options: ControlRouteOptions): Promise<BoardsListenerState> {
@@ -141,7 +109,7 @@ async function followBoards(options: ControlRouteOptions): Promise<BoardsListene
 		return { state: "failed", error: "this viewer runs no boards listener; cp-daemon reload applies the saved settings" };
 	}
 	try {
-		return await options.boards.reload(options.home);
+		return await options.boards.reload();
 	} catch (error) {
 		return { state: "failed", error: error instanceof Error ? error.message : String(error) };
 	}

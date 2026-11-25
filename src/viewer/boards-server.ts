@@ -4,11 +4,12 @@
  * no cookie, no `dispatch`: every other path and method is 404, so no dashboard route is reachable from this port.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createServer as createNetServer } from "node:net";
-import { type DaemonConfig, daemonPaths, readDaemonConfig } from "../service/daemon-files.ts";
+import { readFileSync } from "node:fs";
+import { createServer as createNetServer, isIP } from "node:net";
+import { dirname, join } from "node:path";
 import type { BoardsListenerState } from "./api-types.ts";
 import { escapeHtml } from "./app-page.ts";
-import type { BoardsAddress } from "./bind-host.ts";
+import { type BoardsAddress, boardsAddress } from "./bind-host.ts";
 import { BOARD_CSP, type Board, type BoardWarn, listBoards, onceWarner } from "./boards.ts";
 import { hostHeaderFor, send, serveBoard } from "./server.ts";
 import type { ViewerState } from "./sessions.ts";
@@ -52,13 +53,40 @@ export function createBoardsServer(state: ViewerState, index: () => boolean, log
 	return createServer((req, res) => boardsHandle(req, res, own, index(), warn));
 }
 
-/** The Settings keys whose applied change moves the listener (`BoardsListener.reload`). */
-export const BOARDS_LISTENER_KEYS: readonly string[] = ["boards.port", "boards.host", "boards.index"];
+/** `data/daemon.json` beside the state dir (cp-daemon's `daemonPaths`); the viewer imports no daemon module. */
+export const daemonConfigFile = (stateDir: string): string => join(dirname(stateDir), "data", "daemon.json");
 
-/** The address `data/daemon.json` names, as cp-daemon passes it on (`boardsEnv`); undefined when no port is set. */
-export function boardsOfConfig(config?: DaemonConfig): BoardsAddress | undefined {
-	if (config?.boards_port === undefined) return undefined;
-	return { port: config.boards_port, host: config.boards_host ?? "127.0.0.1", index: config.boards_index === true };
+/** The `boards_*` keys of `data/daemon.json`; `address` absent when no port is set. */
+export interface DaemonBoards { address?: BoardsAddress; host: string }
+
+/**
+ * `data/daemon.json`'s boards keys under `boardsAddress`'s rules, the ones cp-daemon's `boardsEnv` hands the viewer.
+ * Undefined when the file is absent; an unreadable file or a bad key throws, naming the file.
+ */
+export function readDaemonBoards(stateDir: string): DaemonBoards | undefined {
+	const file = daemonConfigFile(stateDir);
+	let raw: unknown;
+	try {
+		raw = JSON.parse(readFileSync(file, "utf8"));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw new Error(`${file} is unreadable: ${(error as Error).message}`);
+	}
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${file} is not a JSON object`);
+	const { boards_port: port, boards_host: host, boards_index: index } = raw as Record<string, unknown>;
+	if (index !== undefined && typeof index !== "boolean") throw new Error(`${file}: boards_index must be true or false`);
+	if (host !== undefined && (typeof host !== "string" || isIP(host) === 0 || host.includes("%"))) {
+		throw new Error(`${file}: boards_host must be an IP address`);
+	}
+	const bind = host as string | undefined;
+	const at = port === undefined ? undefined : String(port);
+	const env = { CP_BOARDS_PORT: at, CP_BOARDS_HOST: bind, CP_BOARDS_INDEX: "0" };
+	if (index === true) env.CP_BOARDS_INDEX = "1";
+	try {
+		return { address: boardsAddress(env), host: bind ?? "127.0.0.1" };
+	} catch (error) {
+		throw new Error(`${file}: ${(error as Error).message.replace("CP_BOARDS_PORT", "boards_port")}`);
+	}
 }
 
 /** One exclusive bind of host:port, closed at once: the error code (EADDRINUSE, EADDRNOTAVAIL, EACCES) or undefined. */
@@ -75,7 +103,12 @@ export interface BoardsListener {
 	/** Start, stop or move the listener to `address` (undefined: off); calls run one at a time, in order. */
 	apply(address: BoardsAddress | undefined): Promise<BoardsListenerState>;
 	/** `apply` what `data/daemon.json` names now; an absent or unreadable file is `failed` and moves nothing. */
-	reload(home: string): Promise<BoardsListenerState>;
+	reload(): Promise<BoardsListenerState>;
+	/**
+	 * Why a Settings set of `boards.port`/`boards.host` (merged with `data/daemon.json`) cannot bind here: the dashboard's
+	 * own port (400) or a port held on that address (409). Unreadable files and bad values are the session's to refuse.
+	 */
+	refusal(changes: Record<string, unknown>): Promise<{ status: number; reason: string } | undefined>;
 }
 
 const closeServer = (server: Server): Promise<void> => new Promise((done) => {
@@ -138,18 +171,40 @@ export function boardsListener(
 	return {
 		status: () => ({ ...current }),
 		apply,
-		reload: (home) => {
-			const file = daemonPaths(home).config;
+		reload: () => {
 			// The reason reaches the browser: the home path never does.
 			const failed = (why: string): Promise<BoardsListenerState> =>
-				Promise.resolve({ state: "failed", error: `${why.split(home).join("<home>")}; the listener is unchanged` });
-			let config: DaemonConfig | undefined;
+				Promise.resolve({ state: "failed", error: `${why.split(state.home).join("<home>")}; the listener is unchanged` });
+			let boards: DaemonBoards | undefined;
 			try {
-				config = readDaemonConfig(file);
+				boards = readDaemonBoards(state.stateDir);
 			} catch (error) {
 				return failed((error as Error).message);
 			}
-			return config ? apply(boardsOfConfig(config)) : failed(`${file} is absent`);
+			return boards ? apply(boards.address) : failed(`${daemonConfigFile(state.stateDir)} is absent`);
+		},
+		refusal: async (changes) => {
+			if (!("boards.port" in changes) && !("boards.host" in changes)) return undefined;
+			let boards: DaemonBoards | undefined;
+			try {
+				boards = readDaemonBoards(state.stateDir);
+			} catch {
+				return undefined;
+			}
+			if (!boards) return undefined;
+			const port = "boards.port" in changes ? changes["boards.port"] : boards.address?.port;
+			const host = "boards.host" in changes ? changes["boards.host"] : boards.host;
+			if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) return undefined;
+			if (typeof host !== "string" || isIP(host) === 0 || host.includes("%")) return undefined;
+			if (port === dashboardPort) {
+				return { status: 400, reason: `boards.port: ${port} is the dashboard port; pick another port` };
+			}
+			// The live listener's own port would read as held; a move on it closes first and reports a failed rebind.
+			if (current.state === "listening" && port === current.port) return undefined;
+			const code = await probeBind(port, host);
+			if (!code) return undefined;
+			const held = `boards.port ${port} on ${host} is in use or unavailable here (${code})`;
+			return { status: 409, reason: `${held}; pick another port or address` };
 		},
 	};
 }
