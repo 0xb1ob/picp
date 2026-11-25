@@ -895,8 +895,8 @@ The CLI child of a native worker now gets, beyond `buildChildEnv`'s allow-list, 
 `PLAYWRIGHT_BROWSERS_PATH`, `PUPPETEER_CACHE_DIR`, `PUPPETEER_EXECUTABLE_PATH`, `CHROME_PATH`, `NODE_EXTRA_CA_CERTS`,
 `SSL_CERT_FILE` and the six `HTTP(S)_PROXY`/`NO_PROXY` spellings when set. `PLAYWRIGHT_BROWSERS_PATH` defaults to
 `<passwd home>/.cache/ms-playwright` when unset and that dir exists, since the child's `HOME` is scratch. Never
-`CP_HOME`, `CP_RUN_DIR`, `GH_*`, `SSH_AUTH_SOCK` (the `ops` profile alone gets it, WP7) or a secret-named key; a
-proxy value containing `@` (embedded credentials) is dropped, with one stderr line naming the keys, never the value.
+`CP_HOME`, `CP_RUN_DIR`, `GH_*`, `SSH_AUTH_SOCK` (the `ops` profile alone gets it, WP7; a signing implementer's
+agent reaches only picp's ssh signer, Worker commit signing) or a secret-named key; a proxy value containing `@` (embedded credentials) is dropped, with one stderr line naming the keys, never the value.
 A CA override lets the child trust a custom CA, as pi's workers already do. `tests/e2e/native-worker-parity.test.ts`
 NP-3a pins it through the spawned env key names and the child's own output. NP-1a now also pins `GH_REPO`: with a
 GitHub origin, an `upstream` remote and gh's set-default on that upstream, every `gh_read` runs with the origin's
@@ -995,6 +995,36 @@ planner's fetch shows upstream main in Bash, the `-F` remedy, teardown passes), 
 `tests/e2e/host-compatibility.test.ts` P24b (`mcp.native`) pin it; NP-1a…NP-1c still pin the origin-only reads.
 Recovery: delete `data/gh-read.json`, switch
 `claude_ship` / `claude_research` off, or revert.
+
+## Worker commit signing
+
+- **Before.** pi workers sign as the host does: they inherit its env. The Claude CLI child (scratch `HOME`) and the
+  Codex commit, merge and checkpoint (no `HOME`) dropped the host's signing config, so their commits were unsigned.
+- **Read.** At worker start, `git config --global --includes --get` reads seven keys under the host env:
+  `commit.gpgsign`, `tag.gpgsign`, `user.signingkey`, `gpg.format`, `gpg.program`, `gpg.ssh.program` and
+  `gpg.ssh.allowedSignersFile`. `/doctor` makes the same read. A `~/` path is expanded with the host `HOME`.
+- **Pass.** Only those keys, as `GIT_CONFIG_COUNT` pairs; `GIT_CONFIG_GLOBAL` is never pointed at the host file, so
+  no credential helper, alias or include reaches a worker. A key the worktree's own config sets is not passed, so a
+  repo-local `commit.gpgsign=false` wins as in plain git. openpgp and x509 add `GNUPGHOME`.
+- **Agent key.** An agent-held ssh key (`key::`, or a `.pub` path with `SSH_AUTH_SOCK` set) is reached through
+  `<run dir>/ssh-signer`, a 0700 `gpg.ssh.program` wrapper that alone exports `SSH_AUTH_SOCK`. The socket is in
+  none of the Claude CLI child env, the Codex shell (app-server) env and the Codex `gitEnv`; neither shell env gets
+  `GNUPGHOME` either. `GIT_SSH_COMMAND=false` stays: signing runs ssh-keygen, not ssh.
+- **Where.** The Claude implementer's Bash git and freeze checkpoint; Codex `git_commit`, `git_merge` and checkpoint
+  (worker process). The Codex app-server env is unchanged. Only the driver sets `GIT_CONFIG*`: the agent's Bash
+  assignment stays refused.
+- **Key secrecy, best effort only.** The worker runs as the host's uid, so a key file, an agent socket or a GnuPG
+  home cannot be made unreadable to it. The key path joins the native secret paths: Claude's Read, Grep, Glob and
+  Bash guards, and the same guard chain behind Codex's tool-call hook (no new guard, and the kernel profile is not
+  narrowed). That is a lexical guard and nothing more; this is ruling R2, not a defect. `/doctor` warns on
+  `signing.claude` and `signing.codex` whenever the key is reachable, with the fix "use a dedicated ssh-agent (or a gpg key) that holds only the signing key".
+- **Fail closed.** When the host signs but the key is unreachable, every signer is set to the missing program
+  `/commit_signing_unavailable: <why>`. git prints `cannot exec '/commit_signing_unavailable: …'` and the commit
+  fails, never landing unsigned. `/doctor` names the same reason with a fix.
+- **Read timing.** Signing is read once per worker process; a host config change applies to the next worker.
+- **Pinned by** `tests/e2e/native-commit-signing.test.ts` SG-1…SG-6, `tests/e2e/codex-commit-signing.test.ts`
+  CS-1…CS-4 and `tests/e2e/doctor-commit-signing.test.ts` DS-1.
+- **Recovery.** Revert, or have the host stop signing.
 
 ## Codex CLI workers (C0–C8)
 
@@ -1576,7 +1606,9 @@ the loopback mock model, a throwaway Codex home, zero tokens; run once on 2026-1
   condition C1 makes a revive surface it by path first; or tear down.
 - **RR2.** Worker-side `git add`, `commit` and `merge` run a filter or merge driver the repository's own git config
   names; a config pointing one at a worktree script would run model-written code outside the sandbox, in a
-  credential-free env. Hooks and fsmonitor are off (C3); the model cannot write git config (PA).
+  credential-free env. Hooks and fsmonitor are off (C3); the model cannot write git config (PA). When the host
+  signs, that env also carries the signing keys and, for openpgp, `GNUPGHOME`; an ssh agent reaches only picp's
+  signer (Worker commit signing).
 - **RR3.** The project's commit hooks do not run for a codex job; CI is the check.
 - **RR4.** No network and a narrow read set: many repositories cannot install or test. `CP_CODEX_READ_ROOTS` widens
   a ship implementer's reads (never a planner's or reviewer's, C8); whatever it names is readable by that model.
@@ -1587,8 +1619,8 @@ the loopback mock model, a throwaway Codex home, zero tokens; run once on 2026-1
   `write` entry and every git write "Read-only file system"); every kernel claim rests on the opt-in real-CLI cases.
 - **RR8.** The git common dir is readable (a remote URL with embedded credentials would be too), as for planners.
 
-**Known limits.** Commit and merge run with no HOME, so the operator's global git config (an `excludesFile`, signing)
-does not apply to them. Excluded globs are listed for the kernel up to 200 hits and not under `node_modules`; the
+**Known limits.** Commit and merge run with no HOME, so the operator's global git config (an `excludesFile`) does not
+apply to them; signing does (Worker commit signing). Excluded globs are listed for the kernel up to 200 hits and not under `node_modules`; the
 `git_commit` gate covers the rest. A server name with `-` is unusable on Codex (U3 above).
 
 **Shipped off (C7a).** No persisted shape, contract schema or golden changed, and no selection reaches the implementer

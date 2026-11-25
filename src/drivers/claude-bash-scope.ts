@@ -93,7 +93,7 @@ export function bashScope(job: SpikeJob, secrets: readonly string[], role: "rese
 }
 
 const denied = (what: string, remedy?: string): string => `${what} is denied${remedy ? `; ${remedy}` : ""}`;
-const SECRET = denied("a secret path (settings, Claude config, /proc or /dev/fd)");
+const SECRET = denied("a secret path (settings, Claude config, the git signing key, /proc or /dev/fd)");
 const secretVar = (name: string): boolean => SECRET_ENV_NAME.test(name) || /^(ANTHROPIC|CLAUDE)_/.test(name);
 const RESERVED = new Set(["!", "{", "}", "if", "then", "else", "elif", "fi", "do", "done", "while", "until"]);
 const WRAPPERS: Record<string, readonly string[]> = {

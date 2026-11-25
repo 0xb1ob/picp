@@ -21,6 +21,7 @@ import { nativeDenials } from "./claude-usage.ts";
 import { OBSERVATION_EVENT } from "./claude-observation.ts";
 import { codexDoorRefusal, codexPersistRefusal, READ_ROOTS_ENV, SKILL_DIRS_ENV } from "./codex.ts";
 import { codexCheckpointCommit } from "./native-forge.ts";
+import { workerSigning } from "./worker-signing.ts";
 import { codexErrorCode, codexLimit, USAGE_LIMIT } from "./codex-observation.ts";
 import type { ItemNotification, TokenUsageUpdatedNotification } from "./codex-protocol.ts";
 import { type CodexRunControl, type CodexRunUsage, type CodexSpikeResult, type CodexTokenTotals, type CodexToolEvent, runCodexSpike, ZERO_TOTALS } from "./codex-spike.ts";
@@ -237,6 +238,7 @@ async function turn(prompt: string): Promise<Turn> {
 			},
 			prompt, ...(env.CP_CODEX_MODEL ? { model: env.CP_CODEX_MODEL } : {}), systemPrompt, hostEnv: env, timeoutMs: RUN_TIMEOUT_MS, signal: abort.signal,
 			scratchDir: session.scratch_dir, control, childEnv: workerChildEnv(), ...(user?.mcp.names.length ? { mcp: user.mcp } : {}), ...(skills.length > 0 ? { skillDirs: skills } : {}),
+			secretFiles: workerSigning(env, worktree).secrets,
 			...(readRoots.length > 0 ? { readRoots } : {}),
 			...(resumed ? { resume: { threadId: session.thread_id as string, ...(session.totals ? { baseline: session.totals } : {}) } } : {}),
 			...(env.CP_CODEX_HOME ? { codexHome: env.CP_CODEX_HOME } : {}), ...(env.CP_NATIVE_THINKING ? { effort: env.CP_NATIVE_THINKING } : {}),

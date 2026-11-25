@@ -72,6 +72,7 @@ import { ROLE_PACKAGES, WORKER_PACKAGES_LOADED_AT } from "./worker-packages.ts";
 import { webAccessFindings } from "./web-access.ts";
 import { mcpFindings } from "./mcp-access.ts";
 import { codexFindings } from "./codex-doctor.ts";
+import { signingFindings } from "./signing-doctor.ts";
 import { describeHome, homeCheckoutFinding, isManagedInstall } from "./home.ts";
 import { jobsFile } from "./ledger.ts";
 import { describeRuntime } from "./mode.ts";
@@ -309,6 +310,9 @@ export class Doctor {
 			...(await webAccessFindings({ packageRoot: this.#options.packageRoot, ...(this.#options.env ? { env: this.#options.env } : {}) })),
 			...mcpFindings({ packageRoot: this.#options.packageRoot, run: this.#run, home: this.#options.home, ...(this.#options.env ? { env: this.#options.env } : {}) }),
 			...(await codexFindings({ home: this.#options.home, ...(this.#options.env ? { env: this.#options.env } : {}) })),
+			...signingFindings({
+				home: this.#options.home, env: this.#options.env ?? process.env, run: this.#run,
+			}),
 			...this.#sessionTools(),
 			...this.#ledger(),
 			...this.#packageResources(),

@@ -13,6 +13,7 @@ import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sd
 import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
 import { estimatedRunUsage, liveUsageUpdate, NATIVE_REPORTED_GRACE_MS, NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage, noteStreamedUsage, type StreamedUsage } from "./claude-usage.ts";
 import { checkpointCommit, commitIdentityEnv } from "./native-forge.ts";
+import { workerSigning } from "./worker-signing.ts";
 import { implementerArtifactPath, implementerExclusions, nativeRole, nativeWorkerChildEnv, plannerReadOwners } from "./claude-roles.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
 import { VERDICT_TOOL } from "./claude-verdict.ts";
@@ -203,6 +204,7 @@ async function turn(prompt: string): Promise<Turn> {
 	}
 	transcript.prompt(prompt, resumed);
 	const implementer = nativeRole(role) === "implementer";
+	const signing = workerSigning(env, worktree);
 	// Dispatch predeclares no ship artifact; the implementer's own is named here from the home and job id alone.
 	if (implementer) artifactPath = implementerArtifactPath(env.CP_HOME ?? "", jobId);
 	// Per turn, so a checkpoint aborts only this run; a stop or freeze already under way keeps its aborted controller.
@@ -213,7 +215,8 @@ async function turn(prompt: string): Promise<Turn> {
 			...(implementer ? { excludePaths: implementerExclusions(env.CP_HOME ?? "") } : {}),
 			...(role === "planner" ? { ghReadOwners: plannerReadOwners(env.CP_HOME ?? "") } : {}),
 		},
-		childEnv: { ...workerChildEnv(), ...(implementer ? commitIdentityEnv(worktree) : {}) },
+		childEnv: { ...workerChildEnv(), ...(implementer ? { ...commitIdentityEnv(worktree), ...signing.env } : {}) },
+		secretFiles: signing.secrets,
 		systemPrompt,
 		prompt,
 		web: env.CP_NATIVE_WEB === "1",

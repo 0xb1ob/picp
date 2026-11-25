@@ -152,6 +152,8 @@ export interface CodexSpikeOptions {
 	codexHome?: string;
 	hostEnv?: NodeJS.ProcessEnv;
 	childEnv?: Record<string, string | undefined>;
+	/** Paths the guard chain refuses beside the homes' secrets, best effort (the git signing key). */
+	secretFiles?: readonly string[];
 	extraGuards?: readonly SpikeGuard[];
 	timeoutMs?: number;
 	/** Aborting it runs the stop sequence: interrupt, terminate every reported process, close. */
@@ -299,7 +301,7 @@ class CodexRun {
 		[this.options, this.codex, this.hostEnv, this.codexHome, this.dirs, this.socket] = [options, codex, hostEnv, codexHome, dirs, socket];
 		[this.containment, this.profile] = [containment, profile];
 		const job = { ...options.job, tmp: dirs.tmp };
-		const secrets = [...secretPaths(null, [userInfo().homedir]), resolve(codexHome)];
+		const secrets = [...secretPaths(null, [userInfo().homedir]), resolve(codexHome), ...(options.secretFiles ?? [])];
 		this.reviewer = options.job.role === "gate-reviewer";
 		const role = options.job.role;
 		// The git guard only refuses; first, so an implementer's git refusal names the picp tool, not pi's git.
