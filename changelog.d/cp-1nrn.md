@@ -1,0 +1,1 @@
+- Codex CLI workers get WP8 GitHub parity: the `data/gh-read.json` owner grant and `git_fetch` for Codex planners, `issue_comment` (and, on delivery `pr`, `pr_review_reply` and `pr_thread_resolve`) for Codex implementers, and a `/doctor` `mcp.codex` warn naming each MCP server a Codex planner cannot use (`docs/native-drivers.md` "Codex parity with WP8").

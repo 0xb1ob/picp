@@ -964,8 +964,8 @@ Every new tool runs in the claude-worker process (the in-process picp MCP server
 - G1, owner-scoped reads (planner only, off by default): `data/gh-read.json` `{"owners": ["acme"]}` grants owners
   whose repos a planner's `gh_read` may read. No file is no grant: today's origin-only refusals hold. The worker reads
   it each planner turn (`plannerReadOwners`, `SpikeJob.ghReadOwners`); invalid JSON, an unknown key, a non-array, more
-  than 50 entries or a non-owner name throws naming the file, and the turn fails closed. Implementers and Codex never
-  carry owners. `gh_read` adds `search prs|issues|commits` (query terms in `args`). Scopes are `-R`/`--repo` values on
+  than 50 entries or a non-owner name throws naming the file, and the turn fails closed. Implementers never carry
+  owners; a Codex planner reads the same grant each turn (cp-1nrn). `gh_read` adds `search prs|issues|commits` (query terms in `args`). Scopes are `-R`/`--repo` values on
   every verb but `api` (a repo: the origin or a granted owner's; `pr view|diff|checks` then need `number`),
   `--owner` and `org:`/`user:`/`owner:` qualifiers (a granted owner), `repo:` qualifiers, and `api repos/<owner>/…`
   paths, matched case-insensitively. A search needs one positive scope; one with `OR` or parentheses is refused, so a
@@ -1417,6 +1417,7 @@ and behind `codex_research` (off). No `data/*.json` or `defaults/routing*.json` 
 | `gh_read` | WP1's core moved to the SDK-free `src/drivers/native-gh-read.ts` (Claude's `forgeTools` keeps its `zod` shape and calls it). The run core declares `gh_read` beside `report_result` as a dynamic tool and serves it in the worker process with the worker's env; the hook's guard chain runs first and leaves a ticket, the handler refuses a call with none. Bash `gh` stays refused naming `gh_read` |
 | MCP servers | the worker reads `<agent dir>/mcp.json` once (`codexMcpConfig`, `src/worker-mcp.ts`; values resolved from its env as pi does). Each enabled stdio or HTTP server goes into the thread `config` (`mcp_servers.<name>`) on `thread/start` and every `thread/resume` (P2: a resume without it has no server, M13), never on argv, an event or a log line. A disabled or server-hidden entry never loads; a name outside `[A-Za-z0-9_-]`, `auth`, `!command` or an unset `$VAR` is one stderr line and one `native_mcp_skipped` event. The system prompt gains the servers section |
 | skills | the manager hands the per-job skill dirs to the spawn (`CP_CODEX_SKILL_DIRS`); each is a `read` root of the kernel profile. A dir that is or holds a home, the Codex home, the agent dir or the CP home refuses the run before any app-server |
+| `git_fetch` | (cp-1nrn, WP8 G4) a dynamic tool beside `gh_read`: `git fetch origin` in the job's worktree, run in the worker process with git hooks off; a `cwd` elsewhere is refused naming the worktree |
 | child env | the app-server gets `nativeWorkerChildEnv` with no profile (WP3: pi's non-interactive variables, the job identity, tool, CA and proxy names; never `CP_HOME`, `CP_RUN_DIR`, `GH_*`, `SSH_AUTH_SOCK` or a secret name; a credentialed proxy is one `native_env_dropped` event). The shell policy is `inherit="all"` with `exclude=["CODEX_*","OPENAI_*","INVOCATION_ID"]`: "all" of picp's own allow-list, which still throws on an `OPENAI_*`, `CODEX_*` (but `CODEX_HOME`) or secret-named key |
 
 **The MCP gate.** Every server entry holds `default_tools_approval_mode: "prompt"`, so the CLI asks picp
@@ -1560,8 +1561,9 @@ and the default must come from `sessionFlags`. Any miss refuses before any turn.
 
 **Git writes are picp tools (U2).** The Codex sandbox keeps `.git` read-only even under a write root (PC), so the shell
 reads git and cannot write it. The implementer's thread declares `report_result` (its description names `head_sha`),
-`gh_read`, `git_commit {message}`, `git_merge {ref}` (only `origin/<job>` or `origin/<base>`), `git_fetch` and, for
-delivery `pr`, `git_push`, `pr_create`, `pr_edit`. They run in the worker process after the hook's ticket and the guard
+`gh_read`, `git_commit {message}`, `git_merge {ref}` (only `origin/<job>` or `origin/<base>`), `git_fetch`,
+`issue_comment` and, for delivery `pr`, `git_push`, `pr_create`, `pr_edit`, `pr_review_reply` and `pr_thread_resolve`
+(the comment tools since cp-1nrn, under WP8 G2/G3's rules). They run in the worker process after the hook's ticket and the guard
 chain, through `src/drivers/native-forge.ts` (SDK-free; the Claude forge tools now call the same bodies, texts and argv
 unchanged). Every git call of a codex job starts with `GIT_HOOKS_OFF`; commit and merge get only PATH, the locale and
 the commit identity (no credential, no HOME). `git_commit` runs `git add -A`, then the staged-path gate: a staged path
@@ -1769,3 +1771,21 @@ page offers no Codex and the server refuses a changed codex row, so no codex val
 Recovery: pick pi on the rule, or Restore defaults on Model routing, or revert the PR.
 
 Cases: SD-codex-rule in `tests/e2e/settings-drivers.test.ts`.
+
+### Codex parity with WP8 (cp-1nrn)
+
+An audit of the Claude CLI fixes of 2026-11-18…24 (#869–#878) found four the Codex driver lacked; all four now match
+[WP8](#wp8-github-parity-g1g5). A Codex planner declares `gh_read`, `git_fetch` and `report_result`, and carries the
+`data/gh-read.json` owner grant, read each turn before any app-server starts (an invalid file fails the turn as a
+crash). A Codex implementer declares `issue_comment` on every delivery and, on `pr`, `pr_review_reply` and
+`pr_thread_resolve`; they run the shared `commentWrites` (`src/drivers/native-forge-comments.ts`) in the worker process,
+so the app-server env is unchanged (no `GH_*`). With `codex_research` on, `/doctor` adds one `mcp.codex` warn naming
+each server `codexMcpConfig` skips and each hyphen-named server it loads whose tools picp cannot route (U3), never a
+config value; `mcp.workers` names the Codex planner's servers and that implementers and reviewers get none (R3).
+
+**Known limit.** Dynamic tools are fixed at `thread/start` (`thread/resume` carries none), so a Codex thread started
+before this build keeps its old tool set when resumed; there is no migration.
+
+Cases: CXF-1…CXF-4 in `tests/e2e/codex-forge-parity.test.ts`; CX-7a and CX-7j in `tests/e2e/codex-ship.test.ts`;
+T7/R2-codex, T9c and CX-qmry-refusals in `tests/e2e/driver-hard-constraint.test.ts`; P24c in
+`tests/e2e/host-compatibility.test.ts`.
