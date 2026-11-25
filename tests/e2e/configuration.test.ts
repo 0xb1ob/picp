@@ -685,8 +685,10 @@ const OWNER_FILE: Record<SettingFileOwner, string> = {
 	routing: LAYOUT.routingFile,
 	viewer: `${LAYOUT.data}/viewer.json`,
 	native: `${LAYOUT.data}/native.json`,
+	daemon: `${LAYOUT.data}/daemon.json`,
 };
 const CAPACITY_MIN = { url: "https://gw.example/", path: "/x" };
+const DAEMON_MIN = { schema_version: 1, generated_by: "cp-install", backend: "detached", node: "/usr/bin/node", app: "/opt/cp", home: "/home/cp", path: "/usr/bin", port: 8766 };
 const ownerPath = (home: string, owner: SettingFileOwner) => join(home, OWNER_FILE[owner]);
 const putOwner = (home: string, owner: SettingFileOwner, body: unknown) =>
 	writeFileSync(ownerPath(home, owner), typeof body === "string" ? body : JSON.stringify(body));
@@ -817,6 +819,7 @@ const SCHEMA_INVALID: Record<SettingFileOwner, unknown> = {
 	routing: { schema_version: 1, allow: "x", rubric: [] },
 	viewer: { strict_host: "yes" },
 	native: { claude_research: "yes" },
+	daemon: { schema_version: 1, generated_by: "cp-install" },
 };
 const SECRET_CAPACITY = { url: "https://secret-gateway.example/", path: "/v1/secret-path" };
 /** One valid file per owner, the grant policy keys included. */
@@ -833,6 +836,7 @@ const OVERRIDES: Record<SettingFileOwner, unknown> = {
 	routing: { schema_version: 1, allow: ["anthropic/*"], deny_by_role: { planner: ["mock/denied*"] }, rubric: [{ id: "small", role: "implementer", model: "anthropic/claude-haiku" }] },
 	viewer: { strict_host: true },
 	native: { claude_research: true },
+	daemon: { ...DAEMON_MIN, boards_port: 8767, boards_host: "0.0.0.0", boards_index: true },
 };
 
 // P16-settings-read: settings_get serves the catalog and each owner loader's value, source and status, a revision
@@ -851,7 +855,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 	const catalog = empty.catalog;
 	assert.deepEqual(catalog.map((field) => field.key), [...SETTING_KEYS]);
 	assert.deepEqual(catalog, JSON.parse(JSON.stringify(SETTING_FIELDS)));
-	assert.equal(new Set(catalog.map((field) => field.key)).size, 42);
+	assert.equal(new Set(catalog.map((field) => field.key)).size, 46);
 	for (const field of catalog) assert.ok(field.key.startsWith(`${field.section}.`), field.key);
 	assert.deepEqual(catalog.filter((field) => !field.editable).map((field) => field.key), ["sessions.tool_call_cap", "models.allow"]);
 	assert.deepEqual(empty.audit, []);
@@ -872,7 +876,8 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 	// Range agreement: Settings plans a value exactly when the owner's own loader reads that value back as ok.
 	let compared = 0;
 	for (const field of catalog) {
-		if (field.owner === "env" || field.owner === "routing") continue;
+		// Routing and daemon refuse a set on an absent file (409), so a removed probe file plans nothing.
+		if (field.owner === "env" || field.owner === "routing" || field.owner === "daemon") continue;
 		for (const value of [field.default, ...probes(field)]) {
 			putOwner(home, field.owner, probeFile(field, value));
 			const row = view((await b.get()).snapshot, field.key);
@@ -916,7 +921,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 		if (["models.parent", "models.operator", "models.parent_thinking", "models.operator_thinking"].includes(key)) return { value: null, source: "code", status: "ok" };
 		// parentDriverSetting / operatorDriverSetting read an unparsable owner, or one without `driver`, as pi.
 		if (key === "models.parent_driver" || key === "models.operator_driver") return { value: "pi", source: "code", status: "ok" };
-		const disabled = ["parent", "capacity", "update"].includes(catalog.find((field) => field.key === key)?.owner as string);
+		const disabled = ["parent", "capacity", "update", "daemon"].includes(catalog.find((field) => field.key === key)?.owner as string);
 		return { value: null, source: "none", status: disabled ? "disabled" : "refused" };
 	};
 	for (const variant of ["bad-json", "schema"] as const) {
@@ -949,6 +954,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 		["maintenance.update_interval_min", 30], ["viewer.strict_host", true], ["models.allow", ["anthropic/*"]],
 		["models.rubric", [{ id: "small", role: "implementer", model: "anthropic/claude-haiku" }]], ["models.parent", "anthropic/claude-opus-5-5"], ["models.operator", "openai/gpt-5"],
 		["models.parent_thinking", "high"], ["models.operator_thinking", "low"], ["models.parent_driver", "pi", "code"], ["models.operator_driver", "pi", "code"], ["workers.driver", "pi", "code"],
+		["boards.port", 8767], ["boards.host", "0.0.0.0"], ["boards.index", true], ["boards.public_url", null, "code"],
 	] as Array<[SettingKey, unknown, string?]>) expectView(filed, key, value, source);
 	await b.close();
 

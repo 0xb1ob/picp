@@ -177,6 +177,7 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 		key: (el: Element, key: string) => { const event = new Event("keydown", { bubbles: true, cancelable: true }); Object.defineProperty(event, "key", { value: key }); el.dispatchEvent(event); return event; },
 		type: (el: Element, value: string) => { (el as unknown as { value: string }).value = value; el.dispatchEvent(new Event("input", { bubbles: true })); },
 		decline: () => { answerConfirm = false; },
+		accept: () => { answerConfirm = true; },
 		reopen: (next = hash) => (close(), openTab(t, port, next, storage, undefined, extra, wide)),
 	};
 }

@@ -92,6 +92,8 @@ export interface InnerPorts {
 	remoteConfigured?(): boolean;
 	/** The cloudflared controller's own I/O (`daemon-tunnel.ts`, remote dashboard PR 2c). Absent: no tunnel. */
 	tunnel?: TunnelIo;
+	/** `data/daemon.json` now: each viewer start takes its `boards_*` from it. Absent: the loaded copy. */
+	readConfig?(): DaemonConfig | undefined;
 }
 
 /** The production `kill` port: guarded at its lowest level (`guardedKill`), so no invalid pid reaches `process.kill`. */
@@ -166,10 +168,25 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 			})
 		: undefined;
 
+	/** The loaded config with the `boards_*` keys `data/daemon.json` holds now; other keys still wait for a reload. */
+	const viewerConfig = (): DaemonConfig => {
+		let fresh: DaemonConfig | undefined;
+		try {
+			fresh = ports.readConfig?.();
+		} catch (error) {
+			ports.log(`viewer keeps the loaded boards settings: ${(error as Error).message}`);
+		}
+		if (!fresh) return config;
+		const { boards_port: _port, boards_host: _host, boards_index: _index, ...rest } = config;
+		const { boards_port, boards_host, boards_index } = fresh;
+		return { ...rest, ...(boards_port !== undefined ? { boards_port } : {}), ...(boards_host !== undefined ? { boards_host } : {}), ...(boards_index !== undefined ? { boards_index } : {}) };
+	};
+
 	const startLong = (role: Long): void => {
 		const unit = record.units[role] as LongUnit;
 		unit.starts = [...unit.starts.filter((start) => now() - Date.parse(start) < START_LIMIT_INTERVAL_MS), at()];
-		const pid = ports.spawn(role, childArgv(config, role), childEnv(config, role, options.base), (code, signal) => onLongExit(role, pid, code, signal));
+		const env = childEnv(role === "viewer" ? viewerConfig() : config, role, options.base);
+		const pid = ports.spawn(role, childArgv(config, role), env, (code, signal) => onLongExit(role, pid, code, signal));
 		Object.assign(unit, { pid, state: "running", since: at() });
 		delete unit.result;
 		ports.log(`${role} started pid ${pid}`);
@@ -465,6 +482,7 @@ if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process
 			send,
 			log,
 			remoteConfigured: () => remoteFeatureConfigured(paths.dataDir),
+			readConfig: () => readDaemonConfig(paths.config),
 			tunnel: tunnelIo(paths, (config as DaemonConfig).home, { ...baseEnv(process.env), PATH: (config as DaemonConfig).path }, log),
 		},
 	);

@@ -43,6 +43,7 @@ import { parentSettings } from "./parent-context.ts";
 import { loadQualityConfig, resolveQualityConfig } from "./quality.ts";
 import { loadCapacityConfig } from "./quota.ts";
 import { loadRoutingConfig } from "./routing.ts";
+import { type DaemonConfig, readDaemonConfig } from "./service/daemon-files.ts";
 import { readUpdateConfig } from "./service/update.ts";
 import { loadViewerConfig } from "./viewer/host-config.ts";
 import { loadNativeConfig, type NativeClass, type NativeConfig, nativeConfigFile } from "./worker-driver.ts";
@@ -359,7 +360,7 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 	viewer: {
 		file: dataFile("viewer.json"),
 		read: (_home, _env, file) =>
-			settle("viewer", readOwnerConsistently(file, () => loadViewerConfig(file)), (v: ReturnType<typeof loadViewerConfig>) => ({ "viewer.strict_host": v.strict_host, "viewer.public_url": v.public_url })),
+			settle("viewer", readOwnerConsistently(file, () => loadViewerConfig(file)), (v: ReturnType<typeof loadViewerConfig>) => ({ "viewer.strict_host": v.strict_host, "viewer.public_url": v.public_url, "boards.public_url": v.boards_public_url })),
 	},
 	native: {
 		file: (home) => nativeConfigFile(home),
@@ -369,6 +370,15 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 				"workers.native_codex_research": n.codex_research,
 				"workers.native_codex_ship": n.codex_ship,
 				"workers.native_codex_review": n.codex_review,
+			})),
+	},
+	daemon: {
+		file: dataFile("daemon.json"),
+		read: (_home, _env, file) =>
+			settle("daemon", readOwnerConsistently(file, () => readDaemonConfig(file)), (c: DaemonConfig | undefined) => ({
+				"boards.port": c?.boards_port ?? null,
+				"boards.host": c?.boards_host ?? "127.0.0.1",
+				"boards.index": c?.boards_index === true,
 			})),
 	},
 };

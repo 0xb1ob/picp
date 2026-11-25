@@ -126,7 +126,11 @@ export interface SettingsResponse {
 	model_apply?: ModelApplyRow[];
 	/** The CLI pickers' choices (src/settings-control.ts `DRIVER_CHOICES`); null from an older session. */
 	drivers?: SettingsDriverChoices | null;
+	/** This viewer's boards-only listener as it runs now; null when the viewer has no listener controller. */
+	boards_listener?: BoardsListenerState | null;
 }
+/** The boards-only listener (src/viewer/boards-server.ts): off, listening on host:port, or failed with the error. */
+export interface BoardsListenerState { state: "off" | "listening" | "failed"; host?: string; port?: number; index?: boolean; error?: string }
 /** Effort levels per CLI, the model rules (RegExp sources over `provider/id`) and each role's Codex switch; codex fields are absent from an older session. */
 export interface SettingsDriverChoices { efforts: { pi: string[]; claude: string[]; codex?: string[] }; claude_model: string; codex_model?: string; codex_class?: Record<string, string> }
 /** pi's `provider/id` models; `loading` while a `pi --list-models` run is going; `listed_at` is when it last landed. */
@@ -148,6 +152,8 @@ export interface SettingsWriteResponse {
 	audit?: string;
 	/** A Parent CLI or Operator CLI change: it applies only when that session restarts. */
 	restart?: "parent" | "operator";
+	/** An applied boards port, host or index change: where the boards listener is after this viewer followed it. */
+	boards?: BoardsListenerState;
 }
 /** `POST /api/operator/message` accepted: 202 (`held` while the operator session is offline). */
 export interface ControlSendResponse {

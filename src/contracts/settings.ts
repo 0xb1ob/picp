@@ -19,7 +19,7 @@ import { ReviewerModelSchema, RoutingRuleSchema, ThinkingLevelSchema } from "./r
 /** The CLIs a Settings driver field offers: the Codex CLI is set per rule in Model routing (C8b). */
 const SETTING_DRIVERS = ["pi", "claude"] as const;
 
-export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer", "workers"] as const;
+export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer", "workers", "boards"] as const;
 export type SettingSection = (typeof SETTING_SECTIONS)[number];
 
 /** Owner files in revision order; `env` is the one owner without a file. */
@@ -36,6 +36,7 @@ export const SETTING_OWNERS = [
 	"routing",
 	"viewer",
 	"native",
+	"daemon",
 	"env",
 ] as const;
 export type SettingOwner = (typeof SETTING_OWNERS)[number];
@@ -69,10 +70,11 @@ export const SETTING_APPLIES = [
 	"next_operator_launch",
 	"next_viewer_request",
 	"next_board_link",
+	"boards_listener",
 ] as const;
 export type SettingApplies = (typeof SETTING_APPLIES)[number];
 
-export const SETTING_VALUE_TYPES = ["integer", "number", "nullable_number", "boolean", "enum_list", "string_list", "model_ref", "thinking_level", "rubric", "url", "driver"] as const;
+export const SETTING_VALUE_TYPES = ["integer", "number", "nullable_number", "boolean", "enum_list", "string_list", "model_ref", "thinking_level", "rubric", "url", "driver", "port", "ip"] as const;
 export type SettingValueType = (typeof SETTING_VALUE_TYPES)[number];
 
 export const SETTING_KEYS = [
@@ -118,6 +120,10 @@ export const SETTING_KEYS = [
 	"workers.native_codex_ship",
 	"workers.native_codex_review",
 	"workers.driver",
+	"boards.port",
+	"boards.host",
+	"boards.index",
+	"boards.public_url",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
@@ -167,7 +173,7 @@ const CODEX_HELP =
 	" run on the installed Codex CLI only when a routing rule (or the dispatch) says driver \"codex\" with an OpenAI GPT model (provider openai, id gpt-…) and this switch is on." +
 	" Tokens only: cost reads unknown, so token caps are the bound. Off stops new jobs and refuses resumes and revives; they never move to pi.";
 
-/** The 42 fields, in `SETTING_KEYS` order. */
+/** The 46 fields, in `SETTING_KEYS` order. */
 export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("grants", "mandate-defaults", { applies: "next_grant", on_invalid: "refuse" }, {
 		expiry_hours: { file_key: "expiry_hours", type: "number", minimum: 0.1, maximum: 720, default: 8, label: "Grant expiry (hours)", help: "How long a new grant stands before it must be re-issued." },
@@ -251,6 +257,14 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("workers", "routing", { applies: "next_dispatch", on_invalid: "refuse" }, {
 		driver: { type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets the driver of each data/routing.json rubric row not on the Codex CLI, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi. A full CLI queues new jobs (waiting for its capacity); they never run on another CLI." },
 	}),
+	...group("boards", "daemon", { applies: "boards_listener", on_invalid: "disable" }, {
+		port: { file_key: "boards_port", type: "port", minimum: 1, maximum: 65535, default: null, label: "Boards port", help: "Empty turns the boards listener off. Must differ from the dashboard port." },
+		host: { file_key: "boards_host", type: "ip", default: "127.0.0.1", label: "Bind address", help: "127.0.0.1: this machine only. 0.0.0.0: every interface, LAN and internet included. A Tailscale address (100.x.y.z): only devices on your tailnet." },
+		index: { file_key: "boards_index", type: "boolean", default: false, label: "Boards index", help: "Serve the /boards/ list of every board; off, a board is reachable only by its slug URL." },
+	}),
+	...group("boards", "viewer", { applies: "next_board_link", on_invalid: "refuse" }, {
+		public_url: { file_key: "boards_public_url", type: "url", default: null, label: "Boards public URL", help: "The origin board and report links use (wins over the tunnel and the dashboard public URL). Empty clears it." },
+	}),
 ]);
 
 const FIELD_BY_KEY = new Map<string, SettingField>(SETTING_FIELDS.map((field) => [field.key, field]));
@@ -289,7 +303,21 @@ export function settingValueSchema(field: SettingField): TSchema {
 			return Type.Union([Type.String(), Type.Null()]);
 		case "driver":
 			return StringEnum([...(field.enum ?? [])]);
+		case "port":
+			return Type.Union([Type.Integer(bounds), Type.Null()]);
+		case "ip":
+			return Type.String({ minLength: 1, maxLength: 45 });
 	}
+}
+
+const IPV4_OCTET = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+const IPV4 = new RegExp(`^${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}$`);
+
+/** Why `value` is not a bind IP as `isIP` reads it (no zone id), or undefined; contracts import no `node:net`. */
+export function ipAddressError(value: string): string | undefined {
+	if (IPV4.test(value)) return undefined;
+	if (value.includes(":") && !/[%[\]/]/.test(value) && URL.canParse(`http://[${value}]/`)) return undefined;
+	return "must be an IP address (0.0.0.0 or :: binds every interface)";
 }
 
 const PUBLIC_URL_MAX = 400;
@@ -310,7 +338,7 @@ export function validateSettingValue(key: string, value: unknown): ValidationRes
 	const field = FIELD_BY_KEY.get(key);
 	if (!field) return { ok: false, errors: [`unknown setting ${key}`] };
 	const checked = validate<SettingValue>(settingValueSchema(field), value);
-	const why = checked.ok && field.type === "url" && value !== null ? publicUrlError(value) : undefined;
+	const why = !checked.ok ? undefined : field.type === "url" && value !== null ? publicUrlError(value) : field.type === "ip" ? ipAddressError(value as string) : undefined;
 	return why ? { ok: false, errors: [`${key} ${why}`] } : checked;
 }
 

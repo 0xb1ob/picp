@@ -67,6 +67,7 @@ import { accessOf, canRead, streamValidity } from "./access.ts";
 import { diffJson } from "./json-delta.ts";
 import { viewVersions } from "./view-versions.ts";
 import { strictHost } from "./host-config.ts";
+import type { BoardsListener } from "./boards-server.ts";
 import { DEVICE_NOTICES_PATH, DEVICES_PATH, DEVICES_REVOKE_PATH, type DeviceRoutes, handleDeviceNotices, handleDevicesList, handleDevicesWrite, PAIR_CREATE_PATH } from "./devices-api.ts";
 
 export interface ViewerOptions extends ViewerState {
@@ -97,6 +98,8 @@ export interface ViewerOptions extends ViewerState {
 	refreshTransport?: "poll";
 	/** The test-notification send (`POST /api/push/test`). A test seam; default `fetch`. */
 	pushFetch?: PushFetch;
+	/** The boards-only listener a Settings save moves (boards-server.ts); absent in a viewer that runs none. */
+	boards?: BoardsListener;
 }
 
 /** `host:port` as a browser sends it in the Host header (IPv6 bracketed). */

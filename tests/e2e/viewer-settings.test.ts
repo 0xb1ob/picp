@@ -26,9 +26,9 @@ import { CpBridge } from "../../src/cp-bridge.ts";
 import { settingsPorts } from "../../src/settings-control.ts";
 import { appendScheduleControlLine } from "../../src/viewer/control-audit.ts";
 import { controlConfigFile, controlJournalFile, controlRecordFile, controlSocketFile, readControlRecord, scheduleControlFile } from "../../src/viewer/control-files.ts";
-import { dashboard, operatorSession, startViewer, type Tab, until } from "../harness/dashboard.ts";
+import { dashboard, freePort, operatorSession, startViewer, type Tab, until } from "../harness/dashboard.ts";
 import { createScratchHome, createScratchLedger, REPO_ROOT } from "../harness/index.ts";
-import type { Init, Reply } from "../harness/remote.ts";
+import { call, type Init, type Reply } from "../harness/remote.ts";
 
 process.env.TZ = "UTC";
 type View = Awaited<ReturnType<typeof dashboard>>;
@@ -308,7 +308,7 @@ test("P20-settings-relay: the session's outcomes pass through with no viewer lin
 	const status = await view.get("/api/settings");
 	assert.equal(status.status, 200);
 	assert.deepEqual([status.body.enabled, status.body.running, status.body.supported, status.body.writable], [true, true, true, true]);
-	assert.equal((status.body.catalog as unknown[]).length, 42);
+	assert.equal((status.body.catalog as unknown[]).length, 46);
 	const native = (status.body.catalog as { key: string; help: string }[]).find((field) => field.key === "workers.native_claude_research")?.help ?? "";
 	for (const said of [/only when a routing rule .*driver "claude" and this switch is on/, /Off stops new native jobs and refuses resumes and revives .*never move to pi/, /off then on clears a remembered sign-in, lockdown or no-reset limit block/]) assert.match(native, said);
 	assert.ok(!("available_models" in status.body), "the model list has its own read, /api/settings/models");
@@ -424,9 +424,10 @@ const optionTexts = (select: Element) => [...select.querySelectorAll("option")].
 const settle = () => new Promise((done) => setTimeout(done, 150));
 
 /** Settings in a tab on a home with the shipped routing.json (unless `routing` is false) and a live session. */
-async function settingsTab(t: TestContext, { routing = true, models = MODELS, status = 0, pending = false, ports = {}, hold }: { routing?: boolean; models?: string; status?: number; pending?: boolean; ports?: Partial<ControlPorts>; hold?: RegExp } = {}) {
+async function settingsTab(t: TestContext, { routing = true, models = MODELS, status = 0, pending = false, ports = {}, hold, seed }: { routing?: boolean; models?: string; status?: number; pending?: boolean; ports?: Partial<ControlPorts>; hold?: RegExp; seed?: (home: string, port: number) => void } = {}) {
 	const { view, stub } = await settingsHome(t);
 	if (routing) copyFileSync(join(REPO_ROOT, "defaults/routing.default.json"), join(view.home, LAYOUT.routingFile));
+	seed?.(view.home, view.port);
 	stub.answer(models, status);
 	if (pending) stub.hold();
 	const csrf = await session(t, view.home, view.stateDir, true, ports);
@@ -454,7 +455,7 @@ async function settingsTab(t: TestContext, { routing = true, models = MODELS, st
 
 test("P20-settings-page: four sections; Save posts If-Match, the control token and only the drafted keys; a 412 keeps the draft", { timeout: 120_000 }, async (t) => {
 	const ui = await settingsTab(t);
-	assert.deepEqual(ui.tab.$$("section.settings-section > h2").map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Dashboard address", "Native workers", "Devices"], "the six settings sections, then the served page's Devices");
+	assert.deepEqual(ui.tab.$$("section.settings-section > h2").map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Dashboard address", "Boards", "Native workers", "Devices"], "the seven settings sections, then the served page's Devices");
 	assert.equal(ui.section("Model routing").querySelectorAll("li.settings-rule").length, 4, "one row per shipped rubric entry");
 	const people = ui.section("Parent and operator models");
 	const parent = people.querySelector("#setting-models-parent")!;
@@ -611,6 +612,43 @@ test("cp-board-url-proxy-settings: Dashboard address renders Public URL and the 
 	assert.deepEqual(ui.posts()[2]?.json.changes, { "viewer.public_url": null }, "an empty input sends null");
 	assert.equal(await until(value, (v) => v === null, "cleared"), null);
 	assert.equal(existsSync(file) && "public_url" in (JSON.parse(readFileSync(file, "utf8")) as Line), false, "a delete, never a stored null");
+});
+
+// Settings → Boards (A8): the exposure warning and the three bind hints render; a save and a clear say where the
+// listener is; a move from loopback to every interface asks first, and a declined confirm posts nothing.
+test("P20-settings-boards: Boards shows the state, warning and hints; save and clear report the listener; a wildcard bind asks first", { timeout: 120_000 }, async (t) => {
+	const ui = await settingsTab(t, { seed: (home, port) => put(join(home, LAYOUT.data, "daemon.json"), `${JSON.stringify({
+		schema_version: 1, generated_by: "cp-install", backend: "detached", node: process.execPath, app: REPO_ROOT, home, path: "/usr/bin:/bin", port,
+	}, null, 2)}\n`) });
+	const boards = ui.section("Boards");
+	for (const said of [/Anyone who can reach the boards port can read every published board, with no login/, /127\.0\.0\.1: this machine only/,
+		/0\.0\.0\.0: every interface/, /A Tailscale address \(100\.x\.y\.z\): only devices on your tailnet/]) assert.match(boards.textContent ?? "", said);
+	assert.equal(boards.querySelector(".settings-boards-state")?.textContent, "Off · Boards listener off");
+	const port = boards.querySelector("#setting-boards-port")!, host = boards.querySelector("#setting-boards-host")!;
+	assert.deepEqual([port.getAttribute("type"), host.getAttribute("placeholder")], ["number", "127.0.0.1"]);
+	const notice = (pattern: RegExp) => ui.tab.find(".settings-notice", (el) => pattern.test(el.textContent ?? ""));
+
+	const free = await freePort();
+	await ui.enter(port, String(free));
+	await ui.press(boards, "Save");
+	await notice(new RegExp(`^Saved · 1 change · Boards listener on 127\\.0\\.0\\.1:${free}, index off$`));
+	assert.equal((await call(free, "/")).status, 404, "the boards listener answers on the saved port");
+	await until(() => boards.querySelector(".settings-boards-state")?.textContent, (text) => text === `Set to 127.0.0.1:${free}, index off · Boards listener on 127.0.0.1:${free}, index off`, "the re-read state");
+	await ui.enter(port, "");
+	await ui.press(boards, "Save");
+	await notice(/^Saved · 1 change · Boards listener off$/);
+	assert.deepEqual(ui.posts()[1]?.json.changes, { "boards.port": null }, "an empty port sends null");
+
+	await ui.enter(host, "0.0.0.0");
+	ui.tab.decline();
+	await ui.press(boards, "Save");
+	assert.match(ui.tab.confirms.at(-1) ?? "", /^Boards will be reachable on all interfaces \(0\.0\.0\.0\)/);
+	assert.equal(ui.posts().length, 2, "a declined confirm posts nothing");
+	ui.tab.accept();
+	await ui.press(boards, "Save");
+	await until(() => ui.posts().length, (n) => n === 3, "the confirmed save");
+	assert.deepEqual([ui.posts()[2]?.status, ui.posts()[2]?.json.changes], [200, { "boards.host": "0.0.0.0" }]);
+	await notice(/^Saved · 1 change · Boards listener off$/);
 });
 
 test("P20-settings-readonly: no control token is read only with every control disabled; an absent routing.json is one line, no rubric controls", { timeout: 120_000 }, async (t) => {

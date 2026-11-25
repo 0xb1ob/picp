@@ -1,5 +1,5 @@
 import type { SettingField, SettingKey, SettingValue } from "../src/contracts.ts";
-import type { SettingsModelsResponse, SettingsResponse, SettingsWriteResponse } from "../src/viewer/api-types.ts";
+import type { BoardsListenerState, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse } from "../src/viewer/api-types.ts";
 import { type ControlStatus, failure } from "./control.ts";
 
 /** Settings page (cp-settings-minimal): GET the snapshot, POST apply/restore through the owner-file settings API (PR 171). */
@@ -113,12 +113,46 @@ export const valueOf = (status: SettingsResponse, drafts: Drafts, key: SettingKe
 export const fieldOf = (status: SettingsResponse, key: SettingKey): SettingField | undefined => status.catalog?.find(field => field.key === key);
 /** Why a drafted number breaks its catalog bounds (an invalid parent threshold would disable compaction), or null. */
 export function fieldError(field: SettingField, value: SettingValue | undefined): string | null {
- if (field.type !== "integer" && field.type !== "number" && field.type !== "nullable_number") return null;
- if (value === null || value === undefined) return field.type === "nullable_number" ? null : "A value is required";
+ if (field.type !== "integer" && field.type !== "number" && field.type !== "nullable_number" && field.type !== "port") return null;
+ if (value === null || value === undefined) return field.type === "nullable_number" || field.type === "port" ? null : "A value is required";
+ if (field.type === "port" && !Number.isInteger(value)) return "Must be a whole number";
  if (typeof value !== "number" || !Number.isFinite(value)) return "Not a number";
  if (field.type === "integer" && !Number.isInteger(value)) return "Must be a whole number";
  if (field.minimum !== undefined && value < field.minimum) return `Must be at least ${field.minimum}`;
  if (field.exclusive_minimum !== undefined && value <= field.exclusive_minimum) return `Must be more than ${field.exclusive_minimum}`;
  if (field.maximum !== undefined && value > field.maximum) return `Must be at most ${field.maximum}`;
  return null;
+}
+
+const inV4 = (parts: number[], base: number[], bits: number): boolean => {
+ const value = (list: number[]) => list.reduce((sum, part) => sum * 256 + part, 0);
+ const shift = 2 ** (32 - bits);
+ return Math.floor(value(parts) / shift) === Math.floor(value(base) / shift);
+};
+const V4_PRIVATE: Array<[number[], number]> = [[[10, 0, 0, 0], 8], [[172, 16, 0, 0], 12], [[192, 168, 0, 0], 16], [[100, 64, 0, 0], 10], [[169, 254, 0, 0], 16]];
+
+/** Who a boards bind reaches, by address alone: this machine, a private network or tailnet, every interface, or all. */
+export function bindExposure(host: string): "loopback" | "private" | "wildcard" | "public" {
+ const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host.trim());
+ if (v4) {
+  const parts = v4.slice(1).map(Number);
+  if (parts.every(part => part === 0)) return "wildcard";
+  if (parts[0] === 127) return "loopback";
+  return V4_PRIVATE.some(([base, bits]) => inV4(parts, base, bits)) ? "private" : "public";
+ }
+ const v6 = host.trim().toLowerCase();
+ const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(v6);
+ if (mapped) return bindExposure(mapped[1] as string);
+ if (!v6.includes(":")) return "public";
+ if (/^[0:]+$/.test(v6)) return "wildcard";
+ if (/^[0:]*:0*1$/.test(v6)) return "loopback";
+ // fc00::/7 (ULA, Tailscale's fd7a:115c:a1e0::/48) and fe80::/10 (link-local): a full first group only.
+ return /^f[cd][0-9a-f]{2}:/.test(v6) || /^fe[89ab][0-9a-f]:/.test(v6) ? "private" : "public";
+}
+
+/** One line for the boards listener's state as this viewer reports it. */
+export function boardsText(state: BoardsListenerState): string {
+ if (state.state === "listening") return `Boards listener on ${state.host?.includes(":") ? `[${state.host}]` : state.host}:${state.port}, index ${state.index ? "on" : "off"}`;
+ if (state.state === "off") return "Boards listener off";
+ return `Boards listener failed: ${state.error ?? "unknown error"}; it is off until fixed`;
 }
