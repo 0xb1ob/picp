@@ -48,7 +48,8 @@ export function boardsHandle(req: IncomingMessage, res: ServerResponse, state: V
 /** `index` is read per request, so a Settings save turns the `/boards/` list on or off without a rebind. */
 export function createBoardsServer(state: ViewerState, index: () => boolean, log: (line: string) => void): Server {
 	const warn = onceWarner(log);
-	return createServer((req, res) => boardsHandle(req, res, { home: state.home, stateDir: state.stateDir }, index(), warn));
+	const own = { home: state.home, stateDir: state.stateDir };
+	return createServer((req, res) => boardsHandle(req, res, own, index(), warn));
 }
 
 /** The Settings keys whose applied change moves the listener (`BoardsListener.reload`). */
@@ -83,7 +84,12 @@ const closeServer = (server: Server): Promise<void> => new Promise((done) => {
 });
 
 /** The boards-only listener beside the dashboard on `dashboardPort`; a clash or listen error is logged, never fatal. */
-export function boardsListener(state: ViewerState, dashboardPort: number, out: (line: string) => void, err: (line: string) => void): BoardsListener {
+export function boardsListener(
+	state: ViewerState,
+	dashboardPort: number,
+	out: (line: string) => void,
+	err: (line: string) => void,
+): BoardsListener {
 	let open: { server: Server; host: string; port: number } | undefined;
 	let index = false;
 	let current: BoardsListenerState = { state: "off" };
@@ -120,7 +126,8 @@ export function boardsListener(state: ViewerState, dashboardPort: number, out: (
 			return (current = { state: "failed", host, port, index, error: failed });
 		}
 		open = { server, host, port };
-		out(`cp-view: boards http://${where}/boards/<slug>/ (boards only: public to anyone who can reach it; index ${index ? "on" : "off"})\n`);
+		const said = `index ${index ? "on" : "off"}`;
+		out(`cp-view: boards http://${where}/boards/<slug>/ (boards only: public to anyone who can reach it; ${said})\n`);
 		return (current = { state: "listening", host, port, index });
 	};
 	const apply = (address: BoardsAddress | undefined): Promise<BoardsListenerState> => {
@@ -134,7 +141,8 @@ export function boardsListener(state: ViewerState, dashboardPort: number, out: (
 		reload: (home) => {
 			const file = daemonPaths(home).config;
 			// The reason reaches the browser: the home path never does.
-			const failed = (why: string): Promise<BoardsListenerState> => Promise.resolve({ state: "failed", error: `${why.split(home).join("<home>")}; the listener is unchanged` });
+			const failed = (why: string): Promise<BoardsListenerState> =>
+				Promise.resolve({ state: "failed", error: `${why.split(home).join("<home>")}; the listener is unchanged` });
 			let config: DaemonConfig | undefined;
 			try {
 				config = readDaemonConfig(file);

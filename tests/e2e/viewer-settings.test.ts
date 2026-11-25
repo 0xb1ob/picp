@@ -424,7 +424,12 @@ const optionTexts = (select: Element) => [...select.querySelectorAll("option")].
 const settle = () => new Promise((done) => setTimeout(done, 150));
 
 /** Settings in a tab on a home with the shipped routing.json (unless `routing` is false) and a live session. */
-async function settingsTab(t: TestContext, { routing = true, models = MODELS, status = 0, pending = false, ports = {}, hold, seed }: { routing?: boolean; models?: string; status?: number; pending?: boolean; ports?: Partial<ControlPorts>; hold?: RegExp; seed?: (home: string, port: number) => void } = {}) {
+type TabOptions = {
+	routing?: boolean; models?: string; status?: number; pending?: boolean; ports?: Partial<ControlPorts>; hold?: RegExp;
+	seed?: (home: string, port: number) => void;
+};
+async function settingsTab(t: TestContext, options: TabOptions = {}) {
+	const { routing = true, models = MODELS, status = 0, pending = false, ports = {}, hold, seed } = options;
 	const { view, stub } = await settingsHome(t);
 	if (routing) copyFileSync(join(REPO_ROOT, "defaults/routing.default.json"), join(view.home, LAYOUT.routingFile));
 	seed?.(view.home, view.port);
@@ -455,7 +460,10 @@ async function settingsTab(t: TestContext, { routing = true, models = MODELS, st
 
 test("P20-settings-page: four sections; Save posts If-Match, the control token and only the drafted keys; a 412 keeps the draft", { timeout: 120_000 }, async (t) => {
 	const ui = await settingsTab(t);
-	assert.deepEqual(ui.tab.$$("section.settings-section > h2").map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Dashboard address", "Boards", "Native workers", "Devices"], "the seven settings sections, then the served page's Devices");
+	assert.deepEqual(ui.tab.$$("section.settings-section > h2").map((h) => h.textContent), [
+		"Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Dashboard address", "Boards",
+		"Native workers", "Devices",
+	], "the seven settings sections, then the served page's Devices");
 	assert.equal(ui.section("Model routing").querySelectorAll("li.settings-rule").length, 4, "one row per shipped rubric entry");
 	const people = ui.section("Parent and operator models");
 	const parent = people.querySelector("#setting-models-parent")!;
@@ -616,13 +624,19 @@ test("cp-board-url-proxy-settings: Dashboard address renders Public URL and the 
 
 // Settings → Boards (A8): the exposure warning and the three bind hints render; a save and a clear say where the
 // listener is; a move from loopback to every interface asks first, and a declined confirm posts nothing.
-test("P20-settings-boards: Boards shows the state, warning and hints; save and clear report the listener; a wildcard bind asks first", { timeout: 120_000 }, async (t) => {
-	const ui = await settingsTab(t, { seed: (home, port) => put(join(home, LAYOUT.data, "daemon.json"), `${JSON.stringify({
-		schema_version: 1, generated_by: "cp-install", backend: "detached", node: process.execPath, app: REPO_ROOT, home, path: "/usr/bin:/bin", port,
-	}, null, 2)}\n`) });
+test("P20-settings-boards: state, warning and hints; save and clear report the listener; a wildcard bind asks first",
+	{ timeout: 120_000 }, async (t) => {
+	const config = (home: string, port: number) => ({
+		schema_version: 1, generated_by: "cp-install", backend: "detached", node: process.execPath, app: REPO_ROOT, home,
+		path: "/usr/bin:/bin", port,
+	});
+	const seed = (home: string, port: number) =>
+		put(join(home, LAYOUT.data, "daemon.json"), `${JSON.stringify(config(home, port), null, 2)}\n`);
+	const ui = await settingsTab(t, { seed });
 	const boards = ui.section("Boards");
-	for (const said of [/Anyone who can reach the boards port can read every published board, with no login/, /127\.0\.0\.1: this machine only/,
-		/0\.0\.0\.0: every interface/, /A Tailscale address \(100\.x\.y\.z\): only devices on your tailnet/]) assert.match(boards.textContent ?? "", said);
+	for (const said of [/Anyone who can reach the boards port can read every published board, with no login/,
+		/127\.0\.0\.1: this machine only/, /0\.0\.0\.0: every interface/,
+		/A Tailscale address \(100\.x\.y\.z\): only devices on your tailnet/]) assert.match(boards.textContent ?? "", said);
 	assert.equal(boards.querySelector(".settings-boards-state")?.textContent, "Off · Boards listener off");
 	const port = boards.querySelector("#setting-boards-port")!, host = boards.querySelector("#setting-boards-host")!;
 	assert.deepEqual([port.getAttribute("type"), host.getAttribute("placeholder")], ["number", "127.0.0.1"]);
@@ -633,7 +647,9 @@ test("P20-settings-boards: Boards shows the state, warning and hints; save and c
 	await ui.press(boards, "Save");
 	await notice(new RegExp(`^Saved · 1 change · Boards listener on 127\\.0\\.0\\.1:${free}, index off$`));
 	assert.equal((await call(free, "/")).status, 404, "the boards listener answers on the saved port");
-	await until(() => boards.querySelector(".settings-boards-state")?.textContent, (text) => text === `Set to 127.0.0.1:${free}, index off · Boards listener on 127.0.0.1:${free}, index off`, "the re-read state");
+	const reread = `Set to 127.0.0.1:${free}, index off · Boards listener on 127.0.0.1:${free}, index off`;
+	const state = () => boards.querySelector(".settings-boards-state")?.textContent;
+	await until(state, (text) => text === reread, "the re-read state");
 	await ui.enter(port, "");
 	await ui.press(boards, "Save");
 	await notice(/^Saved · 1 change · Boards listener off$/);

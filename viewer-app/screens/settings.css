@@ -53,7 +53,9 @@ label > .settings-meta, legend > .settings-meta { margin-left: 6px; padding: 1px
 .settings-rule-invalid { border-left-color: var(--danger, var(--text)); }
 .settings-rule-error, .settings-cli-note { grid-column: 1 / -1; overflow-wrap: anywhere; }
 .settings-body > p.settings-cli-block { overflow-wrap: anywhere; }
-.settings-body > p.settings-boards-state { margin: 0; padding: 8px 18px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.settings-body > p.settings-boards-state {
+  margin: 0; padding: 8px 18px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere;
+}
 .settings-restart { display: grid; gap: 8px; padding: 8px 18px 14px; border-top: 1px solid var(--divider); overflow-wrap: anywhere; }
 .settings-restart p { margin: 0; }
 .settings-body > p.settings-apply { margin: 0; padding: 8px 18px; border-top: 1px solid var(--divider); color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }

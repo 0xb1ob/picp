@@ -1,5 +1,7 @@
 import type { SettingField, SettingKey, SettingValue } from "../src/contracts.ts";
-import type { BoardsListenerState, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse } from "../src/viewer/api-types.ts";
+import type {
+ BoardsListenerState, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse,
+} from "../src/viewer/api-types.ts";
 import { type ControlStatus, failure } from "./control.ts";
 
 /** Settings page (cp-settings-minimal): GET the snapshot, POST apply/restore through the owner-file settings API (PR 171). */
@@ -113,8 +115,9 @@ export const valueOf = (status: SettingsResponse, drafts: Drafts, key: SettingKe
 export const fieldOf = (status: SettingsResponse, key: SettingKey): SettingField | undefined => status.catalog?.find(field => field.key === key);
 /** Why a drafted number breaks its catalog bounds (an invalid parent threshold would disable compaction), or null. */
 export function fieldError(field: SettingField, value: SettingValue | undefined): string | null {
- if (field.type !== "integer" && field.type !== "number" && field.type !== "nullable_number" && field.type !== "port") return null;
- if (value === null || value === undefined) return field.type === "nullable_number" || field.type === "port" ? null : "A value is required";
+ if (!["integer", "number", "nullable_number", "port"].includes(field.type)) return null;
+ const optional = field.type === "nullable_number" || field.type === "port";
+ if (value === null || value === undefined) return optional ? null : "A value is required";
  if (field.type === "port" && !Number.isInteger(value)) return "Must be a whole number";
  if (typeof value !== "number" || !Number.isFinite(value)) return "Not a number";
  if (field.type === "integer" && !Number.isInteger(value)) return "Must be a whole number";
@@ -129,7 +132,9 @@ const inV4 = (parts: number[], base: number[], bits: number): boolean => {
  const shift = 2 ** (32 - bits);
  return Math.floor(value(parts) / shift) === Math.floor(value(base) / shift);
 };
-const V4_PRIVATE: Array<[number[], number]> = [[[10, 0, 0, 0], 8], [[172, 16, 0, 0], 12], [[192, 168, 0, 0], 16], [[100, 64, 0, 0], 10], [[169, 254, 0, 0], 16]];
+const V4_PRIVATE: Array<[number[], number]> = [
+ [[10, 0, 0, 0], 8], [[172, 16, 0, 0], 12], [[192, 168, 0, 0], 16], [[100, 64, 0, 0], 10], [[169, 254, 0, 0], 16],
+];
 
 /** Who a boards bind reaches, by address alone: this machine, a private network or tailnet, every interface, or all. */
 export function bindExposure(host: string): "loopback" | "private" | "wildcard" | "public" {
@@ -152,7 +157,9 @@ export function bindExposure(host: string): "loopback" | "private" | "wildcard" 
 
 /** One line for the boards listener's state as this viewer reports it. */
 export function boardsText(state: BoardsListenerState): string {
- if (state.state === "listening") return `Boards listener on ${state.host?.includes(":") ? `[${state.host}]` : state.host}:${state.port}, index ${state.index ? "on" : "off"}`;
+ const host = state.host?.includes(":") ? `[${state.host}]` : state.host;
+ const index = `index ${state.index ? "on" : "off"}`;
+ if (state.state === "listening") return `Boards listener on ${host}:${state.port}, ${index}`;
  if (state.state === "off") return "Boards listener off";
  return `Boards listener failed: ${state.error ?? "unknown error"}; it is off until fixed`;
 }

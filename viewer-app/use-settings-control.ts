@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { type ControlStatus, readControl } from "./control.ts";
-import { boardsText, type Drafts, type ModelsStatus, readModels, readSettings, type RestoreSelector, type SettingsStatus, type SettingsView, writeSettings } from "./settings-control.ts";
+import {
+ boardsText, type Drafts, type ModelsStatus, readModels, readSettings, type RestoreSelector, type SettingsStatus,
+ type SettingsView, writeSettings,
+} from "./settings-control.ts";
 import type { SettingKey } from "../src/contracts.ts";
 import type { ModelApplyRow } from "../src/viewer/api-types.ts";
 
@@ -78,9 +81,13 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
    return false;
   }
   if (answer.state === "applied" || answer.state === "unchanged") {
-   const saved = answer.state === "applied" ? `Saved · ${answer.changes?.length ?? 0} change${answer.changes?.length === 1 ? "" : "s"}${answer.audit_warning ? ` · ${answer.audit_warning}` : ""}` : "Nothing to change";
+   const count = answer.changes?.length ?? 0;
+   const warning = answer.audit_warning ? ` · ${answer.audit_warning}` : "";
+   const plural = count === 1 ? "" : "s";
+   const saved = answer.state === "applied" ? `Saved · ${count} change${plural}${warning}` : "Nothing to change";
    // The write landed either way; a boards listener that could not follow it is the error to read.
-   setNotice({kind: answer.boards?.state === "failed" ? "error" : "ok", text: answer.boards ? `${saved} · ${boardsText(answer.boards)}` : saved, errors: []});
+   const text = answer.boards ? `${saved} · ${boardsText(answer.boards)}` : saved;
+   setNotice({kind: answer.boards?.state === "failed" ? "error" : "ok", text, errors: []});
    if (answer.restart === "parent") setRestart(true);
    // `restart` names one session; a restore can change both drivers.
    if (answer.changes?.some(change => change.key === "models.operator_driver")) setOperatorRestart(true);

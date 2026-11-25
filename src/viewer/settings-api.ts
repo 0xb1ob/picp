@@ -17,7 +17,9 @@ import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
 import { join } from "node:path";
 import { type DaemonConfig, daemonPaths, readDaemonConfig } from "../service/daemon-files.ts";
-import type { BoardsListenerState, ModelApplyRow, ModelList, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse } from "./api-types.ts";
+import type {
+	BoardsListenerState, ModelApplyRow, ModelList, SettingsModelsResponse, SettingsResponse, SettingsWriteResponse,
+} from "./api-types.ts";
 import { BOARDS_LISTENER_KEYS, probeBind } from "./boards-server.ts";
 import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, mayWrite, readAllowed, tokenMatches } from "./control-api.ts";
 import { readControlConfig, readControlRecord } from "./control-files.ts";
@@ -90,7 +92,7 @@ export function handleSettingsWrite(req: IncomingMessage, options: ControlRouteO
 		if (reply.ok) {
 			const result = reply.result as SettingsWriteResponse;
 			if (isObject(result) && PASS_THROUGH.has(result.status)) {
-				const moved = result.state === "applied" && result.changes?.some((change) => BOARDS_LISTENER_KEYS.includes(change.key));
+				const moved = result.state === "applied" && result.changes?.some((row) => BOARDS_LISTENER_KEYS.includes(row.key));
 				return { status: result.status, body: moved ? { ...result, boards: await followBoards(options) } : result };
 			}
 			return refuse(502, `the session answered with an unexpected settings status (${String(isObject(result) ? result.status : result)})`);
@@ -105,7 +107,10 @@ export function handleSettingsWrite(req: IncomingMessage, options: ControlRouteO
  * A set whose boards port and host (`data/daemon.json` merged with the changes) this viewer cannot take: the
  * dashboard's own port, or one a bind probe finds held. Unreadable files and bad values go on to the session's refusal.
  */
-async function boardsBindRefusal(changes: Record<string, unknown>, options: ControlRouteOptions): Promise<{ status: number; reason: string } | undefined> {
+async function boardsBindRefusal(
+	changes: Record<string, unknown>,
+	options: ControlRouteOptions,
+): Promise<{ status: number; reason: string } | undefined> {
 	if (!("boards.port" in changes) && !("boards.host" in changes)) return undefined;
 	let config: DaemonConfig | undefined;
 	try {
@@ -118,17 +123,23 @@ async function boardsBindRefusal(changes: Record<string, unknown>, options: Cont
 	const host = "boards.host" in changes ? changes["boards.host"] : (config.boards_host ?? "127.0.0.1");
 	if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) return undefined;
 	if (typeof host !== "string" || isIP(host) === 0 || host.includes("%")) return undefined;
-	if (port === options.port) return { status: 400, reason: `boards.port: ${port} is the dashboard port; pick another port` };
+	if (port === options.port) {
+		return { status: 400, reason: `boards.port: ${port} is the dashboard port; pick another port` };
+	}
 	// The live listener's own port would read as held; a move on it closes first and reports a failed rebind.
 	const live = options.boards?.status();
 	if (live?.state === "listening" && port === live.port) return undefined;
 	const code = await probeBind(port, host);
-	return code ? { status: 409, reason: `boards.port ${port} on ${host} is in use or unavailable here (${code}); pick another port or address` } : undefined;
+	if (!code) return undefined;
+	const reason = `boards.port ${port} on ${host} is in use or unavailable here (${code}); pick another port or address`;
+	return { status: 409, reason };
 }
 
 /** After an applied boards change: where this viewer's listener is now. Never fails the write that already landed. */
 async function followBoards(options: ControlRouteOptions): Promise<BoardsListenerState> {
-	if (!options.boards) return { state: "failed", error: "this viewer runs no boards listener; cp-daemon reload applies the saved settings" };
+	if (!options.boards) {
+		return { state: "failed", error: "this viewer runs no boards listener; cp-daemon reload applies the saved settings" };
+	}
 	try {
 		return await options.boards.reload(options.home);
 	} catch (error) {
@@ -137,7 +148,10 @@ async function followBoards(options: ControlRouteOptions): Promise<BoardsListene
 }
 
 function settingsBase(now: Date, options: ControlRouteOptions): SettingsResponse {
-	return { generated_at: now.toISOString(), enabled: false, running: false, supported: false, writable: false, reason: null, snapshot: null, catalog: null, audit: [], boards_listener: options.boards?.status() ?? null };
+	return {
+		generated_at: now.toISOString(), enabled: false, running: false, supported: false, writable: false, reason: null,
+		snapshot: null, catalog: null, audit: [], boards_listener: options.boards?.status() ?? null,
+	};
 }
 
 const APPLY_TAIL_BYTES = 16_384;
@@ -180,22 +194,28 @@ export function handleSettingsModels(req: IncomingMessage, options: ControlRoute
 export async function handleSettingsStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): Promise<ControlRouteResult> {
 	if (!readAllowed(req, options)) return { status: 403, body: { error: "Settings are served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
-	if (config.state !== "on") return { status: 200, body: { ...settingsBase(now, options), reason: `Dashboard control is off: ${config.reason}` } };
+	const base = settingsBase(now, options);
+	if (config.state !== "on") {
+		return { status: 200, body: { ...base, reason: `Dashboard control is off: ${config.reason}` } };
+	}
 	const record = readControlRecord(options.stateDir);
 	const session = operatorSession(options.stateDir);
 	if (record.state !== "ok" || !session.running) {
-		return { status: 200, body: { ...settingsBase(now, options), enabled: true, reason: `Operator session offline: ${session.reason}` } };
+		return { status: 200, body: { ...base, enabled: true, reason: `Operator session offline: ${session.reason}` } };
 	}
 	const reply = await controlRequest(record.record, "settings_get", {});
 	if (!reply.ok) {
-		if (reply.status === 400 && /^unknown op/.test(reply.error)) return { status: 200, body: { ...settingsBase(now, options), enabled: true, running: true, reason: SETTINGS_PREDATE } };
-		return { status: 200, body: { ...settingsBase(now, options), enabled: true, reason: reply.error.replace(/^session not running/, "Session not running") } };
+		if (reply.status === 400 && /^unknown op/.test(reply.error)) {
+			return { status: 200, body: { ...base, enabled: true, running: true, reason: SETTINGS_PREDATE } };
+		}
+		const reason = reply.error.replace(/^session not running/, "Session not running");
+		return { status: 200, body: { ...base, enabled: true, reason } };
 	}
 	const result = reply.result as Partial<SettingsResponse>;
 	return {
 		status: 200,
 		body: {
-			...settingsBase(now, options), enabled: true, running: true, supported: true, writable: mayWrite(req),
+			...base, enabled: true, running: true, supported: true, writable: mayWrite(req),
 			snapshot: isObject(result?.snapshot) ? (result.snapshot as SettingsResponse["snapshot"]) : null,
 			catalog: Array.isArray(result?.catalog) ? result.catalog : null,
 			audit: Array.isArray(result?.audit) ? result.audit : [],

@@ -57,7 +57,10 @@ const OWNER_FILE: Record<SettingFileOwner, string> = {
 	daemon: `${LAYOUT.data}/daemon.json`,
 };
 const CAPACITY_MIN = { url: "https://gw.example/", path: "/x" };
-const DAEMON_BASE = { schema_version: 1, generated_by: "cp-install", backend: "detached", node: "/usr/bin/node", app: "/opt/cp", home: "/home/cp", path: "/usr/bin", port: 8766 };
+const DAEMON_BASE = {
+	schema_version: 1, generated_by: "cp-install", backend: "detached", node: "/usr/bin/node", app: "/opt/cp",
+	home: "/home/cp", path: "/usr/bin", port: 8766,
+};
 
 function scratch(t: TestContext): string {
 	const home = createScratchHome();

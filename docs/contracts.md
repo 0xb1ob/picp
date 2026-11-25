@@ -6565,7 +6565,8 @@ restores the order without it. It is read when a link is built (no restart) and 
 the Host and Origin guards, push and pairing ignore it.
 
 **Boards listener (`boards_port`, opt-in, `src/viewer/boards-server.ts`).** With `data/daemon.json` `boards_port` (or
-`CP_BOARDS_PORT`) set, and live after a Settings → Boards save (§Settings writes), the viewer opens a second listener on `boards_host` (`CP_BOARDS_HOST`, an IP address, default
+`CP_BOARDS_PORT`) set, and live after a Settings → Boards save (§Settings writes), the viewer opens a second listener
+on `boards_host` (`CP_BOARDS_HOST`, an IP address, default
 `127.0.0.1`; a wildcard or public address is allowed there, never for the dashboard). It answers only `GET`/`HEAD` of
 `/boards/board.css`, `/boards/<slug>/…` and the bare-slug 308, through the same `resolveBoardFile` confinement under
 `BOARD_CSP`; every other path and method is 404 under `BOARD_CSP`, and it never reaches the dashboard dispatcher, so no
@@ -9937,8 +9938,8 @@ such as `models.allow` or `sessions.tool_call_cap`), 409 (lock busy, invalid own
 `capacity.json`), 412 (stale, with the fresh snapshot), 500 (rolled back) and 503 (audit
 unwritable). An older bridge answers `unknown op`, which becomes 409 unsupported. `dry_run`
 stands in for a separate validate route. A set naming `boards.port` or `boards.host` is checked by the viewer after the
-CSRF token, on `data/daemon.json` merged with the changes: this dashboard's own port is 400, and a port a real bind probe
-finds held on that address is 409 (`boards.port <p> on <host> is in use or unavailable here (<code>)`), each with
+CSRF token, on `data/daemon.json` merged with the changes: this dashboard's own port is 400, and a port a real bind
+probe finds held on that address is 409 (`boards.port <p> on <host> is in use or unavailable here (<code>)`), each with
 `{state: "refused", errors}` and nothing forwarded. After an applied boards port, host or index change the viewer
 re-reads `data/daemon.json` and starts, stops or moves its boards listener in place; the reply adds `boards`
 (`{state: "off" | "listening" | "failed", host?, port?, index?, error?}`), and `GET /api/settings` carries the live

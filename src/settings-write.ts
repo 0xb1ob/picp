@@ -198,7 +198,8 @@ function baseDocument(owner: SettingFileOwner, path: string): Record<string, unk
 		case "capacity":
 			throw new Refusal(409, `${path} is absent: configure the gateway with cp-install --gateway-url first`);
 		case "daemon":
-			throw new Refusal(409, `${path} is absent: boards are set on a cp-install home; a hand-run cp-view reads CP_BOARDS_PORT/CP_BOARDS_HOST/CP_BOARDS_INDEX`);
+			throw new Refusal(409, `${path} is absent: boards are set on a cp-install home;`
+				+ " a hand-run cp-view reads CP_BOARDS_PORT/CP_BOARDS_HOST/CP_BOARDS_INDEX");
 		default:
 			return {};
 	}
@@ -405,7 +406,9 @@ function settleBoards(doc: Record<string, unknown>, path: string): void {
 		doc[key] = value;
 	}
 	if (doc.boards_port !== undefined && doc.boards_port === doc.port) {
-		throw new Refusal(400, "invalid setting value", [`boards.port: ${String(doc.boards_port)} is the dashboard port (its port key); pick another port`]);
+		const port = String(doc.boards_port);
+		const why = `boards.port: ${port} is the dashboard port (its port key); pick another port`;
+		throw new Refusal(400, "invalid setting value", [why]);
 	}
 	try {
 		validateDaemonConfig(doc);
@@ -495,7 +498,8 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			let value: SettingValue;
 			if (request.mode === "set") {
 				value = request.changes[field.key] as SettingValue;
-				if ((field.type === "model_ref" || field.type === "thinking_level" || field.type === "url" || field.type === "port") && value === null) action = "delete"; // unset, never a stored null
+				// Unset, never a stored null.
+				if (["model_ref", "thinking_level", "url", "port"].includes(field.type) && value === null) action = "delete";
 				// A codex switch off is absent, so a home that turned codex off again holds no codex key (C1).
 				if (field.owner === "native" && CODEX_SWITCH_KEYS.includes(fileKey) && value === false) action = "delete";
 				if (field.type === "rubric") value = mergeRubric(present.value, value as unknown as Record<string, unknown>[]) as SettingValue;

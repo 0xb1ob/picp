@@ -422,7 +422,8 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	r.config({ boards_port: 8767, boards_index: true });
 	process.kill(viewer!.pid, "SIGKILL");
 	await r.until("the viewer restart", () => r.starts("viewer").length === 2);
-	assert.deepEqual(roleEnv(r.starts("viewer")[1]!.env), { ...core, CP_BOARDS_PORT: "8767", CP_BOARDS_INDEX: "1", CP_DAEMON_ROLE: "viewer" });
+	const respawned = roleEnv(r.starts("viewer")[1]!.env);
+	assert.deepEqual(respawned, { ...core, CP_BOARDS_PORT: "8767", CP_BOARDS_INDEX: "1", CP_DAEMON_ROLE: "viewer" });
 	const viewerExit = stamp(new RegExp(`viewer pid ${viewer!.pid} exited \\(SIGKILL\\); restart 1 in 10s`));
 	const viewerBack = stamp(new RegExp(`viewer started pid ${r.starts("viewer")[1]!.pid}`));
 	assert.ok(viewerBack - viewerExit >= 9_000 && viewerBack - viewerExit < 16_000, `${viewerBack - viewerExit} ms`);

@@ -688,7 +688,10 @@ const OWNER_FILE: Record<SettingFileOwner, string> = {
 	daemon: `${LAYOUT.data}/daemon.json`,
 };
 const CAPACITY_MIN = { url: "https://gw.example/", path: "/x" };
-const DAEMON_MIN = { schema_version: 1, generated_by: "cp-install", backend: "detached", node: "/usr/bin/node", app: "/opt/cp", home: "/home/cp", path: "/usr/bin", port: 8766 };
+const DAEMON_MIN = {
+	schema_version: 1, generated_by: "cp-install", backend: "detached", node: "/usr/bin/node", app: "/opt/cp",
+	home: "/home/cp", path: "/usr/bin", port: 8766,
+};
 const ownerPath = (home: string, owner: SettingFileOwner) => join(home, OWNER_FILE[owner]);
 const putOwner = (home: string, owner: SettingFileOwner, body: unknown) =>
 	writeFileSync(ownerPath(home, owner), typeof body === "string" ? body : JSON.stringify(body));
@@ -921,7 +924,8 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 		if (["models.parent", "models.operator", "models.parent_thinking", "models.operator_thinking"].includes(key)) return { value: null, source: "code", status: "ok" };
 		// parentDriverSetting / operatorDriverSetting read an unparsable owner, or one without `driver`, as pi.
 		if (key === "models.parent_driver" || key === "models.operator_driver") return { value: "pi", source: "code", status: "ok" };
-		const disabled = ["parent", "capacity", "update", "daemon"].includes(catalog.find((field) => field.key === key)?.owner as string);
+		const owner = catalog.find((field) => field.key === key)?.owner as string;
+		const disabled = ["parent", "capacity", "update", "daemon"].includes(owner);
 		return { value: null, source: "none", status: disabled ? "disabled" : "refused" };
 	};
 	for (const variant of ["bad-json", "schema"] as const) {

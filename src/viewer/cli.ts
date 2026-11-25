@@ -98,8 +98,10 @@ export async function main(argv: readonly string[]): Promise<void> {
 		appBuildError = "Viewer build unavailable";
 		process.stderr.write(`cp-view: startup build failed; / returns 503; health and APIs remain available: ${error instanceof Error ? error.message : "unknown build error"}\n`);
 	}
-	const boardsCtl = boardsListener({ home, stateDir }, port, (line) => process.stdout.write(line), (line) => process.stderr.write(line));
-	const options = { home, stateDir, host, port, requireTailnet, boards: boardsCtl, ...(app ? { app } : {}), ...(appBuildError ? { appBuildError } : {}) };
+	const out = (line: string) => process.stdout.write(line), err = (line: string) => process.stderr.write(line);
+	const boardsCtl = boardsListener({ home, stateDir }, port, out, err);
+	const built = { ...(app ? { app } : {}), ...(appBuildError ? { appBuildError } : {}) };
+	const options = { home, stateDir, host, port, requireTailnet, boards: boardsCtl, ...built };
 	const remote = remoteRuntime(options);
 	if (boards) void boardsCtl.apply(boards);
 	if (!address.local) {

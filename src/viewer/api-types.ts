@@ -130,7 +130,13 @@ export interface SettingsResponse {
 	boards_listener?: BoardsListenerState | null;
 }
 /** The boards-only listener (src/viewer/boards-server.ts): off, listening on host:port, or failed with the error. */
-export interface BoardsListenerState { state: "off" | "listening" | "failed"; host?: string; port?: number; index?: boolean; error?: string }
+export interface BoardsListenerState {
+	state: "off" | "listening" | "failed";
+	host?: string;
+	port?: number;
+	index?: boolean;
+	error?: string;
+}
 /** Effort levels per CLI, the model rules (RegExp sources over `provider/id`) and each role's Codex switch; codex fields are absent from an older session. */
 export interface SettingsDriverChoices { efforts: { pi: string[]; claude: string[]; codex?: string[] }; claude_model: string; codex_model?: string; codex_class?: Record<string, string> }
 /** pi's `provider/id` models; `loading` while a `pi --list-models` run is going; `listed_at` is when it last landed. */

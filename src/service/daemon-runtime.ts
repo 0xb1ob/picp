@@ -179,7 +179,12 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 		if (!fresh) return config;
 		const { boards_port: _port, boards_host: _host, boards_index: _index, ...rest } = config;
 		const { boards_port, boards_host, boards_index } = fresh;
-		return { ...rest, ...(boards_port !== undefined ? { boards_port } : {}), ...(boards_host !== undefined ? { boards_host } : {}), ...(boards_index !== undefined ? { boards_index } : {}) };
+		return {
+			...rest,
+			...(boards_port !== undefined ? { boards_port } : {}),
+			...(boards_host !== undefined ? { boards_host } : {}),
+			...(boards_index !== undefined ? { boards_index } : {}),
+		};
 	};
 
 	const startLong = (role: Long): void => {

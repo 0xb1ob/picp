@@ -19,7 +19,9 @@ import { ReviewerModelSchema, RoutingRuleSchema, ThinkingLevelSchema } from "./r
 /** The CLIs a Settings driver field offers: the Codex CLI is set per rule in Model routing (C8b). */
 const SETTING_DRIVERS = ["pi", "claude"] as const;
 
-export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer", "workers", "boards"] as const;
+export const SETTING_SECTIONS = [
+	"grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer", "workers", "boards",
+] as const;
 export type SettingSection = (typeof SETTING_SECTIONS)[number];
 
 /** Owner files in revision order; `env` is the one owner without a file. */
@@ -74,7 +76,10 @@ export const SETTING_APPLIES = [
 ] as const;
 export type SettingApplies = (typeof SETTING_APPLIES)[number];
 
-export const SETTING_VALUE_TYPES = ["integer", "number", "nullable_number", "boolean", "enum_list", "string_list", "model_ref", "thinking_level", "rubric", "url", "driver", "port", "ip"] as const;
+export const SETTING_VALUE_TYPES = [
+	"integer", "number", "nullable_number", "boolean", "enum_list", "string_list", "model_ref", "thinking_level", "rubric",
+	"url", "driver", "port", "ip",
+] as const;
 export type SettingValueType = (typeof SETTING_VALUE_TYPES)[number];
 
 export const SETTING_KEYS = [
@@ -258,12 +263,25 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		driver: { type: "driver", enum: [...SETTING_DRIVERS], default: "pi", label: "Workers CLI", help: "pi or the Claude CLI for every worker type at once: sets the driver of each data/routing.json rubric row not on the Codex CLI, and data/native.json claude_research, claude_ship and claude_review (on for claude, off for pi). Under claude every row needs an Anthropic Claude model (provider anthropic, id claude-…) and a Claude effort level. Off refuses resumes and revives of live native jobs; they never move to pi. A full CLI queues new jobs (waiting for its capacity); they never run on another CLI." },
 	}),
 	...group("boards", "daemon", { applies: "boards_listener", on_invalid: "disable" }, {
-		port: { file_key: "boards_port", type: "port", minimum: 1, maximum: 65535, default: null, label: "Boards port", help: "Empty turns the boards listener off. Must differ from the dashboard port." },
-		host: { file_key: "boards_host", type: "ip", default: "127.0.0.1", label: "Bind address", help: "127.0.0.1: this machine only. 0.0.0.0: every interface, LAN and internet included. A Tailscale address (100.x.y.z): only devices on your tailnet." },
-		index: { file_key: "boards_index", type: "boolean", default: false, label: "Boards index", help: "Serve the /boards/ list of every board; off, a board is reachable only by its slug URL." },
+		port: {
+			file_key: "boards_port", type: "port", minimum: 1, maximum: 65535, default: null, label: "Boards port",
+			help: "Empty turns the boards listener off. Must differ from the dashboard port.",
+		},
+		host: {
+			file_key: "boards_host", type: "ip", default: "127.0.0.1", label: "Bind address",
+			help: "127.0.0.1: this machine only. 0.0.0.0: every interface, LAN and internet included."
+				+ " A Tailscale address (100.x.y.z): only devices on your tailnet.",
+		},
+		index: {
+			file_key: "boards_index", type: "boolean", default: false, label: "Boards index",
+			help: "Serve the /boards/ list of every board; off, a board is reachable only by its slug URL.",
+		},
 	}),
 	...group("boards", "viewer", { applies: "next_board_link", on_invalid: "refuse" }, {
-		public_url: { file_key: "boards_public_url", type: "url", default: null, label: "Boards public URL", help: "The origin board and report links use (wins over the tunnel and the dashboard public URL). Empty clears it." },
+		public_url: {
+			file_key: "boards_public_url", type: "url", default: null, label: "Boards public URL",
+			help: "The origin board and report links use (wins over the tunnel and the dashboard public URL). Empty clears it.",
+		},
 	}),
 ]);
 
@@ -338,7 +356,10 @@ export function validateSettingValue(key: string, value: unknown): ValidationRes
 	const field = FIELD_BY_KEY.get(key);
 	if (!field) return { ok: false, errors: [`unknown setting ${key}`] };
 	const checked = validate<SettingValue>(settingValueSchema(field), value);
-	const why = !checked.ok ? undefined : field.type === "url" && value !== null ? publicUrlError(value) : field.type === "ip" ? ipAddressError(value as string) : undefined;
+	const why = !checked.ok ? undefined
+		: field.type === "url" && value !== null ? publicUrlError(value)
+		: field.type === "ip" ? ipAddressError(value as string)
+		: undefined;
 	return why ? { ok: false, errors: [`${key} ${why}`] } : checked;
 }
 

@@ -6,7 +6,10 @@ import { PageHeader } from "../components/PageHeader.tsx";
 import { ParentRestart } from "../components/ParentRestart.tsx";
 import { RestartSession } from "../components/RestartSession.tsx";
 import { ShellContext } from "../components/Shell.tsx";
-import { bindExposure, boardsText, type Cli, type CliChoices, cliChoices, cliError, codexSwitchOf, type Drafts, fieldError, fieldOf, type ModelsStatus, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
+import {
+ bindExposure, boardsText, type Cli, type CliChoices, cliChoices, cliError, codexSwitchOf, type Drafts, fieldError,
+ fieldOf, type ModelsStatus, type RestoreSelector, type SettingsView, valueOf,
+} from "../settings-control.ts";
 import "./settings.css";
 
 /** The browser bundle takes no values from src/contracts.ts; the type pins this list to `ThinkingLevel`. */
@@ -26,7 +29,9 @@ const COMPACTION: SettingKey[] = ["sessions.parent_compact_at_tokens", "sessions
 const VIEWER: SettingKey[] = ["viewer.public_url", "viewer.strict_host"];
 const WORKERS: SettingKey[] = ["workers.native_claude_research", "workers.native_codex_research", "workers.native_codex_ship", "workers.native_codex_review"];
 const BOARDS: SettingKey[] = ["boards.port", "boards.host", "boards.index", "boards.public_url"];
-const BOARDS_WARNING = "Anyone who can reach the boards port can read every published board, with no login: response reports and schedule results included, and job-id slugs are guessable. Opening a firewall or router is your own step. A save moves the listener in this dashboard at once; nothing restarts.";
+const BOARDS_WARNING = "Anyone who can reach the boards port can read every published board, with no login:"
+ + " response reports and schedule results included, and job-id slugs are guessable. Opening a firewall or router is"
+ + " your own step. A save moves the listener in this dashboard at once; nothing restarts.";
 const lines = (text: string): string[] => text.split(/[\n,]/).map(line => line.trim()).filter(Boolean);
 const pick = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(keys.filter(key => key in drafts).map(key => [key, drafts[key]]));
 const omit = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(Object.entries(drafts).filter(([key]) => !keys.includes(key as SettingKey)));
@@ -54,7 +59,14 @@ const rowEdited = (row: RoutingRule, was: RoutingRule | undefined): boolean => J
 
 
 /** `confirmSave`: a question Save asks first (null: none); declined, nothing is posted. */
-function Section({title, help, keys, drafts, setDrafts, view, restore, restoreText, disabled, invalid, unsavedCount, confirmSave, children}: {title: string; help: string; keys: SettingKey[]; drafts: Drafts; setDrafts: (next: (drafts: Drafts) => Drafts) => void; view: SettingsView; restore: RestoreSelector | null; restoreText: string; disabled: boolean; invalid?: boolean; unsavedCount?: number; confirmSave?: (changes: Drafts) => string | null; children: ComponentChildren}) {
+function Section({
+ title, help, keys, drafts, setDrafts, view, restore, restoreText, disabled, invalid, unsavedCount, confirmSave,
+ children,
+}: {
+ title: string; help: string; keys: SettingKey[]; drafts: Drafts; setDrafts: (next: (drafts: Drafts) => Drafts) => void;
+ view: SettingsView; restore: RestoreSelector | null; restoreText: string; disabled: boolean; invalid?: boolean;
+ unsavedCount?: number; confirmSave?: (changes: Drafts) => string | null; children: ComponentChildren;
+}) {
  const changes = pick(drafts, keys);
  const unsaved = unsavedCount ?? Object.keys(changes).length;
  const [busy, setBusy] = useState(false);
@@ -74,7 +86,8 @@ function Section({title, help, keys, drafts, setDrafts, view, restore, restoreTe
   <p class="settings-help">{help}</p>
   <div class="settings-body">{children}</div>
   {restore && <div class="settings-actions">
-   <button type="button" class="settings-primary" disabled={disabled || busy || invalid || !Object.keys(changes).length} onClick={save}>Save</button>
+   <button type="button" class="settings-primary" disabled={disabled || busy || invalid || !Object.keys(changes).length}
+    onClick={save}>Save</button>
    <button type="button" disabled={disabled || busy} onClick={reset}>Restore defaults</button>
    {unsaved > 0 && <span class="settings-unsaved">{unsaved} unsaved change{unsaved === 1 ? "" : "s"}</span>}
   </div>}
@@ -233,10 +246,16 @@ function Field({field, value, source, error, set, disabled, models, choices}: {f
    : field.type === "url"
    ? <input id={id} type="text" inputMode="url" spellcheck={false} autoComplete="off" placeholder="https://dash.example.test/" value={typeof value === "string" ? value : ""} aria-invalid={error ? true : undefined} disabled={disabled} onInput={event => set(event.currentTarget.value.trim() || null)}/>
    : field.type === "ip"
-   ? <input id={id} type="text" inputMode="decimal" spellcheck={false} autoComplete="off" placeholder="127.0.0.1" value={typeof value === "string" ? value : ""} aria-invalid={error ? true : undefined} disabled={disabled} onInput={event => set(event.currentTarget.value.trim())}/>
+   ? <input id={id} type="text" inputMode="decimal" spellcheck={false} autoComplete="off" placeholder="127.0.0.1"
+    value={typeof value === "string" ? value : ""} aria-invalid={error ? true : undefined} disabled={disabled}
+    onInput={event => set(event.currentTarget.value.trim())}/>
    : field.type === "boolean"
    ? <div class="settings-checks"><label><input id={id} type="checkbox" checked={value === true} disabled={disabled} onChange={event => set(event.currentTarget.checked)}/>{value === true ? "On" : "Off"}</label></div>
-   : <input id={id} type="number" value={typeof value === "number" ? String(value) : ""} min={field.minimum ?? field.exclusive_minimum} max={field.maximum} step={field.type === "integer" || field.type === "port" ? 1 : "any"} placeholder={field.type === "port" ? "off" : undefined} aria-invalid={error ? true : undefined} disabled={disabled} onInput={event => set(event.currentTarget.value === "" ? null : Number(event.currentTarget.value))}/>;
+   : <input id={id} type="number" value={typeof value === "number" ? String(value) : ""}
+    min={field.minimum ?? field.exclusive_minimum} max={field.maximum}
+    step={field.type === "integer" || field.type === "port" ? 1 : "any"}
+    placeholder={field.type === "port" ? "off" : undefined} aria-invalid={error ? true : undefined} disabled={disabled}
+    onInput={event => set(event.currentTarget.value === "" ? null : Number(event.currentTarget.value))}/>;
  return <div class="settings-field"><label for={id}>{field.label} {meta}</label><p class="settings-help">{field.help}</p>{input}{error && <small class="settings-warn" role="alert">{error}</small>}{field.type === "model_ref" && typeof value === "string" && <ModelNote models={models} values={[value]}/>}</div>;
 }
 
@@ -310,15 +329,25 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
  };
  const invalid = (keys: SettingKey[]) => keys.some(key => { const spec = fieldOf(data, key); return !!cliErrors[key] || (!!spec && key in drafts && fieldError(spec, drafts[key]) !== null); });
  const daemonAbsent = status.snapshot.owners.find(owner => owner.owner === "daemon")?.state === "absent";
+ const boardsKeys: SettingKey[] = daemonAbsent ? ["boards.public_url"] : BOARDS;
  const savedPort = view_("boards.port")?.value, savedHost = String(view_("boards.host")?.value ?? "127.0.0.1");
- const boardsSaved = typeof savedPort === "number" ? `Set to ${savedHost.includes(":") ? `[${savedHost}]` : savedHost}:${savedPort}, index ${view_("boards.index")?.value === true ? "on" : "off"}` : "Off";
+ const savedBind = `${savedHost.includes(":") ? `[${savedHost}]` : savedHost}:${String(savedPort)}`;
+ const savedIndex = `index ${view_("boards.index")?.value === true ? "on" : "off"}`;
+ const boardsSaved = typeof savedPort === "number" ? `Set to ${savedBind}, ${savedIndex}` : "Off";
+ const boardsLive = data.boards_listener ? boardsText(data.boards_listener) : "This dashboard runs no boards listener";
+ const boardsReach = " on the boards port can read every board, with no login. Save?";
  // Only a move from this machine or a private network to every interface or a public address asks first.
  const boardsConfirm = (changes: Drafts): string | null => {
   const next = changes["boards.host"];
-  if (typeof next !== "string" || bindExposure(savedHost) === "wildcard" || bindExposure(savedHost) === "public") return null;
+  const was = bindExposure(savedHost);
+  if (typeof next !== "string" || was === "wildcard" || was === "public") return null;
   const reach = bindExposure(next);
-  if (reach === "wildcard") return `Boards will be reachable on all interfaces (${next}): anyone who can reach this machine on the boards port can read every board, with no login. Save?`;
-  return reach === "public" ? `Boards will be reachable on a public address (${next}): anyone who can reach it on the boards port can read every board, with no login. Save?` : null;
+  if (reach === "wildcard") {
+   return `Boards will be reachable on all interfaces (${next}): anyone who can reach this machine${boardsReach}`;
+  }
+  return reach === "public"
+   ? `Boards will be reachable on a public address (${next}): anyone who can reach it${boardsReach}`
+   : null;
  };
  const modelsState = <ModelsState status={view.models} refresh={view.refreshModels} disabled={disabled}/>;
  const notice = view.notice;
@@ -351,10 +380,15 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   <Section title="Dashboard address" help="Public URL applies to the next board or report link; the Host pin applies to the next dashboard request. Neither restarts anything." keys={VIEWER} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: VIEWER}} restoreText="Unset the public URL and turn the Host pin off?" disabled={disabled}>
    {VIEWER.map(field)}
   </Section>
-  <Section title="Boards" help={BOARDS_WARNING} keys={daemonAbsent ? ["boards.public_url"] : BOARDS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{section: "boards"}} restoreText="Turn the boards listener off and clear its address, index and public URL?" disabled={disabled} invalid={invalid(BOARDS)} confirmSave={boardsConfirm}>
-   <p class="settings-meta settings-boards-state" role="status">{boardsSaved} · {data.boards_listener ? boardsText(data.boards_listener) : "This dashboard runs no boards listener"}</p>
-   {daemonAbsent && <p class="settings-readonly">No data/daemon.json: the port, address and index are set on a cp-install home; a hand-run cp-view reads CP_BOARDS_PORT, CP_BOARDS_HOST and CP_BOARDS_INDEX.</p>}
-   {(daemonAbsent ? ["boards.public_url" as SettingKey] : BOARDS).map(field)}
+  <Section title="Boards" help={BOARDS_WARNING} keys={boardsKeys} drafts={drafts} setDrafts={setDrafts} view={view}
+   restore={{section: "boards"}} restoreText="Turn the boards listener off and clear its address, index and public URL?"
+   disabled={disabled} invalid={invalid(BOARDS)} confirmSave={boardsConfirm}>
+   <p class="settings-meta settings-boards-state" role="status">{boardsSaved} · {boardsLive}</p>
+   {daemonAbsent && <p class="settings-readonly">
+    No data/daemon.json: the port, address and index are set on a cp-install home; a hand-run cp-view reads
+    CP_BOARDS_PORT, CP_BOARDS_HOST and CP_BOARDS_INDEX.
+   </p>}
+   {boardsKeys.map(field)}
   </Section>
   <Section title="Native workers" help="Off by default, and pi stays every job's driver; no shipped routing rule names claude or codex. The Workers CLI under Model routing sets the Claude switch too: on with the Claude CLI, off with pi. The Codex switches are set here only; with one on, Model routing offers the Codex CLI on that class's rules." keys={WORKERS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: WORKERS}} restoreText="Turn the Claude CLI research workers and every Codex CLI switch off?" disabled={disabled}>
    {WORKERS.map(field)}

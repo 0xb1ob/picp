@@ -233,6 +233,7 @@ function workersDriverView(rubric: View | undefined, native: OwnerRead<unknown> 
 type Owner = { file: (home: string) => string; read: (home: string, env: NodeJS.ProcessEnv, file: string) => Settled };
 
 const dataFile = (name: string) => (home: string) => join(home, LAYOUT.data, name);
+type ViewerConfig = ReturnType<typeof loadViewerConfig>;
 
 const OWNERS: Record<SettingFileOwner, Owner> = {
 	"mandate-defaults": {
@@ -360,7 +361,11 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 	viewer: {
 		file: dataFile("viewer.json"),
 		read: (_home, _env, file) =>
-			settle("viewer", readOwnerConsistently(file, () => loadViewerConfig(file)), (v: ReturnType<typeof loadViewerConfig>) => ({ "viewer.strict_host": v.strict_host, "viewer.public_url": v.public_url, "boards.public_url": v.boards_public_url })),
+			settle("viewer", readOwnerConsistently(file, () => loadViewerConfig(file)), (v: ViewerConfig) => ({
+				"viewer.strict_host": v.strict_host,
+				"viewer.public_url": v.public_url,
+				"boards.public_url": v.boards_public_url,
+			})),
 	},
 	native: {
 		file: (home) => nativeConfigFile(home),

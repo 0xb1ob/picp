@@ -58,8 +58,9 @@ test("BL-404: every dashboard route, method and the index are 404 on the boards 
 	const refused: Array<[string, string]> = [["GET", "/"], ["GET", "/api/dashboard"], ["GET", "/api/stream?view=overview"], ["POST", CONTROL_MESSAGE_PATH],
 		["GET", "/api/report/cp-1"], ["GET", "/boards/"], ["GET", "/api/identity"], ["GET", "/healthz"], ["GET", "/sw.js"], ["GET", "/assets/viewer/app.js"],
 		["GET", "/api/devices"], ["GET", "/pair"], ["POST", "/api/pair/claim"], ["GET", "/api/push"], ["POST", PUSH_SUBSCRIPTION_PATH],
-		["POST", OPERATOR_UPLOAD_PATH], ["POST", "/boards/alpha/"], ["DELETE", "/boards/alpha/"], ["GET", "/api/sessions?view=you&transcript=1"],
-		["GET", "/api/settings"], ["POST", "/api/settings/apply"], ["POST", "/api/settings/restore"], ["GET", "/api/settings/models"]];
+		["POST", OPERATOR_UPLOAD_PATH], ["POST", "/boards/alpha/"], ["DELETE", "/boards/alpha/"],
+		["GET", "/api/sessions?view=you&transcript=1"], ["GET", "/api/settings"], ["POST", "/api/settings/apply"],
+		["POST", "/api/settings/restore"], ["GET", "/api/settings/models"]];
 	for (const [method, path] of refused) {
 		const reply = await call(bp, path, { method, ...(method === "POST" ? { body: "{}", headers: { "content-type": "application/json" } } : {}) });
 		assert.equal(reply.status, 404, `${method} ${path}`);
