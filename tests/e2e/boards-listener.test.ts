@@ -29,7 +29,12 @@ async function withBoards(t: TestContext, env: Record<string, string> = {}) {
 	const home = seeded(t);
 	const bp = await freePort();
 	const viewer = await startViewer(t, { home, env: { CP_BOARDS_PORT: String(bp), CP_BOARDS_HOST: "127.0.0.1", ...env } });
-	await until(() => call(bp, "/boards/board.css").catch(() => ({ status: 0 })), (reply) => reply.status === 200, `boards listener on ${bp}\n${viewer.output()}`);
+	// The second port must really bind on CI: a listen error fails here at once, named, and nothing is ever skipped.
+	await until(() => {
+		const failed = /cp-view: boards listener on \S+ failed: .*/.exec(viewer.output());
+		if (failed) throw new Error(`the boards listener could not bind ${bp}: ${failed[0]}`);
+		return call(bp, "/boards/board.css").catch(() => ({ status: 0 }));
+	}, (reply) => reply.status === 200, `boards listener on ${bp}\n${viewer.output()}`);
 	return { viewer, bp };
 }
 
