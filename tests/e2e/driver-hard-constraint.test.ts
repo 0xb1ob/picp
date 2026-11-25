@@ -253,6 +253,9 @@ test("T6: a pipeline advance whose codex implementer finds the slot full waits f
 	const ship = await waitFor(() => h.record(started.ship_id), (record) => record?.worker.driver === "codex", { timeoutMs: 120_000, what: "the implementer on codex" });
 	assert.deepEqual([ship?.worker.role, ship?.worker.model, ship?.routing?.driver], ["implementer", FAKE_CODEX_REF, "codex"]);
 	assert.match(ship?.routing?.driver_reason ?? "", new RegExp(`override ${FAKE_CODEX_REF}`), "the replay ran with the pin");
+	// The fleet record lands mid-replay; the drain removes the entry only once the replay returns.
+	const drained = { timeoutMs: 30_000, what: "the replayed advance leaving the native wait queue" };
+	await waitFor(() => post.nativeWait.list().length, (left) => left === 0, drained);
 	assert.deepEqual(post.nativeWait.list(), []);
 });
 
