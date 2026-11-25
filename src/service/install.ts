@@ -7,6 +7,7 @@
  * It writes `data/daemon.json` and starts cp-daemon, the one runtime per home (parent supervisor, viewer,
  * health, update): the thin `cp-daemon.service` on systemd, detached otherwise (daemon-backend.ts, the only
  * module that runs systemctl). A home still on the legacy cp-* units migrates here (M1, docs/service.md).
+ * Hand-set `worker_memory_max` and `boards_port`/`boards_host`/`boards_index` are kept across reruns.
  *
  *   --home DIR          the home (default ~/.pi-command-post)
  *   --app DIR           the checkout cp-daemon runs (default: this one)
@@ -290,7 +291,7 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	if (models === "fail") return 1;
 	// A kept parent pin leaves the wrapper's own export as it was (an older wrapper carries none): byte-identical.
 	const wrapperParent = models.parent === kept.parent ? wrapped.parent : models.parent;
-	ctx.config = { ...baseConfig, ...(viewerHost ? { viewer_host: viewerHost } : {}), ...(models.parent ? { parent_model: models.parent } : {}), ...(previousConfig?.worker_memory_max ? { worker_memory_max: previousConfig.worker_memory_max } : {}) };
+	ctx.config = { ...baseConfig, ...(viewerHost ? { viewer_host: viewerHost } : {}), ...(models.parent ? { parent_model: models.parent } : {}), ...(previousConfig?.worker_memory_max ? { worker_memory_max: previousConfig.worker_memory_max } : {}), ...keptBoards(previousConfig) };
 
 	// 3d. M1's preflight (docs/service.md §Migration), before anything is written. --no-start leaves a legacy home as is.
 	const legacy = systemd ? legacyPresent(ports, unitDir) : [];
@@ -416,6 +417,13 @@ async function progress<T>(ports: InstallPorts, on: boolean, name: string, work:
 }
 
 /** The last lines of a real run: `ready:` only after cp-daemon's readiness and a passing /doctor, else `incomplete:`. */
+/** The hand-set `boards_*` keys of the previous data/daemon.json, kept like `worker_memory_max`. */
+function keptBoards(previous: DaemonConfig | undefined): Pick<DaemonConfig, "boards_port" | "boards_host" | "boards_index"> {
+	if (!previous) return {};
+	const { boards_port, boards_host, boards_index } = previous;
+	return { ...(boards_port !== undefined ? { boards_port } : {}), ...(boards_host !== undefined ? { boards_host } : {}), ...(boards_index !== undefined ? { boards_index } : {}) };
+}
+
 function summary(ports: InstallPorts, o: { ready: boolean; noStart: boolean; host: string | undefined; port: number; later: readonly string[]; rerun: string }): void {
 	const url = o.host === undefined ? undefined : `http://${o.host.includes(":") ? `[${o.host}]` : o.host}:${o.port}/`;
 	if (o.ready) ports.log(`ready: cp-daemon runs and /doctor passed; ${url ? `the dashboard: ${url}` : "the dashboard has no address yet (viewer-host below)"}; the operator session: cp-operator`);

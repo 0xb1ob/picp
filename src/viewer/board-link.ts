@@ -4,7 +4,7 @@
  */
 import { tailscaleIp } from "./bind-host.ts";
 import { DEFAULT_PORT } from "./cli.ts";
-import { publicUrl } from "./host-config.ts";
+import { boardsPublicUrl, publicUrl } from "./host-config.ts";
 import { liveTunnelOrigin } from "./remote-runtime.ts";
 import { hostHeaderFor } from "./server.ts";
 import { resolveStateDir } from "./sessions.ts";
@@ -16,10 +16,15 @@ export interface BoardLink { url: string; note?: string }
 const BOARD_LINK_REMEDY =
 	"relative link: no tunnel, public URL, viewer host or tailnet address; set Settings → Dashboard address → Public URL (data/viewer.json public_url) or cp-install --viewer-host <ip>";
 
-/** Tunnel origin, else `viewer.public_url`, else the configured host (loopback too), else the tailnet IPv4, else relative. */
+/**
+ * `boards_public_url` (the boards-only listener), else the tunnel origin, else `viewer.public_url`, else the configured
+ * host (loopback too), else the tailnet IPv4, else relative.
+ */
 export function boardLink(home: string, slug: string, options: BoardLinkOptions = {}, tailnet: () => string | undefined = tailscaleIp): BoardLink {
 	const stateDir = resolveStateDir(home);
 	const path = `/boards/${slug}/`;
+	const boards = boardsPublicUrl(stateDir);
+	if (boards) return { url: `${boards}${path}` };
 	const live = liveTunnelOrigin(stateDir);
 	if (live) return { url: `${live}${path}` };
 	const base = publicUrl(stateDir);

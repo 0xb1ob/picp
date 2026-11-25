@@ -1,7 +1,7 @@
 /**
- * `data/viewer.json` (keys `viewer.strict_host`, `viewer.public_url`): whether the local listener pins its exact bind
- * Host, the DNS-rebinding guard (off by default, operator decision ask-1946d8fc2bf8, so a proxied URL works), and the
- * public URL board links use. Nothing here writes.
+ * `data/viewer.json` (keys `viewer.strict_host`, `viewer.public_url`, `boards_public_url`): whether the local listener
+ * pins its exact bind Host, the DNS-rebinding guard (off by default, operator decision ask-1946d8fc2bf8, so a proxied
+ * URL works), and the public URLs board links use. Nothing here writes.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -9,10 +9,11 @@ import { publicUrlError } from "./public-url.ts";
 
 export const viewerConfigFile = (stateDir: string): string => join(dirname(stateDir), "data", "viewer.json");
 
-const KEYS = ["strict_host", "public_url"];
+const KEYS = ["strict_host", "public_url", "boards_public_url"];
+type UrlKey = "public_url" | "boards_public_url";
 
 /** The file's object (absent: `{}`); unreadable, not an object or an unknown key throws, naming why. */
-function readViewerFile(file: string): { strict_host?: unknown; public_url?: unknown } {
+function readViewerFile(file: string): { strict_host?: unknown; public_url?: unknown; boards_public_url?: unknown } {
 	let raw: unknown;
 	try {
 		raw = JSON.parse(readFileSync(file, "utf8"));
@@ -22,7 +23,7 @@ function readViewerFile(file: string): { strict_host?: unknown; public_url?: unk
 	}
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${file} is not a JSON object`);
 	const extra = Object.keys(raw).filter((key) => !KEYS.includes(key));
-	if (extra.length) throw new Error(`${file} has unknown key ${extra.join(", ")}; the only keys are "strict_host" and "public_url"`);
+	if (extra.length) throw new Error(`${file} has unknown key ${extra.join(", ")}; the only keys are "strict_host", "public_url" and "boards_public_url"`);
 	return raw;
 }
 
@@ -31,14 +32,17 @@ function strictOf(file: string, raw: { strict_host?: unknown }): boolean {
 	return raw.strict_host === true;
 }
 
-/** Absent file or keys: `strict_host` false, `public_url` null. Any other key or a bad value throws, naming why. */
-export function loadViewerConfig(file: string): { strict_host: boolean; public_url: string | null } {
-	const raw = readViewerFile(file);
-	const strict = strictOf(file, raw);
-	const url = raw.public_url;
+function urlOf(file: string, raw: { public_url?: unknown; boards_public_url?: unknown }, key: UrlKey): string | null {
+	const url = raw[key];
 	const why = url === undefined || url === null ? undefined : publicUrlError(url);
-	if (why) throw new Error(`${file}: public_url ${why}`);
-	return { strict_host: strict, public_url: typeof url === "string" ? url : null };
+	if (why) throw new Error(`${file}: ${key} ${why}`);
+	return typeof url === "string" ? url : null;
+}
+
+/** Absent file or keys: `strict_host` false, both URLs null. Any other key or a bad value throws, naming why. */
+export function loadViewerConfig(file: string): { strict_host: boolean; public_url: string | null; boards_public_url: string | null } {
+	const raw = readViewerFile(file);
+	return { strict_host: strictOf(file, raw), public_url: urlOf(file, raw, "public_url"), boards_public_url: urlOf(file, raw, "boards_public_url") };
 }
 
 /** Read per request; a bad file or strict_host fails closed (strict), a bad public_url alone never does. */
@@ -51,11 +55,22 @@ export function strictHost(stateDir: string): boolean {
 	}
 }
 
-/** `viewer.public_url` read at link time, trailing slashes dropped; unset or an invalid file is undefined. */
-export function publicUrl(stateDir: string): string | undefined {
+/** One URL key read at link time, trailing slashes dropped; unset, invalid or an invalid file is undefined. */
+function linkBase(stateDir: string, key: UrlKey): string | undefined {
+	const file = viewerConfigFile(stateDir);
 	try {
-		return loadViewerConfig(viewerConfigFile(stateDir)).public_url?.replace(/\/+$/, "") || undefined;
+		return urlOf(file, readViewerFile(file), key)?.replace(/\/+$/, "") || undefined;
 	} catch {
 		return undefined;
 	}
+}
+
+/** `viewer.public_url`; a bad `boards_public_url` does not void it. */
+export function publicUrl(stateDir: string): string | undefined {
+	return linkBase(stateDir, "public_url");
+}
+
+/** `boards_public_url`: the boards-only listener's public origin; a bad `public_url` does not void it. */
+export function boardsPublicUrl(stateDir: string): string | undefined {
+	return linkBase(stateDir, "boards_public_url");
 }

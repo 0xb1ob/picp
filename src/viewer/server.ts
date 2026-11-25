@@ -19,6 +19,7 @@
  * are served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
  * Remote dashboard: `dispatch` is also reached through the remote listener's gate (remote-server.ts), which binds an
  * authenticated device context to the request (access.ts); with `devices` set, three device routes are added (devices-api.ts).
+ * The opt-in boards-only listener (boards-server.ts) never reaches `dispatch`: it shares only `serveBoard` and `send`.
  */
 
 import { readFileSync } from "node:fs";
@@ -179,8 +180,8 @@ export function pollingStreams(): number {
 	return refreshStreams();
 }
 
-/** `/boards/…`: the built-in stylesheet, or one static file from a board's `site/`. */
-function board(res: ServerResponse, pathname: string, options: ViewerOptions, warn: BoardWarn): void {
+/** `/boards/…`: the built-in stylesheet, or one static file from a board's `site/`; also the boards-only listener's. */
+export function serveBoard(res: ServerResponse, pathname: string, options: ViewerState, warn: BoardWarn): void {
 	const csp = { "content-security-policy": BOARD_CSP };
 	if (pathname === "/boards/board.css") {
 		send(res, 200, "text/css; charset=utf-8", BOARD_CSS, csp);
@@ -488,7 +489,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 				return;
 			}
 			if (url.pathname.startsWith("/boards/")) {
-				board(res, url.pathname, options, warn);
+				serveBoard(res, url.pathname, options, warn);
 				return;
 			}
 			send(res, 404, "text/plain; charset=utf-8", "not found\n");

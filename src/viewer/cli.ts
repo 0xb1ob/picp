@@ -12,10 +12,13 @@
  * `--require-tailnet` is also the only way the operator's own full transcript is
  * served (`/api/sessions?view=you&transcript=1`, refused 403 without it).
  * Default port: 8766. Default home: CP_HOME, else this package's home.
+ * Opt-in boards-only listener: CP_BOARDS_PORT, CP_BOARDS_HOST (default 127.0.0.1; a wildcard is allowed), and
+ * CP_BOARDS_INDEX=1 for the `/boards/` list (boards-server.ts). A clash or listen error never stops the dashboard.
  */
 
 import type { ViewerApp } from "./app-page.ts";
-import { bindHostRefusal, tailscaleIp } from "./bind-host.ts";
+import { type BoardsAddress, boardsAddress, bindHostRefusal, tailscaleIp } from "./bind-host.ts";
+import { createBoardsServer } from "./boards-server.ts";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { describeHome } from "../home.ts";
@@ -59,6 +62,20 @@ export function listenPlan(home: string, env: NodeJS.ProcessEnv, requireTailnet:
 	}
 }
 
+/** Starts the boards-only listener beside the dashboard; a clash or a listen error is logged, never fatal. */
+function startBoards(state: { home: string; stateDir: string }, boards: BoardsAddress, dashboardPort: number): void {
+	if (boards.port === dashboardPort) {
+		process.stderr.write(`cp-view: boards listener not started: CP_BOARDS_PORT ${boards.port} is the dashboard port\n`);
+		return;
+	}
+	const where = hostHeaderFor(boards.host, boards.port);
+	createBoardsServer(state, boards.index, (line) => process.stderr.write(line))
+		.on("error", (error: NodeJS.ErrnoException) => process.stderr.write(`cp-view: boards listener on ${where} failed: ${error.code ?? error.message}; the dashboard keeps serving\n`))
+		.listen(boards.port, boards.host, () => {
+			process.stdout.write(`cp-view: boards http://${where}/boards/<slug>/ (boards only: public to anyone who can reach it; index ${boards.index ? "on" : "off"})\n`);
+		});
+}
+
 export async function main(argv: readonly string[]): Promise<void> {
 	const { values } = parseArgs({
 		args: [...argv],
@@ -77,6 +94,7 @@ export async function main(argv: readonly string[]): Promise<void> {
 	const home = resolve(values.home ?? describeHome().home);
 	const requireTailnet = values["require-tailnet"] === true;
 	const address = listenPlan(home, { ...process.env, ...(values.port !== undefined ? { CP_VIEWER_PORT: values.port } : {}) }, requireTailnet && values.host === undefined);
+	const boards = boardsAddress(process.env);
 	const { port } = address;
 	const host = values.host ?? address.host;
 	// Unflagged, the viewer still serves transcripts and explorer data to whoever reaches it: never a wildcard, public or non-IP bind.
@@ -95,6 +113,7 @@ export async function main(argv: readonly string[]): Promise<void> {
 	}
 	const options = { home, stateDir, host, port, requireTailnet, ...(app ? { app } : {}), ...(appBuildError ? { appBuildError } : {}) };
 	const remote = remoteRuntime(options);
+	if (boards) startBoards({ home, stateDir }, boards, port);
 	if (!address.local) {
 		process.stdout.write(`cp-view: remote-only (no tailnet address; cp-tunnel enabled the remote dashboard): no local listener, state ${stateDir}\n`);
 		remote.start();

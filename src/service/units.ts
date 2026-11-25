@@ -57,6 +57,10 @@ export interface UnitInput {
 	wrapper?: string;
 	/** CP_VIEWER_HOST, pinned by cp-install (policy-checked there); absent, every unit renders as before it existed. */
 	viewerHost?: string;
+	/** The opt-in boards-only listener (`CP_BOARDS_*`, cp-view.service only); absent, no unit changes. */
+	boardsPort?: number;
+	boardsHost?: string;
+	boardsIndex?: boolean;
 }
 
 /** One systemd word (Environment=): quoted, `\` and `"` escaped, `%` doubled (specifier escape). */
@@ -137,6 +141,11 @@ export function renderUnits(raw: UnitInput): Record<string, string> {
 	// Every unit that resolves the viewer's address (the port's units) carries the pinned host, so health, update
 	// verify, intake board links and the viewer itself agree on one address.
 	const host: Record<string, string> = input.viewerHost ? { CP_VIEWER_HOST: input.viewerHost } : {};
+	const boards: Record<string, string> = input.boardsPort === undefined ? {} : {
+		CP_BOARDS_PORT: String(input.boardsPort),
+		...(input.boardsHost ? { CP_BOARDS_HOST: input.boardsHost } : {}),
+		...(input.boardsIndex ? { CP_BOARDS_INDEX: "1" } : {}),
+	};
 	const parent = [
 		header,
 		"[Unit]",
@@ -180,7 +189,7 @@ export function renderUnits(raw: UnitInput): Record<string, string> {
 		"Type=simple",
 		`ExecStart=${[input.node, `${input.app}/src/viewer/cli.ts`, "--home", input.home, "--require-tailnet", "--port", String(input.port)].map(execWord).join(" ")}`,
 		`WorkingDirectory=${directory(input.home)}`,
-		...environment({ CP_HOME: input.home, CP_MODE: "multi", PATH: input.path, ...host }),
+		...environment({ CP_HOME: input.home, CP_MODE: "multi", PATH: input.path, ...host, ...boards }),
 		"Restart=always",
 		"RestartSec=10",
 		"",

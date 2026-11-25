@@ -9,10 +9,14 @@
 
 import type { DoctorFinding } from "../contracts.ts";
 import type { CommandRunner } from "../doctor.ts";
+import { type BoardsAddress, boardsAddress } from "./bind-host.ts";
+import { DEFAULT_PORT } from "./cli.ts";
 import { controlSocketFile, readControlConfig, readControlRecord } from "./control-files.ts";
 import { loadViewerConfig, strictHost, viewerConfigFile } from "./host-config.ts";
 import { pidAlive } from "./overview-health.ts";
+import { hostHeaderFor } from "./server.ts";
 import { resolveStateDir } from "./sessions.ts";
+import { type DaemonConfig, daemonPaths, readDaemonConfig } from "../service/daemon-files.ts";
 import { serviceFindings, viewerExpected } from "../service/status.ts";
 
 function pidsOf(run: CommandRunner, cwd: string, pattern: string): string[] {
@@ -23,7 +27,31 @@ function pidsOf(run: CommandRunner, cwd: string, pattern: string): string[] {
 /** `env` is where the service lines read the unit dir and the legacy home: injected in tests so the host's own units never leak in. */
 export function viewerFindings(run: CommandRunner, cwd: string, env: NodeJS.ProcessEnv = process.env): DoctorFinding[] {
 	const stateDir = resolveStateDir(cwd);
-	return [viewerFinding(run, cwd, env), dashboardControlFinding(stateDir), viewerHostFinding(stateDir), ...serviceFindings(run, cwd, env, stateDir)];
+	return [viewerFinding(run, cwd, env), dashboardControlFinding(stateDir), viewerHostFinding(stateDir), boardsFinding(cwd, env), ...serviceFindings(run, cwd, env, stateDir)];
+}
+
+/** One line: the opt-in boards-only listener, from CP_BOARDS_PORT when set, else data/daemon.json `boards_*`. */
+export function boardsFinding(home: string, env: NodeJS.ProcessEnv): DoctorFinding {
+	let config: DaemonConfig | undefined;
+	try {
+		config = readDaemonConfig(daemonPaths(home).config);
+	} catch {
+		config = undefined; // `service.daemon` reports an unreadable data/daemon.json
+	}
+	let boards: BoardsAddress | undefined;
+	try {
+		boards = env.CP_BOARDS_PORT ? boardsAddress(env) : config?.boards_port === undefined ? undefined
+			: { port: config.boards_port, host: config.boards_host ?? "127.0.0.1", index: config.boards_index === true };
+	} catch (error) {
+		return { check: "boards", severity: "warn", what: `boards listener: ${(error as Error).message}`.slice(0, 200), fix: "fix or unset CP_BOARDS_PORT/CP_BOARDS_HOST/CP_BOARDS_INDEX" };
+	}
+	if (!boards) return { check: "boards", severity: "ok", what: "boards listener: off (no boards_port in data/daemon.json or CP_BOARDS_PORT); boards are served only by the dashboard" };
+	const viewerPort = Number(env.CP_VIEWER_PORT);
+	const dashboard = Number.isInteger(viewerPort) && viewerPort >= 1 && viewerPort <= 65535 ? viewerPort : config?.port ?? DEFAULT_PORT;
+	if (boards.port === dashboard) {
+		return { check: "boards", severity: "warn", what: `boards listener: boards_port ${boards.port} is the dashboard port; cp-view does not start it`, fix: "set another boards_port in data/daemon.json (or CP_BOARDS_PORT), then cp-daemon reload" };
+	}
+	return { check: "boards", severity: "ok", what: `boards listener: on ${hostHeaderFor(boards.host, boards.port)}, apart from the dashboard (${dashboard}): every published board is public to anyone who can reach it; /boards/ index ${boards.index ? "on" : "off"}` };
 }
 
 function viewerFinding(run: CommandRunner, cwd: string, env: NodeJS.ProcessEnv): DoctorFinding {
@@ -55,8 +83,8 @@ export function viewerHostFinding(stateDir: string): DoctorFinding {
 	} catch (error) {
 		const message = (error as Error).message;
 		const what = strictHost(stateDir) ? "viewer Host check on: data/viewer.json is invalid, so the bind Host is pinned"
-			: "viewer Host check off: data/viewer.json public_url is invalid, so board links skip it";
-		return { check: "viewer-host", severity: "warn", what, detail: message.slice(0, 2000), fix: "fix data/viewer.json (only {\"strict_host\": true|false, \"public_url\": \"https://…\"}) or remove it" };
+			: "viewer Host check off: data/viewer.json public_url or boards_public_url is invalid, so board links skip it";
+		return { check: "viewer-host", severity: "warn", what, detail: message.slice(0, 2000), fix: "fix data/viewer.json (only {\"strict_host\": true|false, \"public_url\": \"https://…\", \"boards_public_url\": \"https://…\"}) or remove it" };
 	}
 }
 
