@@ -230,8 +230,9 @@ function implementerForgeTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv): Codex
 	const comments = commentWrites(job, hostEnv);
 	const base = hostEnv.CP_BASE_BRANCH?.trim() || "main";
 	const tools = [
-		forgeTool("git_commit", "Commit every change in this job's worktree: `git add -A`, then `git commit -m <message>`, "
-			+ "hooks off. A change to an excluded path is refused and unstaged. The shell cannot write .git.",
+		forgeTool("git_commit", "Commit every change in this job's worktree: `git add -A`, then "
+			+ "`git commit -m <message>`, hooks off. A change to an excluded path is refused and unstaged. "
+			+ "The shell cannot write .git.",
 			(args) => gitCommit(job, args as { message: string }, {
 				excluded: job.excludePaths ?? [], env: hostEnv, hooksOff: true,
 			})),

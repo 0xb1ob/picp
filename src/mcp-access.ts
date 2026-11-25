@@ -118,12 +118,13 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 	// R3: only Codex planners load servers; a hyphenated name loads but picp's hook cannot route its tools (U3).
 	const codexMcp = codexOn ? codexMcpConfig(user, o.env ?? process.env) : undefined;
 	const unusable = (codexMcp?.names ?? []).filter((name) => name.includes("-")).map((name) =>
-		`MCP server ${name} loaded but unusable: the Codex CLI spells - as _ in tool names, so picp refuses its calls (U3)`);
+		`MCP server ${name} loaded but unusable: the Codex CLI spells - as _ in tool names, `
+		+ "so picp refuses its calls (U3)");
 	const codexLines = [...(codexMcp?.skipped ?? []), ...unusable];
 	if (codexLines.length > 0) {
 		const what = `codex planners: ${codexLines.length} MCP server(s) not loaded or unusable`;
-		const fix = "name servers with letters, digits and _ only, and use literal or $VAR values set in the parent's env; "
-			+ "auth is not loaded for the Codex CLI — docs/native-drivers.md C5";
+		const fix = "name servers with letters, digits and _ only, and use literal or $VAR values set in the "
+			+ "parent's env; auth is not loaded for the Codex CLI — docs/native-drivers.md C5";
 		const detail = codexLines.map((line) => scrubMcpText(line, {}, 300)).join("\n");
 		nativeSkips.push(finding("mcp.codex", "warn", what, fix, detail));
 	}

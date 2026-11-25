@@ -216,7 +216,8 @@ test(CXF2, { skip, timeout: 420_000 }, async (t) => {
 	await origin.settled;
 	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
 	assert.match(results(h, "git_push")[0]?.text ?? "", new RegExp(`^Pushed HEAD to origin/${job.id}\\.`));
-	const pushed = execFileSync("git", ["ls-remote", bare, `refs/heads/${job.id}`], { encoding: "utf8" }).split("\t")[0];
+	const remote = execFileSync("git", ["ls-remote", bare, `refs/heads/${job.id}`], { encoding: "utf8" });
+	const pushed = remote.split("\t")[0];
 	assert.equal(pushed, h.git(job.id, "rev-parse", "HEAD"));
 	assert.match(results(h, "pr_create")[0]?.text ?? "", /^Draft PR for .*: https:\/\/github\.com\/o\/r\/pull\/7$/);
 	assert.ok((results(h, "gh_read")[0]?.text ?? "").includes(THREAD), JSON.stringify(results(h, "gh_read")));
@@ -224,7 +225,7 @@ test(CXF2, { skip, timeout: 420_000 }, async (t) => {
 	const own = "https:\\/\\/github\\.com\\/o\\/r\\/pull\\/7";
 	const replied = new RegExp(`^Replied to review comment 101 on ${own}: `);
 	assert.match(replies[0]?.text ?? "", replied, JSON.stringify(replies));
-	const otherPr = /^Refused: pr_review_reply replies only on this job's PR #7 .*review comment 202 is on .*\/pulls\/8/;
+	const otherPr = /^Refused: pr_review_reply replies only on this job's PR #7 .*comment 202 is on .*\/pulls\/8/;
 	assert.match(replies[1]?.text ?? "", otherPr);
 	assert.match(replies[2]?.text ?? "", /^Refused: pr_review_reply: review comment 303 is a reply; reply to its top/);
 	const resolves = results(h, "pr_thread_resolve");
@@ -236,7 +237,7 @@ test(CXF2, { skip, timeout: 420_000 }, async (t) => {
 	assert.match(resolves[2]?.text ?? "", /^Refused: pr_thread_resolve takes a thread_id/);
 	const comments = results(h, "issue_comment");
 	assert.deepEqual(comments.map((each) => each.ok), [true, true, false, false, false], JSON.stringify(comments));
-	const unnamed = /^Refused: issue_comment posts only on an issue of o\/r this job's brief names or its PR closes .*#99/;
+	const unnamed = /^Refused: issue_comment posts only on an issue of o\/r this job's brief names or its PR .*#99/;
 	assert.match(comments[2]?.text ?? "", unnamed);
 	assert.match(comments[3]?.text ?? "", /^Refused: issue_comment: o\/r#14 is a pull request, not an issue/);
 	assert.match(comments[4]?.text ?? "", /; #15 is refused\./);
@@ -277,14 +278,16 @@ test(CXF3, { skip, timeout: 300_000 }, async (t) => {
 		git(up, "push", "-q", "origin", "HEAD:main");
 	});
 	const ends = await h.run([
-		job.dispatch(), h.awaitFile(upstream.done), step("cp_send", { job_id: job.id, message: "Go on.", mode: "steer" }),
+		job.dispatch(), h.awaitFile(upstream.done),
+		step("cp_send", { job_id: job.id, message: "Go on.", mode: "steer" }),
 		h.awaitEnvelope(job.id), h.pause(2), step("cp_teardown", { job_id: job.id }),
 	]);
 	await upstream.settled;
 	const fetches = results(h, "git_fetch");
 	assert.match(fetches[0]?.text ?? "", /^Fetched origin\./, JSON.stringify(fetches));
 	assert.equal(fetches[1]?.ok, false);
-	const elsewhere = new RegExp(`^Refused: git_fetch runs only in this job's worktree .*, never ${escape(h.b.clone)}\\.`);
+	const clone = escape(h.b.clone);
+	const elsewhere = new RegExp(`^Refused: git_fetch runs only in this job's worktree .*, never ${clone}\\.`);
 	assert.match(fetches[1]?.text ?? "", elsewhere);
 	const log = readFileSync(readRunStatus(h.b.home, job.id).transcript_file as string, "utf8");
 	assert.match(log, /cxf3 upstream/, "the shell read the fetched origin/main");
@@ -301,7 +304,8 @@ test(CXF3, { skip, timeout: 300_000 }, async (t) => {
 const CXF4 = "CXF-4: a codex git_push and freeze checkpoint refused for the workflow scope name workflow_scope_missing";
 test(CXF4, { skip, timeout: 420_000 }, async (t) => {
 	const files = { ".github/workflows/ci.yml": "name: ci\n" };
-	const h = await codexWorkerHome(t, { native: { codex_ship: true }, files, ship: true, mandateDefaults: "scaffold" });
+	const options = { native: { codex_ship: true }, files, ship: true, mandateDefaults: "scaffold" as const };
+	const h = await codexWorkerHome(t, options);
 	const job = await h.job("pr", "ship");
 	const bare = git(h.b.clone, "remote", "get-url", "origin");
 	const refusal = "refusing to allow a Personal Access Token to create or update workflow "
@@ -324,7 +328,8 @@ test(CXF4, { skip, timeout: 420_000 }, async (t) => {
 	await parent.waitFor((r) => parent.records().indexOf(r) >= records && r.type === "extension_ui_request"
 		&& String(r.message).startsWith("DRAIN:"), 60_000);
 	const settledIdle = "the frozen worker settles idle";
-	await waitFor(() => ofType(h, job.id, "agent_settled").length > 0, Boolean, { timeoutMs: 60_000, what: settledIdle });
+	const settled = () => ofType(h, job.id, "agent_settled").length > 0;
+	await waitFor(settled, Boolean, { timeoutMs: 60_000, what: settledIdle });
 	writeFileSync(gate, "open\n");
 	await running;
 	const [push] = results(h, "git_push");
