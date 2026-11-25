@@ -140,6 +140,7 @@ test(CXF1, { skip, timeout: 420_000 }, async (t) => {
 	assert.ok((reads[4]?.text ?? "").includes(THREAD), all);
 	const otherOrg = /^Refused: gh_read never searches `org:other`: beyond this job's repo it reads only the repos of/;
 	assert.match(reads[5]?.text ?? "", otherOrg, all);
+	assert.match(reads[5]?.text ?? "", /it reads only the repos of acme/, all);
 	assert.match(reads[6]?.text ?? "", /^Refused: gh_read `api` reads only o\/r/, all);
 	const ungrantedOrg = /^Refused: gh_read never searches `org:acme`: no owner is granted to this job/;
 	for (const control of [reads[7], reads[8]]) assert.match(control?.text ?? "", ungrantedOrg, all);
@@ -227,7 +228,9 @@ test(CXF2, { skip, timeout: 420_000 }, async (t) => {
 	assert.match(replies[0]?.text ?? "", replied, JSON.stringify(replies));
 	const otherPr = /^Refused: pr_review_reply replies only on this job's PR #7 .*comment 202 is on .*\/pulls\/8/;
 	assert.match(replies[1]?.text ?? "", otherPr);
+	assert.match(replies[1]?.text ?? "", /review comment 202 is on .*\/pulls\/8/);
 	assert.match(replies[2]?.text ?? "", /^Refused: pr_review_reply: review comment 303 is a reply; reply to its top/);
+	assert.match(replies[2]?.text ?? "", /reply to its top-level comment 101 instead\./);
 	const resolves = results(h, "pr_thread_resolve");
 	const resolved = new RegExp(`^Resolved review thread PRRT_a on ${own}\\.`);
 	assert.match(resolves[0]?.text ?? "", resolved, JSON.stringify(resolves));
@@ -239,6 +242,7 @@ test(CXF2, { skip, timeout: 420_000 }, async (t) => {
 	assert.deepEqual(comments.map((each) => each.ok), [true, true, false, false, false], JSON.stringify(comments));
 	const unnamed = /^Refused: issue_comment posts only on an issue of o\/r this job's brief names or its PR .*#99/;
 	assert.match(comments[2]?.text ?? "", unnamed);
+	assert.match(comments[2]?.text ?? "", /this job's brief names or its PR closes .*; #99 is refused\./);
 	assert.match(comments[3]?.text ?? "", /^Refused: issue_comment: o\/r#14 is a pull request, not an issue/);
 	assert.match(comments[4]?.text ?? "", /; #15 is refused\./);
 	const calls = gh.calls();
