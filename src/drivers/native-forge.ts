@@ -294,7 +294,8 @@ export async function codexCheckpointCommit(job: ForgeJob, options: CodexCheckpo
 	return { head: head.out, pushed: false, error: workflowScopeRefusal(pushed.out) ?? bounded(pushed.out), ...excluded };
 }
 
-/** The JSON input schemas of the six Codex forge tools, the Claude `zod` shapes' limits. */
+const COMMENT_BODY = { type: "string", minLength: 1, maxLength: BODY_MAX } as const;
+/** The JSON input schemas of the nine Codex forge tools, the Claude `zod` shapes' limits. */
 export const FORGE_INPUT_SCHEMAS = {
 	git_push: { type: "object", properties: { branch: { type: "string" }, force: { type: "boolean" } }, additionalProperties: false },
 	git_fetch: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false },
@@ -309,6 +310,18 @@ export const FORGE_INPUT_SCHEMAS = {
 	},
 	git_commit: { type: "object", properties: { message: { type: "string", minLength: 1, maxLength: COMMIT_MESSAGE_MAX } }, required: ["message"], additionalProperties: false },
 	git_merge: { type: "object", properties: { ref: { type: "string", minLength: 1 } }, required: ["ref"], additionalProperties: false },
+	issue_comment: {
+		type: "object", properties: { issue: { type: "integer", minimum: 1 }, body: COMMENT_BODY },
+		required: ["issue", "body"], additionalProperties: false,
+	},
+	pr_review_reply: {
+		type: "object", properties: { comment_id: { type: "integer", minimum: 1 }, body: COMMENT_BODY },
+		required: ["comment_id", "body"], additionalProperties: false,
+	},
+	pr_thread_resolve: {
+		type: "object", properties: { thread_id: { type: "string", minLength: 1, maxLength: 100 } },
+		required: ["thread_id"], additionalProperties: false,
+	},
 } as const;
 export type ForgeToolName = keyof typeof FORGE_INPUT_SCHEMAS;
 
@@ -316,7 +329,9 @@ export type ForgeToolName = keyof typeof FORGE_INPUT_SCHEMAS;
 export function parseForgeArgs(name: ForgeToolName, value: unknown): Record<string, unknown> | string {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return `Refused: ${name} takes an object of arguments.`;
 	const a = value as Record<string, unknown>;
-	const schema = FORGE_INPUT_SCHEMAS[name] as { properties: Record<string, { type: string; minLength?: number; maxLength?: number }>; required?: readonly string[] };
+	const schema = FORGE_INPUT_SCHEMAS[name] as {
+		properties: Record<string, { type: string; minLength?: number; maxLength?: number; minimum?: number }>; required?: readonly string[];
+	};
 	for (const key of Object.keys(a)) if (!(key in schema.properties)) return `Refused: ${name} \`${key}\` is not a ${name} argument.`;
 	for (const key of schema.required ?? []) if (a[key] === undefined) return `Refused: ${name} needs \`${key}\`.`;
 	for (const [key, rule] of Object.entries(schema.properties)) {
@@ -325,6 +340,7 @@ export function parseForgeArgs(name: ForgeToolName, value: unknown): Record<stri
 		const bad = (why: string) => `Refused: ${name} \`${key}\` ${why}.`;
 		if (rule.type === "boolean" && typeof field !== "boolean") return bad("must be a boolean");
 		if (rule.type === "integer" && (typeof field !== "number" || !Number.isInteger(field))) return bad("must be an integer");
+		if (rule.type === "integer" && (field as number) < (rule.minimum ?? Number.NEGATIVE_INFINITY)) return bad(`must be ≥ ${rule.minimum}`);
 		if (rule.type === "string") {
 			if (typeof field !== "string") return bad("must be a string");
 			if (field.length < (rule.minLength ?? 0) || field.length > (rule.maxLength ?? Number.POSITIVE_INFINITY)) return bad(`must be ${rule.minLength ?? 0}-${rule.maxLength ?? "any"} characters`);

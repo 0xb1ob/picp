@@ -13,6 +13,7 @@ import { type Cmd, extract, lexCommands } from "./claude-bash-lex.ts";
 import { FORGE_TOOL_NAMES } from "./claude-roles.ts";
 import type { DynamicToolSpec, McpElicitationParams } from "./codex-protocol.ts";
 import { FORGE_INPUT_SCHEMAS, type ForgeReply, type ForgeToolName, forgeWrites, gitCommit, gitMerge, parseForgeArgs } from "./native-forge.ts";
+import { commentWrites } from "./native-forge-comments.ts";
 import { capped, type ForgeState, GH_READ_INPUT_SCHEMA, ghRead, parseGhReadArgs, processState } from "./native-gh-read.ts";
 import type { NormalizedCall, SpikeGuard, SpikeJob } from "./native-guards.ts";
 import { PACKET_TOOL_NAMES, packetTools } from "./native-packet-tools.ts";
@@ -204,14 +205,9 @@ function packetDynamicTools(root: string): CodexDynamicTool[] {
 	}));
 }
 
-/**
- * C7a: the implementer's git and forge writes in the worker process with `hostEnv`, git hooks off. `git_push`,
- * `pr_create` and `pr_edit` only for delivery `pr`; commit and merge get a credential-free env.
- */
-function implementerForgeTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv): CodexDynamicTool[] {
-	const writes = forgeWrites(job, hostEnv, { hooksOff: true });
-	const base = hostEnv.CP_BASE_BRANCH?.trim() || "main";
-	const tool = (name: ForgeToolName, description: string, call: (args: Record<string, unknown>) => Promise<ForgeReply>): CodexDynamicTool => ({
+/** A forge write as a dynamic tool: its arguments checked against FORGE_INPUT_SCHEMAS[name], its output capped. */
+function forgeTool(name: ForgeToolName, description: string, call: (args: Record<string, unknown>) => Promise<ForgeReply>): CodexDynamicTool {
+	return {
 		spec: { type: "function", name, description, inputSchema: JSON.parse(JSON.stringify(FORGE_INPUT_SCHEMAS[name])) as unknown },
 		async run(args) {
 			const parsed = parseForgeArgs(name, args);
@@ -219,29 +215,49 @@ function implementerForgeTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv): Codex
 			const done = await call(parsed);
 			return { text: capped(done.text), success: !done.isError };
 		},
-	});
+	};
+}
+
+/**
+ * C7a: the implementer's git and forge writes in the worker process with `hostEnv`, git hooks off. `git_push`,
+ * `pr_create`, `pr_edit`, `pr_review_reply` and `pr_thread_resolve` only for delivery `pr`; commit and merge get a
+ * credential-free env. WP8: `issue_comment` for every delivery.
+ */
+function implementerForgeTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv): CodexDynamicTool[] {
+	const writes = forgeWrites(job, hostEnv, { hooksOff: true });
+	const comments = commentWrites(job, hostEnv);
+	const base = hostEnv.CP_BASE_BRANCH?.trim() || "main";
 	const tools = [
-		tool("git_commit", "Commit every change in this job's worktree: `git add -A`, then `git commit -m <message>`, hooks off. A change to an excluded path is refused and unstaged. The shell cannot write .git.",
+		forgeTool("git_commit", "Commit every change in this job's worktree: `git add -A`, then `git commit -m <message>`, hooks off. A change to an excluded path is refused and unstaged. The shell cannot write .git.",
 			(args) => gitCommit(job, args as { message: string }, { excluded: job.excludePaths ?? [], env: hostEnv, hooksOff: true })),
-		tool("git_merge", `Merge origin/${job.job_id} or origin/${base} into HEAD (git_fetch first). On conflicts fix the files with the shell, then git_commit.`,
+		forgeTool("git_merge", `Merge origin/${job.job_id} or origin/${base} into HEAD (git_fetch first). On conflicts fix the files with the shell, then git_commit.`,
 			(args) => gitMerge(job, args as { ref: string }, { env: hostEnv, hooksOff: true })),
-		tool("git_fetch", writes.descriptions.fetch, (args) => writes.fetch(args)),
+		forgeTool("git_fetch", writes.descriptions.fetch, (args) => writes.fetch(args)),
+		forgeTool("issue_comment", comments.descriptions.issueComment, (args) => comments.issueComment(args as { issue: number; body: string })),
 	];
 	if (job.delivery !== "pr") return tools;
 	return [
 		...tools,
-		tool("git_push", writes.descriptions.push, (args) => writes.push(args)),
-		tool("pr_create", writes.descriptions.prCreate, (args) => writes.prCreate(args as { title: string; body: string })),
-		tool("pr_edit", writes.descriptions.prEdit, (args) => writes.prEdit(args)),
+		forgeTool("git_push", writes.descriptions.push, (args) => writes.push(args)),
+		forgeTool("pr_create", writes.descriptions.prCreate, (args) => writes.prCreate(args as { title: string; body: string })),
+		forgeTool("pr_edit", writes.descriptions.prEdit, (args) => writes.prEdit(args)),
+		forgeTool("pr_review_reply", comments.descriptions.reviewReply, (args) => comments.reviewReply(args as { comment_id: number; body: string })),
+		forgeTool("pr_thread_resolve", comments.descriptions.threadResolve, (args) => comments.threadResolve(args as { thread_id: string })),
 	];
 }
 
-/** Planner: `report_result` and `gh_read` (forge writes off). Reviewer (C6): `report_verdict` and the packet reads.
- * Implementer (C7a): `report_result`, `gh_read` and its git and forge writes. */
+/** WP8 (G4): the planner's `git_fetch` of origin in its own worktree, run in the worker process with `hostEnv`. */
+function plannerForgeTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv): CodexDynamicTool[] {
+	const writes = forgeWrites(job, hostEnv, { hooksOff: true });
+	return [forgeTool("git_fetch", writes.descriptions.fetch, (args) => writes.fetch(args))];
+}
+
+/** Planner: `report_result`, `gh_read` and `git_fetch` (forge writes off). Reviewer (C6): `report_verdict` and the
+ * packet reads. Implementer (C7a): `report_result`, `gh_read` and its git, forge and comment writes. */
 export function codexRoleTools(job: SpikeJob, hostEnv: NodeJS.ProcessEnv, report: CodexReportState, forge: ForgeState = processState): CodexDynamicTool[] {
 	if (job.role === "gate-reviewer") return [verdictTool(job, report), ...packetDynamicTools(job.worktree)];
 	if (job.role === "implementer") return [reportTool(job, report), ghReadTool(job, hostEnv, forge), ...implementerForgeTools(job, hostEnv)];
-	return [reportTool(job, report), ghReadTool(job, hostEnv, forge)];
+	return [reportTool(job, report), ghReadTool(job, hostEnv, forge), ...plannerForgeTools(job, hostEnv)];
 }
 
 const serverOf = (mcp: CodexMcpServers, toolName: string): string | undefined =>

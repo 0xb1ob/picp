@@ -123,11 +123,11 @@ export async function codexSelectionRefusal(input: NativeSelection): Promise<{ c
 
 /** What the Codex model is told after the profile body: its tools, its read-only reach, and how the artifact is written. */
 export const CODEX_ADDENDUM = [
-	"Codex worker: your tools are the Codex shell, gh_read for GitHub reads (never gh in the shell), the MCP servers named",
-	"below if any, and report_result; ignore any other tool names above. The shell reads the worktree, the skill",
-	"directories your brief names and system paths only, has no network, and writes only the artifact directory. Write",
-	"the artifact with a quoted heredoc to the predeclared artifact path (CP_ARTIFACT_PATH). apply_patch, sub-agents and",
-	"web search are refused. Then call report_result once.",
+	"Codex worker: your tools are the Codex shell, gh_read for GitHub reads and git_fetch for origin (never gh or git",
+	"fetch in the shell), the MCP servers named below if any, and report_result; ignore any other tool names above.",
+	"The shell reads the worktree, the skill directories your brief names and system paths only, has no network, and",
+	"writes only the artifact directory. Write the artifact with a quoted heredoc to the predeclared artifact path",
+	"(CP_ARTIFACT_PATH). apply_patch, sub-agents and web search are refused. Then call report_result once.",
 ].join("\n");
 
 /** C6: what a Codex reviewer is told after the profile body: picp's packet reads and the verdict, no shell. */
@@ -139,18 +139,20 @@ export const CODEX_REVIEW_ADDENDUM = [
 ].join("\n");
 
 const SHIP_TOOLS = [
-	"Codex implementer: your tools are the Codex shell, git_commit, git_merge, git_fetch, gh_read (never gh in the shell)",
-	"and report_result; ignore any other tool names above. The shell reads and writes this worktree only (plus the",
-	"system paths and the read roots your brief names); .git and the excluded paths are read-only and there is no",
-	"network. Write files with the shell (a quoted heredoc, sed -i, a script); apply_patch is refused, and a file is",
-	"restored with `git show HEAD:<path> > <path>`. The shell never writes git: git_commit runs `git add -A` and commits",
-	"every change (an excluded path is refused), git_fetch then git_merge {ref: \"origin/<base>\"} brings the base in.",
+	"Codex implementer: your tools are the Codex shell, git_commit, git_merge, git_fetch, gh_read (never gh in the shell),",
+	"issue_comment (on an issue your brief names or your PR closes) and report_result; ignore any other tool names above.",
+	"The shell reads and writes this worktree only (plus the system paths and the read roots your brief names); .git",
+	"and the excluded paths are read-only and there is no network. Write files with the shell (a quoted heredoc, sed -i,",
+	"a script); apply_patch is refused, and a file is restored with `git show HEAD:<path> > <path>`. The shell never",
+	"writes git: git_commit runs `git add -A` and commits every change (an excluded path is refused), git_fetch then",
+	"git_merge {ref: \"origin/<base>\"} brings the base in.",
 ];
 /** C7b: what a Codex ship implementer (delivery pr) is told after the profile body. */
 export const CODEX_SHIP_ADDENDUM = [
 	...SHIP_TOOLS,
 	"Then git_push (HEAD to origin/<job>, never forced), pr_create once for the draft PR, and report_result once with",
-	"head_sha. Sub-agents and web search are refused.",
+	"head_sha. pr_review_reply and pr_thread_resolve act on this job's PR only (thread and comment ids from gh_read",
+	"`pr threads`). Sub-agents and web search are refused.",
 ].join("\n");
 /** C7b: delivery local has no push or PR: git_commit is the delivery. */
 export const CODEX_LOCAL_SHIP_ADDENDUM = [

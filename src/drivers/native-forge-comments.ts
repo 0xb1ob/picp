@@ -1,5 +1,5 @@
 /**
- * WP8 (G2/G3): a native implementer's comment writes, Claude-only and SDK-free: `issue_comment`, `pr_review_reply`
+ * WP8 (G2/G3): comment writes for the Claude and Codex implementers, SDK-free: `issue_comment`, `pr_review_reply`
  * and `pr_thread_resolve`. Each reads ownership (origin repo, own PR or named issue) before it writes; gh runs in the
  * worker process with GH_REPO pinned to the GitHub origin, so no credential enters the CLI child.
  */

@@ -102,7 +102,9 @@ test("CX-7a: a codex ship job commits, pushes only its branch, opens a draft PR,
 	// R3: no MCP server; the ship tools on thread/start.
 	const threads = fakeThreads(h.state);
 	assert.ok(threads.length > 0 && threads.every((each) => each.mcpServers.length === 0), JSON.stringify(threads));
-	assert.deepEqual(threads[0]?.dynamicTools, ["gh_read", "git_commit", "git_fetch", "git_merge", "git_push", "pr_create", "pr_edit", "report_result"]);
+	assert.deepEqual(threads[0]?.dynamicTools, [
+		"gh_read", "git_commit", "git_fetch", "git_merge", "git_push", "issue_comment", "pr_create", "pr_edit", "pr_review_reply", "pr_thread_resolve", "report_result",
+	]);
 	const [run] = await h.runs(job.id);
 	assert.deepEqual([run?.lockdown, run?.bypass, run?.cost_unknown, run?.report], ["ok", undefined, true, true], JSON.stringify(run));
 	assert.equal(readRunStatus(h.b.home, job.id).usage.cost_usd, 0);
@@ -499,7 +501,7 @@ test("CX-7j: a local codex ship job has no git_push: origin unchanged, head_sha 
 	assert.deepEqual(h.originRefs(), before, "origin unchanged");
 	assert.equal(envelope(h, job.id).head_sha, h.git(job.id, "rev-parse", "HEAD"));
 	assert.equal(h.git(job.id, "log", "-1", "--format=%s"), "local");
-	assert.deepEqual(fakeThreads(h.state)[0]?.dynamicTools, ["gh_read", "git_commit", "git_fetch", "git_merge", "report_result"]);
+	assert.deepEqual(fakeThreads(h.state)[0]?.dynamicTools, ["gh_read", "git_commit", "git_fetch", "git_merge", "issue_comment", "report_result"]);
 	assert.match(readFileSync(join(h.b.home, paths.runDir(job.id), "codex-system-prompt.md"), "utf8"), new RegExp(CODEX_LOCAL_SHIP_ADDENDUM.split("\n").at(-2)!.slice(0, 50)));
 	assertClean(h);
 });
