@@ -1358,7 +1358,7 @@ test("P13c native policy and run options: add saves a report-only revision 1 or 
 	assertCall(results, "pipe", "refused", /\/limits\/child_jobs: a pipeline admits its anchor and its ship \(at least 2\)/);
 	assertCall(results, "broken", "refused", /schedule-policies\.json is not valid JSON \(EISDIR/);
 	assertCall(results, "fixed", "ok", /added sch-[0-9a-f]{6} broken/);
-	assertCall(results, "huge", "refused", /overrides\.parallelism: must be <= 32/);
+	assertCall(results, "huge", "refused", /overrides\.parallelism: expected <= 32/);
 	assertCall(results, "script-model", "ok", /run now not recorded: a script_path recipe runs no model: model and thinking overrides are refused/);
 	// R1 PR2: an unrouted run override is refused before any run or job exists ("refused run_now calls start no run").
 	assertCall(results, "unrouted", "ok", /run now not recorded: run override model names mock\/unrouted, which data\/routing\.json does not route/);

@@ -218,11 +218,11 @@ test("chat-routing: cp_job create, cp_pipeline start and cp_ask create jobs with
 	await child.prompt("Take the requests.");
 	await child.waitFor(() => child.eventsOfType("agent_settled").length >= 1, 120_000);
 
-	assert.match(toolResult(child, "stale"), /source_send_id[\s\S]*must not have additional properties/, "cp_job's closed schema refuses it");
+	assert.match(toolResult(child, "stale"), /source_send_id: unknown field/, "cp_job's closed schema refuses it");
 	// cp_pipeline and cp_ask schemas are open: a stale source_send_id is ignored, never resolved into an origin.
 	for (const id of ["stale-pipeline", "stale-ask"]) {
 		const reply = toolResult(child, id);
-		assert.ok(/must not have additional properties/.test(reply) || !/source_send_id|origin/.test(reply), `${id}: ${reply}`);
+		assert.ok(/unknown field/.test(reply) || !/source_send_id|origin/.test(reply), `${id}: ${reply}`);
 	}
 	assert.match(toolResult(child, "job"), /created cp-/, `cp_job create: ${toolResult(child, "job")}`);
 	const jobs = readJobsDocument(home.path).jobs;

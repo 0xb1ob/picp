@@ -3,7 +3,7 @@
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import { existsSync } from "node:fs";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../../src/contracts/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { formatMemoryStatus } from "../../src/memory.ts";

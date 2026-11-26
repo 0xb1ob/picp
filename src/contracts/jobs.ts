@@ -1,6 +1,6 @@
 /** The jobs ledger — <home>/.pi-command-post/jobs.json. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { ContractError, DELIVERIES, IsoTimestampSchema, isSafeProjectName, JOB_KINDS, JobIdSchema, LEDGER_PREFIX_PATTERN, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
 import { RISKS } from "./routing.ts";

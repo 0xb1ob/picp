@@ -1,6 +1,6 @@
 /** Contract primitives: path-safe ids, timestamps, job kind/delivery, roles, usage, validate(). Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 

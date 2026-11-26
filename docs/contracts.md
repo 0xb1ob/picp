@@ -1694,8 +1694,10 @@ somewhere (ticket scope, not a gap).
 **Operator idle cache warming** (`src/operator-cache-warming.ts`, cp-c1ur N8). The bridge's `cache_warming_decision`
 handler answers `warm` whenever one avoided cache miss pays for the refresh (`missCost > warmCost`), overriding pi's
 idle estimate, and otherwise leaves pi's decision. pi fires the event between turns only under the global
-`cacheWarming: "idle"` setting (default `"streaming"` stops at settle) and ends idle warming 30 minutes after the last
-request; choosing that setting is the human's, since it is machine-wide.
+`cacheWarming: "idle"` setting (`"streaming"` stops at settle) and ends idle warming 30 minutes after the last
+request; choosing that setting is the human's, since it is machine-wide. Since pi 1.5.1 `"idle"` is the default, so
+a host upgrade to pi 1.5.1 or later turns idle warming on machine-wide unless `~/.pi/agent/settings.json` pins
+`"cacheWarming": "streaming"`.
 
 ### Reconcile
 

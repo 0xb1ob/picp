@@ -8,7 +8,7 @@
  * tests/e2e/configuration.test.ts (P16-settings-read).
  */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, type TSchema, Type } from "typebox";
 import { IsoTimestampSchema, type ValidationResult, validate } from "./core.ts";
 import { DEFAULT_BUDGET_CONFIG, DEFAULT_JOB_TOOL_CALL_CAP, DEFAULT_JOB_WALL_CLOCK_SECONDS } from "./limits.ts";

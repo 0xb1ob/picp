@@ -2,7 +2,7 @@
  * The identifier-only reference an operator question may carry: a job, one review attempt, one finding inside it,
  * or the CI observations of one head (one run when its id was recorded). Pure: no filesystem, no policy.
  */
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./contracts/string-enum.ts";
 import { type Static, Type } from "typebox";
 import { isSafeJobId, isSafeProjectName, JOB_ID_PATTERN, PROJECT_NAME_PATTERN, REVIEW_MAX_ATTEMPTS } from "./contracts.ts";
 import { FLAG_ORDER } from "./evidence-reference-label.ts";

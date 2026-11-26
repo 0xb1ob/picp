@@ -2,7 +2,7 @@
  * cp_teardown, cp_merged, cp_integrate and cp_artifact.
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../../src/contracts/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { formatMerge } from "../../src/merges.ts";

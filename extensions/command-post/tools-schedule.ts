@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../../src/contracts/string-enum.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { PolicyAction } from "../../src/schedule-run-fire.ts";
 import { Type } from "typebox";

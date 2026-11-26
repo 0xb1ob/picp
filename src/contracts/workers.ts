@@ -1,6 +1,6 @@
 /** Worker profiles and the spawn/trust policy (forbidden tools and flags, receipts). Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { type Role, RoleSchema, validate, type ValidationResult } from "./core.ts";
 import { type ThinkingLevel, ThinkingLevelSchema } from "./routing.ts";

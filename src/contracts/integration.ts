@@ -1,6 +1,6 @@
 /** Merge receipts, merge authority, integration records and the CI/PR watch. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
 import type { Narrow, Replace } from "./internal.ts";

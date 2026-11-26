@@ -1,6 +1,6 @@
 /** The project registry — data/projects.json. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { type Delivery, DeliverySchema, IsoTimestampSchema, PROJECT_NAME_PATTERN, validate, type ValidationResult } from "./core.ts";
 import { type MandateAction, MandateActionSchema, type MandateAskOn, MandateAskOnSchema } from "./mandates.ts";

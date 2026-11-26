@@ -1,6 +1,6 @@
 /** Fleet state — state/fleet.json (single writer: the parent extension). Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { type Delivery, DeliverySchema, IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema, normalizeLegacyRoles, OriginSchema, type Role, RoleSchema, SCHEMA_VERSION, SkillNameSchema, UsageSchema, validate, type ValidationResult } from "./core.ts";
 import { isSafeScriptPath } from "./jobs.ts";

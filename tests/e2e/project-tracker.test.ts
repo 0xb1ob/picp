@@ -213,10 +213,16 @@ test("P15-jobs-lifecycle: cp_job records, queries, gates and closes jobs, and /c
 	failed(ends, "no-project", /needs `project`/);
 	failed(ends, "pipeline", /cp_pipeline start/);
 	failed(ends, "answer", /cp_ask/);
-	for (const call of ["retired-type", "retired-priority", "unnamed"]) failed(ends, call, /must not have additional properties/);
+	for (const call of ["retired-type", "retired-priority", "unnamed"]) failed(ends, call, /unknown field/);
 	const actions = s.requests()[0]?.body.tools?.map((tool) => tool as { function?: { name?: string; parameters?: { properties?: { action?: { enum?: string[] } } } } })
 		.find((tool) => tool.function?.name === "cp_job")?.function?.parameters?.properties?.action?.enum;
 	assert.deepEqual(actions, ["create", "show", "list", "history", "ready", "blocked", "claim", "update", "comment", "amend", "dep_add", "dep_remove", "close", "drop"]);
+	// Qualify pi 1.6.1 (B1): the local StringEnum emits, byte for byte, what pi-ai's did on pi 1.4.0.
+	type Offered = { function?: { name?: string; parameters?: { properties?: Record<string, unknown> } } };
+	const tools = s.requests()[0]?.body.tools as Offered[] | undefined;
+	const kind = tools?.find((tool) => tool.function?.name === "cp_job")?.function?.parameters?.properties?.kind;
+	const pinned = '{"type":"string","enum":["ship","research"],"description":"create: ship|research; list: filter"}';
+	assert.equal(JSON.stringify(kind), pinned);
 
 	const fresh = notes.slice(-8);
 	const line = (job: Job) => new RegExp(`^${job.id}\\s+\\S+\\s+\\S+\\s+\\S+\\s+${job.title}$`, "m");
@@ -411,7 +417,7 @@ test("P15-jobs-refusals: cp_job refuses bad intake, guards live workers and unre
 	for (const call of ["risk-same", "risk-plain"]) assert.deepEqual([jobOf(ends, call).id, details(ends, call).existing], [risky.id, true], call);
 	failed(ends, "risk-second", /risk:/);
 	failed(ends, "risk-bogus", /risk:bogus is not one of/);
-	failed(ends, "risk-medium", /must be equal to one of the allowed values/);
+	failed(ends, "risk-medium", /risk: expected one of \["low","high"\]/);
 	failed(ends, "risk-edit", /job carries 2 risk: labels \(low, bogus\); exactly one is allowed/);
 
 	assert.deepEqual(jobOf(ends, "run").script, { path: "scripts/run.sh" });
@@ -432,7 +438,7 @@ test("P15-jobs-refusals: cp_job refuses bad intake, guards live workers and unre
 	failed(ends, "unknown-project", /unknown project "unknown" — register it first; known: demo, alpha/);
 	for (const call of ["blank-ref", "two-line-ref"]) failed(ends, call, /external ref must be one non-empty line/);
 	failed(ends, "comma-label", /may not contain a comma/);
-	for (const call of ["fax", "vibes"]) failed(ends, call, /must be equal to one of the allowed values/);
+	for (const call of ["fax", "vibes"]) failed(ends, call, /expected one of/);
 	ok(ends, "archive", /alpha archived/);
 	failed(ends, "archived", /project "alpha" is archived.*cp_project unarchive/);
 	const shared = jobOf(ends, "shared");
@@ -916,7 +922,7 @@ test("P15-projects: cp_project registers, clones, detects who merges, reads CI r
 	failed(ends, "web-other-name", /already registered as "web"/);
 	for (const index of [0, 1, 2, 3]) failed(ends, `bad-name ${index}`, /^invalid project name ".*": must match /);
 	failed(ends, "blank-name", /^cp_project add needs a name$/);
-	failed(ends, "bad-delivery", /delivery: must be equal to one of the allowed values/);
+	failed(ends, "bad-delivery", /delivery: expected one of \["pr","local"\]/);
 	// A clone already in place matches its origin without the .git suffix or with a trailing slash; a foreign one fails.
 	for (const call of ["bare", "slashy"]) ok(ends, call, /\(already present\)/);
 	const local = ok(ends, "lcl", /lcl ready \(delivery:local\)/);
@@ -993,7 +999,7 @@ test("P15-projects: cp_project registers, clones, detects who merges, reads CI r
 	assert.match(text(ends, "handoff-list"), /web {2}delivery:pr merge:human_handoff/);
 	ok(ends, "repo", /web merge_policy: repo/);
 	failed(ends, "policy-missing", /needs a policy/);
-	failed(ends, "policy-junk", /must be equal to one of the allowed values/);
+	failed(ends, "policy-junk", /expected one of/);
 	failed(ends, "policy-ghost", /unknown project "ghost"/);
 	ok(ends, "archive", /lcl archived/);
 	assert.match(text(ends, "archived-list"), /lcl \[archived\]/);

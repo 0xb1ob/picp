@@ -1,6 +1,6 @@
 /** Checkpoints and escalations — the two ways a decision reaches a human. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JOB_ID_PATTERN, JobIdSchema, PROJECT_NAME_PATTERN, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
 import { DecisionSummarySchema, PlanSummarySchema } from "./envelope.ts";

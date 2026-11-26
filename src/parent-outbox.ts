@@ -11,7 +11,7 @@
  * Pier's outbox (proof of delivery, attempt ceiling, explicit undeliverable, a
  * batch as one follow-up); no Pier code.
  */
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./contracts/string-enum.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
