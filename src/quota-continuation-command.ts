@@ -3,7 +3,7 @@
  * quota continuation. Runs in the parent process, so a cancel serializes with the due pass; it never sends anything.
  */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./contracts/string-enum.ts";
 import { type Static, Type } from "typebox";
 import { JobIdSchema } from "./contracts.ts";
 import type { QuotaContinuation, QuotaIntent } from "./quota-continuation.ts";

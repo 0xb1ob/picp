@@ -1,6 +1,6 @@
 /** Durable wake-ups: answered decisions, death/bound/recovery outboxes, answer cards. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
 import { SUMMARY_MAX_CHARS } from "./envelope.ts";

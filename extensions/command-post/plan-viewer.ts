@@ -42,7 +42,7 @@ export interface OpenPlanViewerDeps {
 	/** Reads the target's bytes, capped. Never called outside the TUI gate. */
 	readSource(target: PlanTarget): { text: string; bytes: number; truncated: boolean };
 	/** Markdown render, memoized by the caller's choice of theme/width. */
-	renderLines(text: string, width: number): string[];
+	renderLines(text: string, width: number): readonly string[];
 	/**
 	 * Viewport body rows. Optional: when absent, `openPlanViewer` computes it
 	 * from the real terminal the `ctx.ui.custom` factory hands it, via
@@ -130,7 +130,7 @@ export interface PlanViewerOptions {
 	bytes: number;
 	truncated: boolean;
 	text: string;
-	renderLines: (text: string, width: number) => string[];
+	renderLines: (text: string, width: number) => readonly string[];
 	/** Viewport body rows; recomputed by the caller on every render (resize-safe). */
 	rows: () => number;
 	now?: () => number;
@@ -210,14 +210,14 @@ export class PlanViewer {
 	readonly #truncated: boolean;
 	readonly #path: string;
 	readonly #text: string;
-	readonly #renderLines: (text: string, width: number) => string[];
+	readonly #renderLines: (text: string, width: number) => readonly string[];
 	readonly #rows: () => number;
 	readonly #onDone: () => void;
 	readonly #onChange: () => void;
 	readonly #scheduleIdle: (ms: number, onTimeout: () => void) => { cancel: () => void };
 	readonly #idleTimeoutMs: number;
 
-	#cache: { width: number; lines: string[] } | undefined;
+	#cache: { width: number; lines: readonly string[] } | undefined;
 	#offset = 0;
 	#searching = false;
 	#query = "";
@@ -252,7 +252,7 @@ export class PlanViewer {
 		this.#onDone();
 	}
 
-	#linesFor(width: number): string[] {
+	#linesFor(width: number): readonly string[] {
 		if (!this.#cache || this.#cache.width !== width) {
 			this.#cache = { width, lines: this.#renderLines(this.#text, width) };
 			this.#matches = findMatches(this.#cache.lines, this.#query);

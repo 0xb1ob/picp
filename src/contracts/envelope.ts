@@ -1,6 +1,6 @@
 /** The `report_result` envelope (worker → parent), the planner artifact sections and envelope validation. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { type Delivery, isInside, IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema, validate, type ValidationResult } from "./core.ts";
 import type { Replace } from "./internal.ts";

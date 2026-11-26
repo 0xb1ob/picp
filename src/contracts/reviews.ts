@@ -1,6 +1,6 @@
 /** Reviews and gates: plan gate verdicts, diff review, the quality pass, gate config and pending reviews. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
 import { DecisionSummarySchema } from "./envelope.ts";

@@ -1,6 +1,6 @@
 /** Run artifacts — state/runs/<job-id>/{events.jsonl,status.json}. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, normalizeLegacyRoles, UsageSchema, validate, type ValidationResult } from "./core.ts";
 import { type Failure, FailureSchema } from "./limits.ts";

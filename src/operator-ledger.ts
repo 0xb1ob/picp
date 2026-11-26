@@ -2,7 +2,7 @@
  * `cp_parent jobs`: the operator session's direct, read-only ledger query (list/history/show). It reads the selected
  * home's files only; it never starts or attaches a parent and holds no fleet or ledger writer.
  */
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./contracts/string-enum.ts";
 import { type Static, Type } from "typebox";
 import { configureLayout, type Mode } from "./contracts.ts";
 import { formatHistory, historyDetails, queryJobs } from "./job-history.ts";

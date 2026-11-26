@@ -1,6 +1,6 @@
 /** Pipeline records (research → gate → implement). Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { type Delivery, DeliverySchema, IsoTimestampSchema, JobIdSchema } from "./core.ts";
 import { type JobRouting, JobRoutingSchema } from "./routing.ts";

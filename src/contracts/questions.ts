@@ -1,6 +1,6 @@
 /** Operator questions (T31) and the plan-review answer codec. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, normalizeLegacyRoles, type Role, RoleSchema, validate, type ValidationResult } from "./core.ts";
 import type { Narrow } from "./internal.ts";
