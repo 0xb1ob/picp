@@ -20,6 +20,10 @@ export const navigation = [
 ] as const;
 /** The README's "Words you will see" table: the one glossary that decision cards and Overview rows link to. */
 export const GLOSSARY_HREF = "https://github.com/0xb1ob/picp#words-you-will-see";
+/** A board link made absolute on the Boards public URL leaves the dashboard: a new tab. A relative one stays put. */
+export const newTab = (href: string): {target?: "_blank"; rel?: string} =>
+ /^https?:\/\/[^/?#]+(?:\/[^?#]*)?\/boards\/[A-Za-z0-9][A-Za-z0-9_-]*\//i.test(href)
+  ? {target:"_blank", rel:"noopener noreferrer"} : {};
 export type NavId = typeof navigation[number]["id"];
 /** The sidebar (desktop) and the tab bar (phone): the same three items on both widths. */
 export const primaryNav: readonly NavId[] = ["sessions","jobs","more"];

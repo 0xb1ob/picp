@@ -3,6 +3,7 @@ import type { Ask, AwaitingDetail, AwaitingResponse, DecidedResponse, DecisionSc
 import { listBoards } from "./boards.ts";
 import { listOrRead, roots, resolveRootId } from "./explorer.ts";
 import { dashboard } from "./fleet-view.ts";
+import { boardsHref } from "./host-config.ts";
 import { jobArtifact, jobsView } from "./jobs-view.ts";
 import { decisions } from "./overview-decisions.ts";
 import { nonnegative, objectList, text, timestamp } from "./overview-read.ts";
@@ -37,7 +38,9 @@ function runUnderState(state: ViewerState, path: string): string | undefined {
 /** One evidence path as a viewer link: a report, a job's run (its artifact to read), or a file under a Files root. */
 export function evidenceLink(state: ViewerState, path: string, project: string, boards: () => string[]): AwaitingDetail["evidence"][number] {
  const board = /(?:^|\/)boards\/([A-Za-z0-9][A-Za-z0-9_-]*)(?:\/|$)/.exec(path)?.[1];
- if (board && boards().includes(board)) return {path, href:"#reports", read:`/boards/${board}/`};
+ if (board && boards().includes(board)) {
+  return {path, href:"#reports", read:boardsHref(state.stateDir)(`/boards/${board}/`)};
+ }
  const run = runUnderState(state, path);
  if (run) return {path, href:`#job/${encodeURIComponent(run)}`, read:jobArtifact(state,run)?.href ?? null};
  for (const root of roots(state)) {

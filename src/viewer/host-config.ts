@@ -74,3 +74,9 @@ export function publicUrl(stateDir: string): string | undefined {
 export function boardsPublicUrl(stateDir: string): string | undefined {
 	return linkBase(stateDir, "boards_public_url");
 }
+
+/** The dashboard's board links (`/boards/<slug>/…`): on `boards_public_url` when set and valid, else relative. */
+export function boardsHref(stateDir: string): (path: string) => string {
+	const base = boardsPublicUrl(stateDir);
+	return (path) => (base ? `${base}${path}` : path);
+}
