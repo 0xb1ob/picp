@@ -313,8 +313,8 @@ export interface DispatchRequest extends PickRequest {
 	/** cp-wlhu S5: the foreign-CI line `CommandPost.dispatch`'s reviewer gate computed; snapshotted into the brief, never stored. */ foreignCi?: string;
 	/** Installed skill names the operator mentioned for THIS worker (src/job-skills.ts); never paths. */
 	skills?: string[];
-	/** Bind to an existing PR (cp_dispatch pr, picp-d0p): a number or url; ship/pr jobs only. */
-	pr?: string;
+	/** Bind to an existing PR (cp_dispatch pr, picp-d0p): a number or url; ship/pr jobs only. */ pr?: string;
+	/** A dispatch-queue replay's entry time, kept on the fleet record as `queued_at`. */ queuedAt?: string;
 }
 export interface DispatchResult {
 	job_id: string;
@@ -811,7 +811,7 @@ export class Dispatcher {
 				...scheduleRecord(issue.labels),
 				branch,
 				...(bound ? { bound_pr: { number: bound.number, url: bound.url, base: bound.base } } : {}),
-				dispatched_at: isoTimestamp(now()),
+				dispatched_at: isoTimestamp(now()), ...(request.queuedAt ? { queued_at: request.queuedAt } : {}),
 				usage: EMPTY_USAGE,
 				budget: managed.plan.budget,
 				bounds: hardBounds,

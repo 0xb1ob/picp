@@ -10,7 +10,7 @@ import { type ResolvedAwaitingItem } from "../../src/awaiting.ts";
 import { CommandPost, type CommandPostOptions } from "../../src/command-post.ts";
 import { type OperatorModelPickReference, PLAN_VIEW_MAX_BYTES, type Runtime, type ThinkingLevel } from "../../src/contracts.ts";
 import { formatDispatchResult } from "../../src/dispatch.ts";
-import { waitingLabel } from "../../src/dispatch-queue.ts";
+import { waitingDriver, waitingLabel } from "../../src/dispatch-queue.ts";
 import { checkStoredPick } from "../../src/reroute.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { formatIntake, type IntakeResult } from "../../src/intake.ts";
@@ -459,7 +459,7 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 					...(request.model ? { model: request.model } : {}),
 					...(request.thinking ? { thinking: request.thinking } : {}),
 					...(request.operatorQuote ? { operator_quote: request.operatorQuote } : {}),
-				});
+				}, waitingDriver(error));
 			} catch (queueError) {
 				(error as Error).message += ` (not queued: ${(queueError as Error).message.split("\n")[0]})`;
 				throw error;

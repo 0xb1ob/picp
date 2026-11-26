@@ -83,7 +83,7 @@ import { raisePlanApproval } from "./escalation.ts";
 import { authorityHold } from "./authority-hold.ts";
 import type { Dispatcher, DispatchResult } from "./dispatch.ts";
 import { UpdateHoldError } from "./update-hold.ts";
-import { waitingLabel } from "./dispatch-queue.ts";
+import { waitingDriver, waitingLabel } from "./dispatch-queue.ts";
 import type { QuestionStore } from "./questions.ts";
 import { ReviewApprovalStore } from "./review-approval.ts";
 import { resolveFinalFix } from "./final-fix.ts";
@@ -700,7 +700,7 @@ export interface PipelineOptions {
 	/** cp-912x R1: an advance a full CLI refused waits for that CLI (NativeWaitQueue); returns its position. */
 	waitNative?: (researchId: string, error: unknown, implementerModel?: string | null) => { position: number; text: string } | undefined;
 	/** cp-912x R2: a planner a full CLI refused waits in the dispatch queue (DispatchQueue.enqueue). */
-	enqueue?: (jobId: string, request: QueuedDispatchRequest) => number;
+	enqueue?: (jobId: string, request: QueuedDispatchRequest, driver?: "claude" | "codex") => number;
 }
 
 export interface StartRequest {
@@ -946,7 +946,8 @@ export class PipelineRunner {
 			if (waiting === undefined || !this.#options.enqueue) throw error;
 			// A full CLI never moves the planner: it waits as a new job in the dispatch queue, on the same CLI.
 			const position = this.#options.enqueue(research.id, { ...planner, ...(request.fetch === false ? { fetch: false as const } : {}),
-				...(request.wallClockSeconds !== undefined ? { wall_clock_seconds: request.wallClockSeconds } : {}) });
+				...(request.wallClockSeconds !== undefined ? { wall_clock_seconds: request.wallClockSeconds } : {}) },
+				waitingDriver(error));
 			return { research_id: research.id, ship_id: ship.id, record, queued: { position, waiting } };
 		}
 		return { research_id: research.id, ship_id: ship.id, record, dispatch };

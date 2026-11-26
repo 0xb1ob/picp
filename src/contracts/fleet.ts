@@ -233,6 +233,8 @@ export const FleetRecordSchema = Type.Object(
 			),
 		),
 		dispatched_at: IsoTimestampSchema,
+		/** When a queued dispatch entered `state/dispatch-queue.json`: the Jobs detail's "waited" counts from it. */
+		queued_at: Type.Optional(IsoTimestampSchema),
 		/**
 		 * When the CURRENT envelope generation was accepted. Stamped once per
 		 * generation, and cleared when a promote reopens the slot (see

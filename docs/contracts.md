@@ -2318,7 +2318,10 @@ Other spawn-time policy, all fail-closed:
   (`QUEUED DISPATCH STARTED`/`DROPPED`); a drain that throws keeps every
   entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause. Only STARTED carries
   the job as a candidate key, so a DROPPED notice is never superseded for lacking a
-  fleet record.
+  fleet record. An entry a full CLI parked records `waiting_driver`; a started entry's
+  `queued_at` is kept on its fleet record, so the Jobs detail can say how long it waited.
+  Why a job waits is read in one place, `src/viewer/queue-wait.ts`, for the Jobs page,
+  `cp_next` and `cp_status_block`.
 - **Native wait queue (cp-7qic R6).** A review, gate (a recovery gate included), quality panel start, confirmed
   revive, bounded-recovery revive, plain send or pipeline advance that a full CLI refuses `occupied` is appended to
   `state/native-wait.json` (`src/native-wait-queue.ts`, at most `NATIVE_WAIT_MAX` = 32, one entry per kind and job; a repeat returns the same

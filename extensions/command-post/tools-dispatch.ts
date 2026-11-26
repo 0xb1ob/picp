@@ -8,7 +8,7 @@ import { Type } from "typebox";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { OperatorModelPickReferenceSchema, type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, SkillNameSchema, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
 import { BlockedDispatchError, formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
-import { nativeOccupied, waitingLabel } from "../../src/dispatch-queue.ts";
+import { nativeOccupied, waitingDriver, waitingLabel } from "../../src/dispatch-queue.ts";
 import { checkStoredPick } from "../../src/reroute.ts";
 import { formatAskDispatch } from "./session-post.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
@@ -267,7 +267,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				let position: number;
 				try {
 					checkStoredPick(post.home, params.job_id, params.model, params.operator_quote, params.driver as "pi" | "claude" | "codex" | undefined);
-					position = post.dispatchQueue.enqueue(params.job_id, request as QueuedDispatchRequest);
+					position = post.dispatchQueue.enqueue(params.job_id, request as QueuedDispatchRequest, waitingDriver(error));
 				} catch (queueError) {
 					// Today's refusal stands; the queue failure is named on it.
 					(error as Error).message += ` (not queued: ${(queueError as Error).message.split("\n")[0]})`;

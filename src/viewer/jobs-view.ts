@@ -21,6 +21,7 @@ import { deployView } from "./deploy-view.ts";
 import { jobReference, reviewFindings, rowReference } from "./evidence-timeline.ts";
 import { type CiSeen, reviewGuide } from "./review-guide.ts";
 import { quotaView } from "./quota-view.ts";
+import { queueWaited, queueWaits } from "./queue-wait.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
@@ -69,7 +70,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
  const watched=readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
  const ciRows=Array.isArray(watched) ? watched.map(obj) : [];
  const ids=[...new Set([...ledger.map(j=>String(j.id)),...fleet.map(j=>String(j.job_id))])];
- const fleetById=firstById(fleet,"job_id"); const ledgerById=firstById(ledger,"id");
+ const fleetById=firstById(fleet,"job_id"); const ledgerById=firstById(ledger,"id"); const waits=queueWaits(state,now);
  const jobs:ViewerJob[]=ids.map(id=>{
   const entry=fleetById.get(id); const job=ledgerById.get(id);
   const detail=rows.get(id); const live=base.in_flight.find(j=>j.id===id);
@@ -104,6 +105,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
    summary:(()=>{const line=str(envelope?.summary)?.split("\n").find(l=>l.trim())?.trim();return line ? line.length>80 ? `${line.slice(0,79)}…` : line : null;})(),
    blockers:base.blocked.items.find(j=>j.id===id)?.blockers.map(b=>b.id) ?? [],context:entry ? workerContext(state,id,detail?.model,windows) : null,
    ...(skills.length ? {skills} : {}),
+   queue_wait:waits.get(id) ?? null,waited:phase==="queued" ? null : queueWaited(job,entry),
    ...(parked ? {parked_pending:str(obj(parked.pending)?.kind) ?? null,handed_at:timestamp(parked.handed_at) ? parked.handed_at : null} : {})};
  });
  return {generated_at:base.generated_at,awaiting_count:base.awaiting.count,jobs,
