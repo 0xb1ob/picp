@@ -7,6 +7,7 @@ import type { ProjectSelection } from "../project-filter.ts";
 import { sessionHref } from "../routes.ts";
 import { contextText } from "./ContextChip.tsx";
 import { Icon } from "./icons.tsx";
+import { RoleBadge } from "./JobSignals.tsx";
 import { AnswerLine, type Answering, answerView } from "./Answering.tsx";
 import { OtherAnswer } from "./OtherAnswer.tsx";
 
@@ -84,6 +85,7 @@ function Body({asks, live, selection, control, answering, jobs, jobsError, curre
      <dl>
       <dt>Wall clock</dt><dd><Clock job={job}/></dd>
       <dt>Project</dt><dd>{w.project ?? "untagged"}</dd>
+      <dt>Role</dt><dd><RoleBadge role={w.worker_role}/></dd>
       <dt>Context</dt><dd>{w.context ? contextText(w.context) : job?.context ? contextText(job.context) : NONE}</dd>
       <dt>Model</dt><dd>{modelText({model: w.context?.model ?? w.model ?? job?.model ?? null, thinking: w.thinking})}</dd>
       <dt>Cost</dt><dd>{cost === null ? NONE : money(cost)}</dd>

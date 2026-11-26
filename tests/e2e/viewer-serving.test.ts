@@ -886,6 +886,6 @@ test("P21-render-css: the served stylesheet ellipsizes long one-line cells, grid
 	assert.ok(wide, "wide flight grid");
 	const tracks = wide[2]!.trim().split(" "), fixed = [...wide[2]!.matchAll(/(\d+)px/g)].map((m) => +m[1]!);
 	const title = (width: number) => width - 208 - 64 - fixed.reduce((a, b) => a + b, 0) - 7 * +wide[3]!;
-	assert.ok(tracks.length === 8 && title(+wide[1]!) >= 240 && title(+wide[1]!) >= 1.5 * fixed[0]!, `Title ${title(+wide[1]!)}px at ${wide[1]}px`);
-	assert.ok(title(1440) >= 45 * 7 && +wide[1]! <= 1200, `Title ${title(1440)}px at 1440 fits 45 characters; 8 columns by 1200 px`);
+	assert.ok(tracks.length === 9 && title(+wide[1]!) >= 240 && title(+wide[1]!) >= 1.5 * fixed[0]!, `Title ${title(+wide[1]!)}px at ${wide[1]}px`);
+	assert.ok(title(1440) >= 45 * 7 && +wide[1]! <= 1200, `Title ${title(1440)}px at 1440 fits 45 characters; 9 columns by 1200 px`);
 });

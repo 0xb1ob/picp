@@ -9,21 +9,24 @@ import { JobsViews } from "../components/JobsViews.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { WaitingFor, WaitReason } from "../components/QueueWait.tsx";
 import "./jobs.css";
-import { CiSignal, DriverBadge, ModelName, PhaseDot, reviewText } from "../components/JobSignals.tsx";
+import { CiSignal, DriverBadge, ModelName, PhaseDot, reviewText, RoleBadge } from "../components/JobSignals.tsx";
 export { CiSignal, PhaseDot, reviewText };
 /** A live worker or a pending CP step; a quiescent parked job (`awaiting_merge`) is With the team instead. */
 export const inFlight = (job:ViewerJob) => !["done","failed","queued","awaiting_merge"].includes(job.phase);
 const DONE_ROWS = 5;
 /** The model cell: the worker's recorded CLI badge (none for a script job), then the model. */
 const JobModel = ({job}:{job:ViewerJob}) => <span class="job-model">{!job.script_path && <DriverBadge driver={job.driver}/>}<ModelName job={job}/></span>;
+const JobRole = ({job}:{job:ViewerJob}) => <span class="job-role"><RoleBadge role={job.worker_role}/></span>;
 export function JobSignals({job}:{job:ViewerJob}) {
- return <><span class="job-clock">{elapsed(job.elapsed_seconds)} / {elapsed(job.limit_seconds)}{job.limit_seconds !== null && job.elapsed_seconds !== null && <progress aria-label="Wall clock" max="100" value={percent(job.elapsed_seconds,job.limit_seconds)}/>}</span><span class="job-context"><ContextChip usage={job.context} compact/>{!job.context && "context n/a"}</span><span class="job-review">{reviewText(job)}</span><CiSignal job={job}/><JobModel job={job}/><span class="job-cost">{money(job.cost_usd)}</span></>;
+ return <><span class="job-clock">{elapsed(job.elapsed_seconds)} / {elapsed(job.limit_seconds)}{job.limit_seconds !== null && job.elapsed_seconds !== null && <progress aria-label="Wall clock" max="100" value={percent(job.elapsed_seconds,job.limit_seconds)}/>}</span><span class="job-context"><ContextChip usage={job.context} compact/>{!job.context && "context n/a"}</span><span class="job-review">{reviewText(job)}</span><CiSignal job={job}/>
+  <JobRole job={job}/><JobModel job={job}/><span class="job-cost">{money(job.cost_usd)}</span></>;
 }
 export function JobRow({job}:{job:ViewerJob}) {
  const flight = inFlight(job) || job.phase === "awaiting_merge"; const finished = ["done","failed"].includes(job.phase);
  const merged = job.pr_status === "merged" || job.merge_sha !== null;
  return <article class={`job-row ${flight ? "job-row-flight" : finished ? "job-row-done" : "job-row-queued"}`}><a class="job-row-link" href={jobHref(job.id)} title={job.ledger_disagrees ? `ledger ${job.ledger_status} · run ${phaseText(job.phase)}` : undefined}><span class="job-title" title={job.title ?? job.id}>{job.title ?? job.id}</span><span class="job-row-heading"><span class="job-row-id"><PhaseDot phase={job.phase}/><code title={job.id}>{job.id}</code>{job.ledger_disagrees && <span class="job-ledger">ledger {job.ledger_status}</span>}</span><span class="job-phase">{phaseText(job.phase)}<span class="job-project"> · {job.project}</span></span></span></a>
- {flight ? <div class="job-signals"><JobSignals job={job}/></div> : finished ? <div class="job-finished"><span class="job-outcome">{job.pr_url && <a href={job.pr_url} target="_blank" rel="noopener noreferrer">{prNumber(job.pr_url)} ↗</a>} {merged ? "merged" : job.phase === "failed" ? "failed" : job.pr_url ? `PR ${job.pr_status ?? "status not recorded"}` : "closed · no PR"}</span><code class="job-commit" title={job.merge_sha ?? job.head ?? undefined}>{shortSha(job.merge_sha ?? job.head) ?? "no commits"}</code><JobModel job={job}/><span class="job-finished-at">{job.finished_at ? time(job.finished_at) : "not recorded"}</span><span class="job-cost">{money(job.cost_usd)}</span></div> : job.queue_wait ? <WaitingFor wait={job.queue_wait}/> : <span class="job-meta">not dispatched</span>}
+ {flight ? <div class="job-signals"><JobSignals job={job}/></div> : finished ? <div class="job-finished"><span class="job-outcome">{job.pr_url && <a href={job.pr_url} target="_blank" rel="noopener noreferrer">{prNumber(job.pr_url)} ↗</a>} {merged ? "merged" : job.phase === "failed" ? "failed" : job.pr_url ? `PR ${job.pr_status ?? "status not recorded"}` : "closed · no PR"}</span><code class="job-commit" title={job.merge_sha ?? job.head ?? undefined}>{shortSha(job.merge_sha ?? job.head) ?? "no commits"}</code>
+  <JobRole job={job}/><JobModel job={job}/><span class="job-finished-at">{job.finished_at ? time(job.finished_at) : "not recorded"}</span><span class="job-cost">{money(job.cost_usd)}</span></div> : job.queue_wait ? <WaitingFor wait={job.queue_wait}/> : <span class="job-meta">not dispatched</span>}
  {job.failure && <span class="job-note" title={job.failure}>{job.failure}</span>}{job.note && <span class="job-note" title={job.note}>{job.note}</span>}
  {job.queue_wait ? <WaitReason wait={job.queue_wait} timed={job.phase !== "queued"}/>
   : job.blockers.length>0 && <span class="job-note" title={`blocked by ${job.blockers.join(", ")}`}>
@@ -32,7 +35,8 @@ export function JobRow({job}:{job:ViewerJob}) {
  </article>;
 }
 function JobColumns({finished=false}:{finished?:boolean}) {
- return <div class={`jobs-columns ${finished ? "jobs-columns-done" : "jobs-columns-flight"}`} aria-hidden="true">{(finished ? ["Job","Title","Outcome","Commit","Model","Done","Cost"] : ["Job","Title","Wall clock","Context","Review","CI","Model","Cost"]).map(label=><span key={label}>{label}</span>)}</div>;
+ return <div class={`jobs-columns ${finished ? "jobs-columns-done" : "jobs-columns-flight"}`} aria-hidden="true">{(finished ? ["Job","Title","Outcome","Commit","Role","Model","Done","Cost"]
+  : ["Job","Title","Wall clock","Context","Review","CI","Role","Model","Cost"]).map(label=><span key={label}>{label}</span>)}</div>;
 }
 function projectList(projects: {name: string; paused: boolean}[]): string {
  const labels = projects.map(p => p.paused ? `${p.name} (paused)` : p.name);

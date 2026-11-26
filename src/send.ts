@@ -518,6 +518,8 @@ export class Sender {
 			...(outcome.disposition ? { disposition: outcome.disposition } : {}),
 			bytes: message.length,
 			busy_before: busy,
+			// The dashboard's "Implementer · repair" reads this; nothing else recorded which sends were repairs.
+			...(request.purpose ? { purpose: request.purpose } : {}),
 			...(rearmed ? { wall_clock_rearmed: true } : {}),
 			...(superseded ? { superseded_generation: superseded.generation } : {}),
 			...(outcome.error ? { error: outcome.error } : {}),
