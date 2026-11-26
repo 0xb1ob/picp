@@ -6,7 +6,7 @@ import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/vie
 import { contextText, tokens } from "../components/ContextChip.tsx";
 import { modelText } from "../../src/viewer/model-text.ts";
 import { elapsed, jobSuffix, stamp, time } from "../format.ts";
-import { jobHref, jobTranscriptHref, sessionHref } from "../routes.ts";
+import { jobHref, jobTranscriptHref, newTab, sessionHref } from "../routes.ts";
 import { InlineText, Linked, Markdown } from "../components/Markdown.tsx";
 import { PrChips } from "../components/PrChip.tsx";
 import { Icon } from "../components/icons.tsx";
@@ -177,7 +177,13 @@ function BridgeNotice({entry:e,clock,chips=false}: {entry:SessionEntry;clock:Com
     {receipt && <small class="session-bridge-receipt">· {receipt}</small>}
     {multi && <button type="button" class="session-notice-line" aria-expanded={open} aria-label={open ? "Hide notice" : "Show notice"} onClick={()=>setOpen(!open)}>notice <span aria-hidden="true">{open ? "▾" : "▸"}</span></button>}
    </div>
-   {multi ? open && <div class="session-notice-rest">{prose && <p><InlineText text={prose} links={e.links}/></p>}{links.length > 0 && <ul class={chips ? "session-notice-paths session-notice-chips" : "session-notice-paths"}>{links.map(link=><li key={link.path}>{link.href ? <a href={link.href} title={link.path}>{chips ? baseName(link.path) : link.path}</a> : <code title={link.path}>{chips ? baseName(link.path) : link.path}</code>}{link.read && <a href={link.read}>read</a>}</li>)}</ul>}</div>
+   {multi ? open && <div class="session-notice-rest">{prose && <p><InlineText text={prose} links={e.links}/></p>}
+    {links.length > 0 && <ul class={chips ? "session-notice-paths session-notice-chips" : "session-notice-paths"}>
+     {links.map(link=><li key={link.path}>
+      {link.href ? <a href={link.href} title={link.path}>{chips ? baseName(link.path) : link.path}</a>
+       : <code title={link.path}>{chips ? baseName(link.path) : link.path}</code>}
+      {link.read && <a href={link.read} {...newTab(link.read)}>read</a>}
+     </li>)}</ul>}</div>
     : prose ? <p><InlineText text={prose} links={e.links}/></p> : null}
   </div>
  </article>;
@@ -205,7 +211,10 @@ function Notice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
    {open && <div class="session-notice-rest">
     {shown.length > 0 && <p><InlineText text={shown.join("\n")} links={e.links}/></p>}
     {shown.length < rest.length && <button type="button" class="session-notice-more" onClick={()=>setFull(true)}>Show more ({rest.length-shown.length} line{rest.length-shown.length === 1 ? "" : "s"})</button>}
-    {links.length > 0 && <ul class="session-notice-paths">{links.map(link=><li key={link.path}>{link.href ? <a href={link.href}>{link.path}</a> : <code>{link.path}</code>}{link.read && <a href={link.read}>read</a>}</li>)}</ul>}
+    {links.length > 0 && <ul class="session-notice-paths">{links.map(link=><li key={link.path}>
+     {link.href ? <a href={link.href}>{link.path}</a> : <code>{link.path}</code>}
+     {link.read && <a href={link.read} {...newTab(link.read)}>read</a>}
+    </li>)}</ul>}
    </div>}
   </div>
  </article>;

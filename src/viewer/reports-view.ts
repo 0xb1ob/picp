@@ -8,19 +8,21 @@
  */
 import { listBoards, type BoardWarn } from "./boards.ts";
 import type { ReportItem, ReportsResponse } from "./api-types.ts";
+import { boardsHref } from "./host-config.ts";
 import { jobReports } from "./job-report.ts";
 import { jobProjects, type ViewerState } from "./sessions.ts";
 
 /** Newest first, one card per job set: an older board for the same jobs is a superseded revision (cp-xslf, cp-xslf-rev2). A board naming no job is always listed. */
 export function boardReports(state: ViewerState, warn: BoardWarn = () => {}): ReportItem[] {
 	const seen = new Set<string>();
+	const href = boardsHref(state.stateDir);
 	return listBoards(state, warn).filter((board) => {
 		if (!board.job_ids.length) return true;
 		const key = [...board.job_ids].sort().join(" ");
 		if (seen.has(key)) return false;
 		seen.add(key);
 		return true;
-	}).map((board): ReportItem => ({ ...board, href: `/boards/${board.slug}/` }));
+	}).map((board): ReportItem => ({ ...board, href: href(`/boards/${board.slug}/`) }));
 }
 
 /**

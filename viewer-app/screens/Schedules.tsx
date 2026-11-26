@@ -1,7 +1,7 @@
 import { useState } from "preact/hooks";
 import type { ScheduleHistoryJob, ScheduleItem, SchedulesResponse } from "../../src/viewer/api-types.ts";
 import { observedTime } from "../format.ts";
-import { composerHref, jobHref, navigation } from "../routes.ts";
+import { composerHref, jobHref, navigation, newTab } from "../routes.ts";
 import { acceptedRunJob, ADD_SCHEDULE_DRAFT, latestRequest, readinessLine, requestLine, RUN_OPTION_THINKING, runOverrides, type ScheduleControlView, scheduleControlLine, scheduleControlReady } from "../schedule-control.ts";
 import { useSchedulePolicy } from "../use-schedule-control.ts";
 import { ScheduleEditor } from "./ScheduleEditor.tsx";
@@ -66,8 +66,12 @@ function RunHistory({s}: {s:ScheduleItem}) {
  const jobs = (ids: (string|null)[]) => s.history.filter(j => ids.includes(j.run_id));
  const loose = s.history.filter(j => j.run_id === null);
  return <ul class="schedule-history">{s.runs.map(r => <li key={r.run_id} class="job-meta">
-  <p class="schedule-run-head"><a href={jobHref(r.anchor_id)}><code>{r.anchor_id}</code></a> · {TRIGGER_TEXT[r.via]}{r.missed && " (missed)"} · {observedTime(r.at)} · {r.status} ({r.jobs_open} of {r.jobs_total} jobs open){r.result && <> · <a href={r.result.href}>{RESULT_TEXT[r.result.kind]}</a></>}
-   {r.card && <> · {r.card.state === "pending" ? `Result card pending${r.card.error ? `: ${r.card.error}` : ""}` : r.card.report_href ? <a href={r.card.report_href}>Result report</a> : "Result delivered"}</>}</p>
+  <p class="schedule-run-head"><a href={jobHref(r.anchor_id)}><code>{r.anchor_id}</code></a> · {TRIGGER_TEXT[r.via]}
+   {r.missed && " (missed)"} · {observedTime(r.at)} · {r.status} ({r.jobs_open} of {r.jobs_total} jobs open)
+   {r.result && <> · <a href={r.result.href} {...newTab(r.result.href)}>{RESULT_TEXT[r.result.kind]}</a></>}
+   {r.card && <> · {r.card.state === "pending" ? `Result card pending${r.card.error ? `: ${r.card.error}` : ""}`
+    : r.card.report_href ? <a href={r.card.report_href} {...newTab(r.card.report_href)}>Result report</a>
+    : "Result delivered"}</>}</p>
   {r.card?.state === "posted" && !r.card.report_href && <p class="schedule-summary">{r.card.headline}</p>}
   <ul class="schedule-run-jobs">{jobs([r.run_id]).map(j => <JobRow key={j.id} j={j}/>)}</ul>
  </li>)}

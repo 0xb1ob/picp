@@ -3,7 +3,7 @@ import { useState } from "preact/hooks";
 import type { AwaitingDetail } from "../../src/viewer/api-types.ts";
 import { CONTROL_TEXT_MAX, type ControlView, controlLine, controlReady } from "../control.ts";
 import { money } from "../format.ts";
-import { jobHref } from "../routes.ts";
+import { jobHref, newTab } from "../routes.ts";
 import { GlossaryLink } from "./GlossaryLink.tsx";
 
 const BULLET = /^\s*[-*\u2022]\s+/;
@@ -50,7 +50,10 @@ export function DecisionCard({ask,control,factsOpen = false,children}: {ask:Awai
    </dl>
    {ask.jobs.length > 0 && <ul class="decision-card-jobs">{ask.jobs.map(j => <li key={j.id}><a href={jobHref(j.id)}><code>{j.id}</code></a>{j.title && <span>{j.title}</span>}<small>{[j.phase,j.model,j.cost_usd === null ? null : money(j.cost_usd),j.ci && `CI ${j.ci}`,j.review && `review ${j.review}`].filter(Boolean).join(" · ")}</small>{j.pr_url && <a href={j.pr_url}>{j.pr_url}</a>}</li>)}</ul>}
    {ask.escalation && <div class="decision-card-escalation"><strong>Parent raised <code>{ask.escalation.id}</code>{ask.escalation.kind && ` · ${ask.escalation.kind.replaceAll("_"," ")}`}</strong><p>{ask.escalation.question}</p>{ask.escalation.recommended && <small>{ask.escalation.differs ? "automatic default:" : "parent recommends"} {ask.escalation.recommended}</small>}</div>}
-   {ask.evidence.length > 0 && <ul class="decision-card-evidence">{ask.evidence.map(e => <li key={e.path}>{e.href ? <a href={e.href}>{e.path}</a> : <code>{e.path}</code>}{e.read && <a href={e.read}>read</a>}</li>)}</ul>}
+   {ask.evidence.length > 0 && <ul class="decision-card-evidence">{ask.evidence.map(e => <li key={e.path}>
+    {e.href ? <a href={e.href}>{e.path}</a> : <code>{e.path}</code>}
+    {e.read && <a href={e.read} {...newTab(e.read)}>read</a>}
+   </li>)}</ul>}
   </details>
  </article>;
 }

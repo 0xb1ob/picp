@@ -238,6 +238,7 @@ to a wider network while the dashboard port stays private. It is off unless `boa
   its slug URL. The dashboard port keeps serving `/boards/` exactly as before.
 - **Links.** `data/viewer.json` `{"boards_public_url": "https://boards.example.test/"}` makes board and report links
   use that origin; it wins over the tunnel and `public_url`, and a bad value voids only its own step.
+  The dashboard's own board links (Reports, Schedules, a decision's `read`) use it too, read per request, else relative.
 - **cp-install** keeps the `boards_*` keys on a rerun; when it reports `data/daemon.json differs`, rerun with `--force`.
 - **Doctor.** `/doctor` `[boards]` says off, or the bind address and port and that boards are public there, and warns
   when `boards_port` is the dashboard port (cp-view then skips the boards listener; the dashboard keeps serving).
