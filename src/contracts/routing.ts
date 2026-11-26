@@ -1,6 +1,6 @@
 /** Routing: the scope/risk/thinking axes, a job's recorded routing and data/routing.json. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { type Role, RoleSchema } from "./core.ts";
 import type { Narrow, Replace } from "./internal.ts";

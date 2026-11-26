@@ -1,6 +1,6 @@
 /** Observation reports: the status snapshot, the status block's Shipped memory and doctor. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { type Delivery, DeliverySchema, IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema, OriginSchema, type Role, RoleSchema, SCHEMA_VERSION, UsageSchema, validate, type ValidationResult } from "./core.ts";
 import { type Failure, FailureSchema } from "./limits.ts";

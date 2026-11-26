@@ -1,6 +1,6 @@
 /** Mandates — operator-issued bounded authority and its home defaults. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema, PROJECT_NAME_PATTERN } from "./core.ts";
 import { type CheckpointKind, CheckpointKindSchema, DelegationProvenanceFields } from "./escalations.ts";

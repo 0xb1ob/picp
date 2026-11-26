@@ -198,7 +198,7 @@ const REPLACE_INPUT = { remove_from: "MMvt", remove_to: "MMvt", replacement_line
 const INSERT_INPUT = { anchor: "MMvt", direction: "after", lines: "x" };
 const STALE = (file: string) =>
 	`[E_STALE_ANCHOR] 1 stale anchor in ${file}: "ReUA". The file changed since read. Call read() on ${file} for fresh anchors.`;
-const INVALID = 'Validation failed for tool "replace":\n  - replacement_lines: must have required properties replacement_lines';
+const INVALID = 'Validation failed for tool "replace":\n  - replacement_lines: missing';
 
 function stubbedHandlers(): Record<string, (event: unknown) => unknown> {
 	const keys = ["CP_JOB_ID", "CP_KIND", "CP_DELIVERY", "CP_RUN_DIR", "CP_ROLE"];

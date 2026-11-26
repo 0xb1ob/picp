@@ -1,6 +1,6 @@
 /** What stops, escalates or recovers a job: hard bounds, budgets, the failure taxonomy and bounded recovery. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, SCHEMA_VERSION } from "./core.ts";
 import type { Narrow } from "./internal.ts";

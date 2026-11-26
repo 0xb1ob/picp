@@ -1,4 +1,4 @@
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JOB_ID_PATTERN, JobIdSchema } from "./core.ts";
 

@@ -155,7 +155,8 @@ test("E2 research worker: notes reach the planner input; missing artifact and ov
 	assert.match(sent(f, "e2-artifact", 1), /does not exist — write the findings before reporting/, "E2-artifact: a missing file is rejected");
 	assert.deepEqual([record(f, missing).attempt, f.provider.requests("e2-artifact").length], [2, 3], "E2-artifact: the written file is accepted");
 	// The tool schema refuses a fourth approach entry before the reporter runs, so the accepted report is attempt 1.
-	assert.match(sent(f, "e2-plan", 2), /plan_summary\.approach: must not have more than 3 items/, "E2-plan: four entries are rejected");
+	const tooMany = /plan_summary\.approach: expected at most 3 items/;
+	assert.match(sent(f, "e2-plan", 2), tooMany, "E2-plan: four entries are rejected");
 	assert.deepEqual([record(f, fat).envelope.plan_summary?.approach, record(f, fat).attempt, f.provider.requests("e2-plan").length],
 		[MINIMAL_PLAN_SUMMARY.approach, 1, 3], "E2-plan: the corrected plan is accepted");
 

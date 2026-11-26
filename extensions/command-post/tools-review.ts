@@ -2,7 +2,7 @@
  * cp_awaiting, cp_pipeline, cp_gate and cp_review.
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../../src/contracts/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveHome } from "../../src/home.ts";

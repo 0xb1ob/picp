@@ -240,7 +240,7 @@ test("P13d native migration at parent start: legacy schedules become native revi
 	assertCall(first, "run-open", "ok", new RegExp(`legacy run ${oldFire.id} is still open: it continues under its original authority`));
 
 	// The add refusals P13c's 12-12 did not carry: nothing is written for any of them.
-	assertCall(first, "cp-other", "refused", /Validation failed for tool "cp_schedule":\n {2}- skill: must be equal to one of the allowed values/);
+	assertCall(first, "cp-other", "refused", /Validation failed for tool "cp_schedule":\n {2}- skill: expected one of/);
 	assertCall(first, "no-quote", "refused", /cp_schedule add needs operator_quote/);
 	assertCall(first, "no-repo", "refused", /needs the project's GitHub repo/);
 	assert.deepEqual(h.schedules().filter((entry) => ["other-skill", "no quote", "prs"].includes(entry.name)), [], "a refused add writes nothing");

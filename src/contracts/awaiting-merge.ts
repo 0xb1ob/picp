@@ -1,6 +1,6 @@
 /** Awaiting-merge parking: a handed-off human_handoff PR with no worker or lease. Import via src/contracts.ts. */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.ts";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, UsageSchema, validate, type ValidationResult } from "./core.ts";
 import type { Narrow, Replace } from "./internal.ts";

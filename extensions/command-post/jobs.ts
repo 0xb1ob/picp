@@ -14,7 +14,7 @@
  * come from `cp_pipeline start` and `cp_ask`, which also do the rest).
  */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../../src/contracts/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import type { CommandPost } from "../../src/command-post.ts";
