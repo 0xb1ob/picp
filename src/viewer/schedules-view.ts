@@ -147,6 +147,7 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 		const slug = id ? legacyReportSlug(id) : null;
 		return slug && boards.some((b) => b.slug === slug) ? boardHref(`/boards/${slug}/`) : null;
 	};
+	const reportLink = (href: string): string => (href.startsWith("/boards/") ? boardHref(href) : href);
 	const factsOf = (id: string): RunJobFacts & { envelope: Json | undefined; record: Json | undefined } => {
 		const board = boards.find((b) => b.job_ids.includes(id));
 		const record = readObject(join(state.stateDir, "runs", id, "envelope.json"));
@@ -168,7 +169,7 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 			return {run_id:r.id,anchor_id:r.anchor_job_id ?? r.id,via:r.trigger.via === "watch" ? "slot" as const : r.trigger.via,at:r.started_at,missed:r.trigger.missed ?? false,
 				status:r.phase === "closed" ? "closed" as const : "open" as const,jobs_open:r.members.filter(m=>!members.some(j=>j.id === m.job_id && j.status === "closed")).length,jobs_total:r.members.length,job_ids:r.members.map(m=>m.job_id),result:inferred?.result ?? null,
 				...(r.result ? {card:{state:r.result.delivered_at ? "posted" as const : "pending" as const,
-					report_href:r.result.report_href ? boardHref(r.result.report_href) : legacyReportHref(r.result.answer_id),
+					report_href:r.result.report_href ? reportLink(r.result.report_href) : legacyReportHref(r.result.answer_id),
 					headline:r.result.headline,error:r.result.error ?? null}} : {})};
 		});
 		const views = [...storedViews,...groups.runs].sort((a,b)=>b.at.localeCompare(a.at)).slice(0,5);
