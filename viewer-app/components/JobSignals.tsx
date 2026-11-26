@@ -1,4 +1,4 @@
-import type { ViewerJob } from "../../src/viewer/api-types.ts";
+import type { ViewerJob, WorkerRole } from "../../src/viewer/api-types.ts";
 import { shortSha } from "../format.ts";
 
 export function PhaseDot({phase}:{phase:string}) { return <span aria-hidden="true" class={`job-dot job-dot-${phase}`}/>; }
@@ -43,4 +43,15 @@ const DRIVER_LABEL: Record<string,string> = {pi:"pi", claude:"Claude CLI", codex
 /** The recorded CLI a session ran on; nothing recorded reads `unknown`, never a guess. */
 export function DriverBadge({driver}:{driver:string | null | undefined}) {
  return <span class={`driver-badge${driver ? "" : " driver-badge-unknown"}`} title={driver ? "CLI driver, as recorded" : "CLI driver not recorded"}>{driver ? DRIVER_LABEL[driver] ?? driver : "unknown"}</span>;
+}
+
+const NO_ROLE: WorkerRole = {label:"—", short:"—"};
+/** The server's role label (worker-role.ts); a dense cell shows `short` by CSS, the title always names it in full. */
+export function RoleBadge({role}:{role:WorkerRole | null | undefined}) {
+ const r = role ?? NO_ROLE, unknown = r.label === NO_ROLE.label;
+ const title = unknown ? "Role not recorded" : `Role: ${r.label}`;
+ return <span class={`role-badge${unknown ? " role-badge-unknown" : ""}`} title={title}>
+  <span class="role-badge-full">{r.label}</span>
+  {r.short !== r.label && <span class="role-badge-short" aria-hidden="true">{r.short}</span>}
+ </span>;
 }

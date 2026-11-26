@@ -155,11 +155,11 @@ test("P18-job-detail-ui: Job detail's hero, facts, tabs, timeline, asks, failure
 	const equiv = await v.open("#job/cp-equiv", false, ".job-facts");
 	assert.equal(equiv.$(".job-badge-review")?.textContent, "review 0 / 5 · pass (equivalent)", "an equivalent pass is not not-started");
 
-	// The hero spans the body: title row, then phase, PR, CI and review badges, then the held hint; facts in their order.
+	// The hero spans the body: title row, then phase, role (none recorded), PR, CI and review badges, then the held hint.
 	const held = await v.open("#job/cp-held", false, ".job-facts");
 	const hero = held.$(".job-detail > .job-detail-heading")!;
 	assert.deepEqual([...hero.children].map((e) => e.className || e.tagName), ["page-header page-header-stack", "job-badges", "P"]);
-	assert.deepEqual(texts([...hero.querySelector(".job-badges")!.children]), ["held", "#12 open ↗", "CI green aaaaaaa", "review 1 / 5 · pass"]);
+	assert.deepEqual(texts([...hero.querySelector(".job-badges")!.children]), ["held", "—", "#12 open ↗", "CI green aaaaaaa", "review 1 / 5 · pass"]);
 	assert.equal(hero.querySelector(".job-badges a")?.getAttribute("href"), "https://github.com/acme/widgets/pull/12");
 	assert.deepEqual([...held.$(".job-detail-body")!.children].map((e) => e.className), ["job-detail-main", "job-detail-side"], "the tab content and the facts rail");
 	assert.deepEqual(texts(held.$$(".job-facts dt")), ["Wall clock", "Cost", "Model", "Head", "Context", "Routing", "Skills", "Mandate", "PR", "Quota continuation", "CI", "Review"]);
@@ -282,11 +282,11 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	const failedRow = jobs.$('.job-row a[href="#job/cp-render"]')!.closest(".job-row")!;
 	assert.equal(failedRow.querySelector(".job-ledger")?.textContent, "ledger in_progress");
 	assert.equal(failedRow.querySelector(".job-note")?.textContent, "wall clock limit");
-	assert.deepEqual(texts(jobs.$$(".jobs-columns-flight > span")), ["Job", "Title", "Wall clock", "Context", "Review", "CI", "Model", "Cost"]);
+	assert.deepEqual(texts(jobs.$$(".jobs-columns-flight > span")), ["Job", "Title", "Wall clock", "Context", "Review", "CI", "Role", "Model", "Cost"]);
 	const wide = jobs.$('a[href="#job/cp-wide"]')!.closest(".job-row")!;
 	assert.equal(wide.querySelector(".job-row-id code")?.getAttribute("title"), "cp-wide", "the full id rides on the id title");
 	assert.ok(wide.querySelector(".job-row-link > .job-title + .job-row-heading"), "title precedes the id inside the one job link");
-	assert.deepEqual([...wide.querySelector(".job-signals")!.children].map((e) => e.className), ["job-clock", "job-context", "job-review", "job-ci job-ci-green", "job-model", "job-cost"]);
+	assert.deepEqual([...wide.querySelector(".job-signals")!.children].map((e) => e.className), ["job-clock", "job-context", "job-review", "job-ci job-ci-green", "job-role", "job-model", "job-cost"]);
 	assert.match(wide.querySelector(".job-signals")!.textContent!, /10m \/ 2h 0m.*context n\/a.*review not started.*CI green.*claude-opus-5-5.*\$1\.50/);
 	assert.equal(Math.round(Number(wide.querySelector(".job-clock progress")?.getAttribute("value"))), Math.round(600 / 7200 * 100), "elapsed / limit");
 	const bare = jobs.$('a[href="#job/cp-bare"]')!.closest(".job-row")!;
@@ -300,7 +300,7 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	assert.ok(jobs.$(".jobs-toolbar .jobs-views") && jobs.$(".jobs-toolbar .jobs-segments"));
 	assert.ok(jobs.$(".jobs-group > header")!.compareDocumentPosition(jobs.$(".jobs-columns-flight")!) & 4, "flight headers follow their section heading");
 	// Done today: groups by newest job with counts and bare cost, five rows and a show-more foot, no flight cells.
-	assert.deepEqual(texts(jobs.$$(".jobs-columns-done > span")).slice(0, 7), ["Job", "Title", "Outcome", "Commit", "Model", "Done", "Cost"]);
+	assert.deepEqual(texts(jobs.$$(".jobs-columns-done > span")).slice(0, 8), ["Job", "Title", "Outcome", "Commit", "Role", "Model", "Done", "Cost"]);
 	assert.deepEqual(texts(jobs.$$(".jobs-project h3 > :not(.jobs-project-cost)")), ["demo", " · 1 merged · 5 closed without PR", "beta", " · 0 merged · 3 closed without PR"]);
 	assert.deepEqual(texts(jobs.$$(".jobs-project-cost")), ["$9.00", "$2.00"], "project cost is the bare amount, no middot");
 	const beta = [...jobs.$$(".jobs-project")[1]!.querySelectorAll(".job-row-done")];
@@ -312,7 +312,7 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	assert.equal(doneRows[1]!.querySelector(".job-outcome")!.textContent!.trim(), "#42 ↗ merged");
 	assert.equal(doneRows[1]!.querySelector(".job-outcome a")?.getAttribute("href"), "https://github.com/acme/repo/pull/42");
 	assert.deepEqual([doneRows[1]!.querySelector(".job-commit")?.textContent, doneRows[1]!.querySelector(".job-commit")?.getAttribute("title")], ["ccccccc", C]);
-	assert.deepEqual([...doneRows[1]!.querySelector(".job-finished")!.children].map((e) => e.className), ["job-outcome", "job-commit", "job-model", "job-finished-at", "job-cost"]);
+	assert.deepEqual([...doneRows[1]!.querySelector(".job-finished")!.children].map((e) => e.className), ["job-outcome", "job-commit", "job-role", "job-model", "job-finished-at", "job-cost"]);
 	assert.deepEqual([doneRows[2]!.querySelector(".job-outcome")!.textContent!.trim(), doneRows[2]!.querySelector(".job-commit")?.textContent], ["closed · no PR", "no commits"]);
 	const doneSection = jobs.$$(".jobs-group").at(-1)!;
 	assert.match(doneSection.querySelector("header")!.textContent!, /newest first/);
@@ -414,7 +414,7 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	assert.match(v.rule(".jobs-screen .job-row-done .job-cost", PHONE), /^position:absolute;/, "the absolute cost rides done rows only");
 	assert.equal(v.css.filter((r) => r.selector === ".jobs-screen .job-cost").length, 0);
 	assert.match(v.rule(".job-row-link", WIDE), /grid-area:1 \/ 1 \/ 2 \/ 3;.*display:grid;.*min-height:0/);
-	assert.match(v.rule(".jobs-columns-flight,.job-row-flight", WIDE), /grid-template-columns:220px minmax\(0,1fr\) 104px 140px 120px 92px 128px 56px/);
+	assert.match(v.rule(".jobs-columns-flight,.job-row-flight", WIDE), /grid-template-columns:200px minmax\(0,1fr\) 104px 124px 112px 92px 52px 112px 56px/);
 	assert.doesNotMatch(v.rule(/\.job-row-link/, WIDE), /display:contents/);
 	assert.match(v.rule(".reports-grid", WIDE), /^display:grid;/);
 });

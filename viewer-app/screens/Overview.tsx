@@ -1,7 +1,9 @@
 import type { ComponentChildren } from "preact";
 import type { FlightJob, OverviewResponse, TeamJob, ViewerJob } from "../../src/viewer/api-types.ts";
 import { ContextChip } from "../components/ContextChip.tsx";
-import { CI_READ_NEEDED, CI_UNREADABLE_LABEL, CiSignal, ModelName, parkedPendingText, reviewText } from "../components/JobSignals.tsx";
+import {
+ CI_READ_NEEDED, CI_UNREADABLE_LABEL, CiSignal, ModelName, parkedPendingText, reviewText, RoleBadge,
+} from "../components/JobSignals.tsx";
 import { Icon } from "../components/icons.tsx";
 import { StartSession } from "../components/StartSession.tsx";
 import type { ControlView } from "../control.ts";
@@ -77,7 +79,9 @@ function FlightRow({j, manyProjects}: {j: FlightJob; manyProjects: boolean}) {
   <div class="overview-flight-title"><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><div class="overview-flight-extra">{manyProjects && <span class="overview-project" title={j.project}>{j.project}</span>}{j.phase === "held" && <span class="overview-meta">{heldFact(j)}</span>}{j.pr_url && <a href={j.pr_url} title={j.pr_url}>{prNumber(j.pr_url)}</a>}</div></div>
   <div class="overview-clock"><span>{elapsed(j.elapsed_seconds)} / {elapsed(j.limit_seconds)}</span>{j.elapsed_seconds !== null && j.limit_seconds !== null && j.limit_seconds > 0 && <progress aria-label="Wall clock" max="100" value={percent(j.elapsed_seconds,j.limit_seconds)}/>}</div>
   <div class="overview-context">{j.context ? <ContextChip usage={j.context} compact/> : <span class="overview-meta">context n/a</span>}</div>
-  <span class="overview-review">{review.startsWith("review ") ? <><span class="overview-review-prefix">review </span>{review.slice(7)}</> : review}</span><span class="overview-ci"><CiSignal job={signal(j)}/></span><span class="overview-model"><ModelName job={signal(j)}/></span><span class="overview-cost">{money(j.cost_usd ?? null)}</span>
+  <span class="overview-review">{review.startsWith("review ") ? <><span class="overview-review-prefix">review </span>{review.slice(7)}</> : review}</span><span class="overview-ci"><CiSignal job={signal(j)}/></span>
+  <span class="overview-role"><RoleBadge role={j.worker_role}/></span>
+  <span class="overview-model"><ModelName job={signal(j)}/></span><span class="overview-cost">{money(j.cost_usd ?? null)}</span>
  </article>;
 }
 /** A parked PR: unknown approvals or CI read as unknown, never zero or "no CI yet"; age grows, execution does not. */
@@ -164,7 +168,7 @@ export function Overview({data:all,control,selection=null}: {data:OverviewRespon
    {data.blocked.items.map(j => <a key={j.id} href={jobHref(j.id)} class="overview-line"><code>{j.id}</code><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><span class="overview-meta">blocked by {j.blockers.map((b,i) => { const phase = blockerPhase(b.id, b.phase); return <span key={b.id}>{i > 0 && ", "}<code>{b.id}</code>{phase && ` (${phase})`}{b.stranded && <span class="overview-amber"> · {b.grant_status ?? "no active grant"}</span>}</span>; })}</span></a>)}
   </Block>}
   <Block title={<>In flight &middot; {fleet ? "-" : data.in_flight.length}{data.in_flight.length > 0 && <span class="overview-held-hint">held = waiting on CI or review, normal for hours &middot; <GlossaryLink/></span>}</>}>
-   {fleet ? <p class="overview-error">Jobs unavailable</p> : data.in_flight.length ? <><div class="overview-flight-columns" aria-hidden="true">{["Job","Title","Wall clock","Context","Review","CI","Model","Cost"].map(label => <span key={label}>{label}</span>)}</div>{data.in_flight.map(j => <FlightRow key={j.id} j={j} manyProjects={manyProjects}/>)}</> : <p class="overview-meta">Nothing in flight</p>}
+   {fleet ? <p class="overview-error">Jobs unavailable</p> : data.in_flight.length ? <><div class="overview-flight-columns" aria-hidden="true">{["Job","Title","Wall clock","Context","Review","CI","Role","Model","Cost"].map(label => <span key={label}>{label}</span>)}</div>{data.in_flight.map(j => <FlightRow key={j.id} j={j} manyProjects={manyProjects}/>)}</> : <p class="overview-meta">Nothing in flight</p>}
   </Block>
   {!fleet && data.with_team.length > 0 && <Block title={<>With the team &middot; {data.with_team.length}<span class="overview-held-hint">handed off; waiting on a human merge, no worker or slot &middot; <GlossaryLink/></span></>}>
    <div class="overview-team-columns" aria-hidden="true">{["Job","Title","PR","Head","Age","Approvals","CI","Last human"].map(label => <span key={label}>{label}</span>)}</div>

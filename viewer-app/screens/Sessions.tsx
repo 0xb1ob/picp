@@ -17,7 +17,7 @@ import { TranscriptImages } from "../components/TranscriptImages.tsx";
 import { TranscriptFiles } from "../components/TranscriptFiles.tsx";
 import { TranscriptSkills } from "../components/TranscriptSkills.tsx";
 import { PendingBubble } from "../components/PendingBubble.tsx";
-import { DriverBadge } from "../components/JobSignals.tsx";
+import { DriverBadge, RoleBadge } from "../components/JobSignals.tsx";
 import { transcriptHasSend } from "../pending-sends.ts";
 import { ShellContext } from "../components/Shell.tsx";
 import { WorkspaceStatus } from "../components/WorkspaceStatus.tsx";
@@ -292,7 +292,11 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
     <p class="session-bar-state" role="status"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><DriverBadge driver={selectedDriver(data)}/><CtxPct usage={context} label/></p>
     <nav class="session-bar-views" aria-label="Session streams">
      {views.map(([id,label]) => <a key={id} href={sessionHref(id)} aria-current={data.selected === id ? "page" : undefined} onClick={closeMenu}>{label}</a>)}
-     {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)} aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}><span class={`session-dot session-dot-${workerDot(w)}`}/><span>{w.id}</span><small>{workerPhase(w)}</small></a>)}
+     {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)}
+      aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}>
+      <span class={`session-dot session-dot-${workerDot(w)}`}/><span>{w.id}</span>
+      <RoleBadge role={w.worker_role}/><small>{workerPhase(w)}</small>
+     </a>)}
     </nav>
     {toolCalls > 0 && <button type="button" aria-pressed={showTools} onClick={e => { onTools(); closeMenu(e); }}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
     <button type="button" aria-haspopup="dialog" onClick={e => { closeMenu(e); shell.openSearch(); }}>Search</button>
@@ -356,9 +360,10 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
  const toggleRun=(key:string)=>setOpenRuns(open=>open.includes(key) ? open.filter(k=>k!==key) : [...open,key]);
  /** A Chats row: avatar (none on a worker nested under CP parent), name, dot, ctx, recorded time, one meta line. */
- const row=(href:string,label:string,meta:string,selected:boolean,{avatar,phase,at,context,preview=false}:{avatar?:string;phase?:string;at?:string | undefined;context?:ContextUsage | null | undefined;preview?:boolean})=><a href={href} aria-current={selected ? "page" : undefined} class={avatar ? "session-choice" : "session-choice session-choice-nested"}>
+ const row=(href:string,label:string,meta:string,selected:boolean,{avatar,phase,at,context,preview=false,role}:{avatar?:string;phase?:string;at?:string | undefined;context?:ContextUsage | null | undefined;preview?:boolean;role?:Worker["worker_role"] | null})=><a href={href} aria-current={selected ? "page" : undefined} class={avatar ? "session-choice" : "session-choice session-choice-nested"}>
   {avatar && <span class={`session-avatar${avatar === "OP" ? " session-avatar-bot" : ""}`} aria-hidden="true">{avatar}</span>}
-  <span class="session-choice-head"><strong title={label}>{label}</strong>{phase && <span class={`session-dot session-dot-${phase}`}/>}<CtxPct usage={context}/>{dayKey(at) && <time class="session-time" dateTime={at} title={stamp(at!,true)}>{time(at!)}</time>}</span>
+  <span class="session-choice-head"><strong title={label}>{label}</strong>{phase && <span class={`session-dot session-dot-${phase}`}/>}
+   {role !== undefined && <RoleBadge role={role}/>}<CtxPct usage={context}/>{dayKey(at) && <time class="session-time" dateTime={at} title={stamp(at!,true)}>{time(at!)}</time>}</span>
   <small class={preview ? "session-model session-preview" : "session-model"}>{meta}</small></a>;
  const files=data.operator_sessions ?? [], open=data.open_asks ?? [];
  const context=data.selected === "you" ? data.operator_context : data.selected === "parent" ? data.parent.context : data.workers.find(w=>w.id===data.session_id)?.context;
@@ -378,7 +383,9 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    <span aria-hidden="true">#</span><span class="project-row-name">{v || "All projects"}</span></a></li>)}</ul>;};
  /** Chats: the sidebar from 900 px; the phone's Conversations drawer passes an Operator href keeping the selection. */
  const chats=(you:string)=><><section aria-label="Operator">{row(you,"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}{projectRows(you)}</section>
-  <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section></>;
+  <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,
+   {phase:workerDot(w),at:w.last_activity,context:w.context,role:w.worker_role ?? null})}</div>)}
+   {!data.workers.length && <p>No workers</p>}</section></>;
  const workspace=useWorkspaceSurfaces(filterable,selection,{session:data.operator_session ?? null,current:!history,asks:open,live:data.workers.filter(countedLive),chats,control,answering});
  // Live counts held and idle workers too; the strip calls working only a recorded `working` run.
  const working=data.workers.filter(w=>countedLive(w) && w.run_phase === "working");

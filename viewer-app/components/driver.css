@@ -1,3 +1,16 @@
 /* The recorded CLI driver pill (pi, Claude CLI, Codex CLI, unknown): small, like the ledger pill. */
 .driver-badge { display: inline-block; flex-shrink: 0; font-size: 10px; line-height: 14px; color: var(--subtle); border: 1px solid var(--ledger-border); border-radius: 999px; padding: 0 6px; white-space: nowrap; }
 .driver-badge-unknown { border-style: dashed; }
+/* The worker role pill (worker-role.ts), the same small pill; it wraps rather than overflow a narrow row. */
+.role-badge { display: inline-block; flex-shrink: 0; max-width: 100%; font-size: 10px; line-height: 14px;
+ color: var(--subtle); border: 1px solid var(--ledger-border); border-radius: 999px; padding: 0 6px;
+ overflow-wrap: anywhere; }
+.role-badge-unknown { border-style: dashed; }
+.role-badge-short { display: none; }
+/* The Overview and Jobs tables (from 1200 px) show `short`; the full name stays in the title and to a screen reader. */
+@media (min-width: 1200px) {
+ .overview-role .role-badge-short, .job-role .role-badge-short { display: inline; white-space: nowrap; }
+ .overview-role .role-badge-full:not(:only-child), .job-role .role-badge-full:not(:only-child) {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; }
+}

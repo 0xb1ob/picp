@@ -425,6 +425,8 @@ test("P9g-send-grants: an expired grant keeps its in-flight promotion and repair
 	assert.equal(existsSync(b.archived(flight, 1)), false);
 	await b.idle(flight, "flight", 4);
 	assert.equal((await b.post.send({ jobId: flight, message: "CI is red; fix it", purpose: "repair" })).receipt, "delivered");
+	assert.deepEqual(b.events(flight, "prompt_sent").map((p) => p.purpose ?? null).slice(-2), [null, "repair"],
+		"only the repair's marker carries its purpose: the dashboard's Implementer · repair reads it");
 	await b.idle(flight, "flight", 6);
 	b.post.mandates.issue({ ...grant, expiry: past(1_000), at: past(60_000), allowed_actions: ["implement", "review"] });
 	await assert.rejects(b.post.send({ jobId: flight, message: "fix it again", purpose: "repair" }), /repair is not an allowed action/);

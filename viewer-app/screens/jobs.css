@@ -92,8 +92,10 @@
  .jobs-group > header { border-bottom: 0; padding-bottom: 12px; }
  .jobs-project h3 { padding: 12px; border: 1px solid var(--border); border-radius: 10px 10px 0 0; background: var(--surface); }
  .jobs-columns, .jobs-screen .job-row { display: grid; column-gap: 16px; align-items: center; }
- .jobs-columns-flight, .job-row-flight { grid-template-columns: 220px minmax(0,1fr) 104px 140px 120px 92px 128px 56px; }
- .jobs-columns-done, .job-row-done { grid-template-columns: 240px minmax(0,1fr) 112px 80px 136px 52px 56px; }
+ /* Role takes its short label (52px); Job, Context, Review and Model gave up the width it needs. */
+ .jobs-columns-flight, .job-row-flight {
+  grid-template-columns: 200px minmax(0,1fr) 104px 124px 112px 92px 52px 112px 56px; }
+ .jobs-columns-done, .job-row-done { grid-template-columns: 220px minmax(0,1fr) 112px 80px 52px 120px 52px 56px; }
  .job-row-queued { grid-template-columns: 220px minmax(0,1fr) auto; }
  .jobs-columns { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }
  .jobs-screen .job-row { min-height: 40px; row-gap: 0; padding: 4px 0; } /* Approved S4 compact desktop rows: 40px flight / 36px done; phone keeps 44px. */
@@ -107,18 +109,18 @@
  .job-phase { margin-left: 0; color: var(--dim); font-size: 11px; white-space: nowrap; min-width: 0; overflow: hidden; flex: 0 100 auto; }
  .job-project { display: inline; }
  .job-outcome > a { min-height: 24px; }
- .job-model, .job-ci { min-width: 0; overflow: hidden; white-space: nowrap; }
+ .job-model, .job-ci, .job-role { min-width: 0; overflow: hidden; white-space: nowrap; }
  .job-model { display: flex; align-items: center; gap: 4px; }
  .job-model code { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
  .job-ci { flex-wrap: nowrap; }
  .job-signals > *, .job-finished > *, .job-row-queued > .job-meta { grid-row: 1; font-size: 11px; }
  .job-clock, .job-outcome { grid-column: 3; }
  .job-context, .job-commit { grid-column: 4; }
- .job-review, .job-finished > .job-model { grid-column: 5; }
- .job-signals > .job-ci, .job-finished-at { grid-column: 6; }
- .job-signals > .job-model { grid-column: 7; }
- .job-signals > .job-cost { grid-column: 8; }
- .job-finished > .job-cost { grid-column: 7; }
+ .job-review, .job-finished > .job-role { grid-column: 5; }
+ .job-signals > .job-ci, .job-finished > .job-model { grid-column: 6; }
+ .job-signals > .job-role, .job-finished-at { grid-column: 7; }
+ .job-signals > .job-model, .job-finished > .job-cost { grid-column: 8; }
+ .job-signals > .job-cost { grid-column: 9; }
  .job-cost, .jobs-columns > :last-child { text-align: right; }
  .job-row > .job-note, .job-row > .job-guide-link { grid-column: 2 / -1; }
  .job-guide-link { min-height: 24px; }

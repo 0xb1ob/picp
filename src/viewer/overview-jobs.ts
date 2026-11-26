@@ -11,6 +11,7 @@ import { modelWindows, workerContext } from "./context-usage.ts";
 import { compareActiveGrants } from "../grant-order.ts";
 import { fileCache } from "./file-cache.ts";
 import { readLines, startOffset } from "./tail.ts";
+import { workerRole } from "./worker-role.ts";
 const runFiles = fileCache((dir: string) => readdirSync(dir), names => names.length * 64);
 /** Whether `runs/<id>/<name>` is listed: a cached listing spares the failed stat of a file most jobs never write. */
 const runHas = (state: ViewerState, id: string, name: string): boolean => {
@@ -91,6 +92,7 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
   const row = rows.find(r => r.job_id === id);
   const runPhase = str(status?.phase);
   return {id, project:String(job.project), title:row?.title ?? null,
+   worker_role:workerRole(state.stateDir,job,status),
    phase:job.phase === "held" || job.phase === "awaiting_merge" ? "held" : job.phase === "launching" || runPhase === "starting" ? "launching" : ["working","idle"].includes(runPhase ?? "") ? runPhase! : "waiting",
    model:row?.model ?? null, script_path:job.executor === "script" ? str(job.script_path) ?? "script" : null,
    elapsed_seconds:elapsed, limit_seconds:nonnegative(obj(job.bounds)?.wall_clock_seconds) || null, head,
