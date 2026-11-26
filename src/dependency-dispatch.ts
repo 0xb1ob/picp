@@ -29,7 +29,7 @@ import {
 	validateArmedDispatchFile,
 } from "./contracts.ts";
 import { BlockedDispatchError, type DispatchRequest } from "./dispatch.ts";
-import { nativeOccupied, toDispatchRequest, waitingLabel } from "./dispatch-queue.ts";
+import { nativeOccupied, toDispatchRequest, waitingDriver, waitingLabel } from "./dispatch-queue.ts";
 import { assertDispatchOpen, readDrain } from "./drain.ts";
 import { UpdateHoldError } from "./update-hold.ts";
 import { atomicWriteJson } from "./json-store.ts";
@@ -45,7 +45,7 @@ export interface ArmedDispatchOptions {
 	/** `CommandPost.dispatch`: the full gate set runs per entry. */
 	dispatch: (request: DispatchRequest) => Promise<{ state: string }>;
 	/** `DispatchQueue.enqueue`: a released job refused by the spawn cap waits for a slot there. */
-	enqueue: (jobId: string, request: QueuedDispatchRequest) => number;
+	enqueue: (jobId: string, request: QueuedDispatchRequest, driver?: "claude" | "codex") => number;
 	/** CommandPost's `#ownsHome()`: the real parent-lock read, per call, failing closed. */
 	owns: () => boolean;
 	ledger: () => { show(id: string): Promise<Job>; blockersOf(id: string): Promise<string[]> };
@@ -138,7 +138,7 @@ export class ArmedDispatches {
 				if (error instanceof MandateError && error.code === "parallelism_full") continue;
 				// cp-qmry: a full configured CLI queues like the spawn cap, never dropped and never switched.
 				if ((error instanceof SpawnSafetyError && error.code === "spawn_cap") || nativeOccupied(error)) {
-					this.#queue(entry, waitingLabel(error) ?? "the spawn cap is full");
+					this.#queue(entry, waitingLabel(error) ?? "the spawn cap is full", waitingDriver(error));
 					continue;
 				}
 				this.#finish(entry, "dropped", ((error as Error).message ?? String(error)).split("\n")[0]!.slice(0, 300));
@@ -160,10 +160,10 @@ export class ArmedDispatches {
 		return undefined;
 	}
 
-	#queue(entry: ArmedDispatchEntry, why: string): void {
+	#queue(entry: ArmedDispatchEntry, why: string, driver?: "claude" | "codex"): void {
 		let position: number;
 		try {
-			position = this.#options.enqueue(entry.job_id, entry.request);
+			position = this.#options.enqueue(entry.job_id, entry.request, driver);
 		} catch (error) {
 			if (error instanceof UpdateHoldError) return; // the hold turned on after the spawn_cap refusal: still armed
 			this.#finish(entry, "dropped", `its blockers landed but ${why} and it could not be queued: ${(error as Error).message.split("\n")[0]}`);

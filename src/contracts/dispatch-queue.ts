@@ -42,6 +42,8 @@ export const DispatchQueueEntrySchema = Type.Object(
 		job_id: JobIdSchema,
 		request: QueuedDispatchRequestSchema,
 		queued_at: IsoTimestampSchema,
+		/** The CLI whose full slots parked it; absent means the spawn cap (or an entry written before this field). */
+		waiting_driver: Type.Optional(Type.Union([Type.Literal("claude"), Type.Literal("codex")])),
 		/** Drop/start bookkeeping only; a head kept by spawn_cap/parallelism_full is never rewritten. */
 		attempts: Type.Integer({ minimum: 0 }),
 	},

@@ -59,6 +59,11 @@ export function waitingLabel(error: unknown): string | undefined {
 	return `waiting for ${driver ? nativeDriverSpec(driver).label : "native CLI"} capacity`;
 }
 
+/** The CLI a full-slot refusal parks the job on, recorded on its queue entry; undefined for the spawn cap. */
+export function waitingDriver(error: unknown): NativeDriverError["driver"] {
+	return nativeOccupied(error) ? (error as NativeDriverError).driver : undefined;
+}
+
 /** Still full, or held for a pending update: keep the entry at the head, untouched, and stop the drain. */
 export function keepsHead(error: unknown): boolean {
 	if (error instanceof UpdateHoldError || nativeOccupied(error)) return true;
@@ -66,10 +71,12 @@ export function keepsHead(error: unknown): boolean {
 	return (error instanceof MandateError || error instanceof ScheduleAuthorityError) && error.code === "parallelism_full";
 }
 
-export function toDispatchRequest(entry: Pick<DispatchQueueEntry, "job_id" | "request">): DispatchRequest {
+type Replayed = Pick<DispatchQueueEntry, "job_id" | "request"> & { queued_at?: string };
+export function toDispatchRequest(entry: Replayed): DispatchRequest {
 	const r = entry.request;
 	return {
 		jobId: entry.job_id,
+		...(entry.queued_at ? { queuedAt: entry.queued_at } : {}),
 		...(r.task === undefined ? {} : { task: r.task }),
 		...(r.task_file === undefined ? {} : { taskFile: r.task_file }),
 		...(r.scope ? { scope: r.scope } : {}),
@@ -123,7 +130,7 @@ export class DispatchQueue {
 	}
 
 	/** Append; refuses a duplicate or a full queue. Returns the new position. */
-	enqueue(jobId: string, request: QueuedDispatchRequest): number {
+	enqueue(jobId: string, request: QueuedDispatchRequest, driver?: "claude" | "codex"): number {
 		assertDispatchOpen(this.#options.home, `queued dispatch of ${jobId}`); // draining wins: nothing new is queued either
 		const codexOff = request.driver === "codex" ? codexPersistRefusal(this.#options.home, `the queued dispatch of ${jobId}`) : undefined;
 		if (codexOff !== undefined) throw new DispatchQueueError(codexOff);
@@ -131,7 +138,9 @@ export class DispatchQueue {
 		const at = file.entries.findIndex((entry) => entry.job_id === jobId);
 		if (at >= 0) throw new DispatchQueueError(`${jobId} is already queued at position ${at + 1} — it starts when a worker slot frees; do not re-dispatch`);
 		if (file.entries.length >= DISPATCH_QUEUE_MAX) throw new DispatchQueueError(`the dispatch queue is full (${DISPATCH_QUEUE_MAX} entries) — ${jobId} was not queued`);
-		this.#write({ ...file, entries: [...file.entries, { job_id: jobId, request, queued_at: isoTimestamp(this.#now()), attempts: 0 }] });
+		const parked = driver ? { waiting_driver: driver } : {};
+		const entry = { job_id: jobId, request, queued_at: isoTimestamp(this.#now()), ...parked, attempts: 0 };
+		this.#write({ ...file, entries: [...file.entries, entry] });
 		return file.entries.length + 1;
 	}
 

@@ -26,6 +26,10 @@ import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 type Tool = { toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } };
 const text = (end: Tool | undefined) => JSON.stringify(end?.result.content ?? "");
+type Queued = { job_id: string; waiting_driver?: string };
+const queuedEntry = (home: string, id: string): Queued | undefined =>
+	(JSON.parse(readFileSync(join(home, LAYOUT.dispatchQueueFile), "utf8")) as { entries: Queued[] }).entries
+		.find((entry) => entry.job_id === id);
 const call = (id: string, args: Record<string, unknown> = {}) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", ...args } }] });
 
 /** PATH without any real `claude`: the shim dir (if any), `tools` (links to a claude dir's other tools), the rest. */
@@ -87,6 +91,7 @@ test("claude saturation: with Workers CLI claude and max_concurrent 1 full, a se
 	assert.equal(h.fleet(second), undefined, "the queued job has no fleet record");
 	assert.equal(existsSync(join(h.b.home, paths.runDir(second))), false, "the queued job has a run");
 	assert.match(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8"), new RegExp(second));
+	assert.equal(queuedEntry(h.b.home, second)?.waiting_driver, "claude", "the entry records the CLI that parked it");
 	h.piUntouched();
 });
 
@@ -109,6 +114,7 @@ test("T7: cp_pipeline start on a full Claude CLI queues its planner waiting for 
 	const research = details?.research_id ?? "";
 	assert.equal(h.fleet(research), undefined, "the planner has no fleet record");
 	assert.match(readFileSync(join(h.b.home, LAYOUT.dispatchQueueFile), "utf8"), new RegExp(research));
+	assert.equal(queuedEntry(h.b.home, research)?.waiting_driver, "claude", "the planner's entry records its CLI");
 	h.piUntouched();
 });
 

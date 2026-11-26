@@ -624,7 +624,7 @@ export class CommandPost {
 		this.armedDispatches = new ArmedDispatches({
 			home: options.home,
 			dispatch: (r) => this.dispatch(r),
-			enqueue: (id, request) => this.dispatchQueue.enqueue(id, request),
+			enqueue: (...args) => this.dispatchQueue.enqueue(...args),
 			owns: () => this.#ownsHome(),
 			ledger: () => this.ledger(),
 			fleet: this.fleet,
@@ -1355,7 +1355,7 @@ export class CommandPost {
 			// through it must wake the parent exactly like one granted anywhere else.
 			onAnswered: (decision) => this.#recordAnswered(decision),
 			...(defaults ? { qualityDefaults: defaults } : {}),
-			send: async (jobId, message) => this.sender.send({ jobId, message }), enqueue: (id, request) => this.dispatchQueue.enqueue(id, request), waitNative: (id, error, model) => waitAdvance(this.nativeWait, id, error, model),
+			send: async (jobId, message) => this.sender.send({ jobId, message }), enqueue: (...args) => this.dispatchQueue.enqueue(...args), waitNative: (id, error, model) => waitAdvance(this.nativeWait, id, error, model),
 			...(this.#options.authorizer ? { authorizer: this.#options.authorizer } : {}),
 			approvals: this.approvals,
 			mandates: this.mandates,

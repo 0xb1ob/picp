@@ -228,7 +228,22 @@ export interface ViewerJob extends FlightJob {
  skills?: string[];
  /** A parked job's hand-off time (team age counts from it); absent otherwise. */
  handed_at?: string | null;
+ /** Why a queued or waiting job has not started (src/viewer/queue-wait.ts); null once it runs. */
+ queue_wait?: QueueWait | null;
+ /** A started job's wait from its recorded park stamp to dispatch; null when no stamp was recorded. */
+ waited?: QueueWaited | null;
 }
+export type QueueWaitKind = "dependency" | "cli_slot" | "worker_slot" | "grant_slot" | "no_grant" | "grant_paused"
+ | "grant_expired" | "backlog" | "anchor" | "ready" | "unknown";
+export type QueuedAtSource = "dispatch_queue" | "native_wait" | "refused_dispatch" | "unblocked" | "created";
+/** Which stamp a queued-at time is, in the words every surface shows. */
+export const QUEUED_AT_LABELS: Record<QueuedAtSource, string> = {dispatch_queue: "entered the dispatch queue",
+ native_wait: "entered the native wait queue", refused_dispatch: "first dispatch refused",
+ unblocked: "last blocker closed", created: "job created"};
+export interface QueueWait {
+ kind: QueueWaitKind; reason: string; queued_at: string; queued_at_source: QueuedAtSource; waiting_seconds: number;
+}
+export interface QueueWaited { queued_at: string; queued_at_source: QueuedAtSource; seconds: number }
 export interface JobsResponse {
  generated_at: string; awaiting_count: number | null;
  jobs: ViewerJob[]; projects: {name:string; paused:boolean}[]; warnings: {section:string;message:string}[];

@@ -32,7 +32,7 @@ interface Usage {
 	total_tokens: number;
 	cache_read: number;
 }
-interface UsageJob {
+export interface UsageJob {
 	job: Json;
 	job_id: string;
 	project: string;
@@ -114,7 +114,7 @@ function usageJobs(state: ViewerState): UsageJob[] {
 }
 
 /** Schedule id -> the mandate it names; unreadable is empty, as `MandateStore.scheduleMandates`. */
-function scheduleMandates(state: ViewerState): Map<string, string> {
+export function scheduleMandates(state: ViewerState): Map<string, string> {
 	try {
 		return new Map(readScheduleFile(join(state.stateDir, "schedules.json")).flatMap((s) => s.mandate_id ? [[s.id, s.mandate_id] as const] : []));
 	} catch {
@@ -122,7 +122,7 @@ function scheduleMandates(state: ViewerState): Map<string, string> {
 	}
 }
 
-function covers(m: Json, job: UsageJob): boolean {
+export function covers(m: Json, job: UsageJob): boolean {
 	if (!strings(m.projects).includes(job.project)) return false;
 	if (m.schedule_grant === true ? !job.schedule_id || job.schedule_mandate !== str(m.id) : job.schedule_id !== undefined) return false;
 	const ids = strings(m.job_ids);

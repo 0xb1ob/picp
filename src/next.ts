@@ -39,6 +39,8 @@ import { runAuthority, scheduleRunVerdict, withRunReviewerSpend } from "./schedu
 import { runSpend } from "./schedule-runs.ts";
 import type { ScheduleRun } from "./viewer/schedule-run-core.ts";
 import { continueForJob, workUnfinished } from "./mandate-continuity.ts";
+import { QUEUED_AT_LABELS, type QueueWait } from "./viewer/api-types.ts";
+import { waitDuration } from "./viewer/queue-wait.ts";
 
 export interface NextPorts {
 	packageRoot?: string;
@@ -59,9 +61,12 @@ export interface NextPorts {
 	queued?: () => string[];
 	/** cp-912x R7: existing-job work a full CLI keeps waiting (`NativeWaitQueue.list`). */
 	waiting?: () => NativeWaitView[];
+	/** Why each queued or waiting job has not started (src/viewer/queue-wait.ts `queueWaits`). */
+	waits?: () => ReadonlyMap<string, QueueWait>;
 }
 
 export interface NativeWaitView { job_id: string; kind: string; driver: string; text: string }
+export type NextWait = QueueWait & { job_id: string };
 
 export type NextActionKind = "dispatch" | "pipeline" | "wait" | "no_mandate" | "paused" | "mission_end" | "draining";
 
@@ -104,6 +109,25 @@ export interface NextResult {
 	others?: NextResult[];
 	/** Readiness behind the answer (every ledger-ready job, the spawn queue), for the snapshot only. */
 	lined_up?: { jobs: Job[]; queued: string[]; waiting?: NativeWaitView[] };
+	/** Each queued or waiting job in scope: the dispatcher's reason, its queued-at stamp and how long it has waited. */
+	waits?: NextWait[];
+}
+
+/** Capacity reasons first (the stuck queue), deliberate parking last; then the longest wait. */
+const WAIT_ORDER: readonly string[] = ["cli_slot", "worker_slot", "grant_slot", "grant_paused", "grant_expired",
+	"no_grant", "unknown", "ready", "dependency", "anchor", "backlog"];
+const WAITS_SHOWN = 8;
+
+function waitsOf(ports: NextPorts, project: string | undefined, fleet: readonly FleetRecord[]): { waits?: NextWait[] } {
+	const map = ports.waits?.();
+	if (!map?.size) return {};
+	const ledger = new Map(ports.ledger.read().jobs.map((job) => [job.id, job]));
+	const projectOf = (id: string): string | undefined =>
+		(ledger.has(id) ? jobProject(ledger.get(id)!) : fleet.find((record) => record.job_id === id)?.project);
+	const waits = [...map].filter(([id]) => !project || projectOf(id) === project)
+		.map(([job_id, wait]) => ({ job_id, ...wait }))
+		.sort((a, b) => WAIT_ORDER.indexOf(a.kind) - WAIT_ORDER.indexOf(b.kind) || b.waiting_seconds - a.waiting_seconds);
+	return waits.length ? { waits } : {};
 }
 
 const waitingOf = (ports: NextPorts): { waiting?: NativeWaitView[] } => {
@@ -144,6 +168,11 @@ function pendingParked(jobs: readonly FleetRecord[]): string | undefined {
 }
 
 export async function cpNext(ports: NextPorts, project?: string): Promise<NextResult> {
+	const result = await nextResult(ports, project);
+	return { ...result, ...waitsOf(ports, project, ports.fleet.read().jobs) };
+}
+
+async function nextResult(ports: NextPorts, project?: string): Promise<NextResult> {
 	const checkout = homeCheckoutFinding(ports.fleet.home, ports.packageRoot ?? PACKAGE_ROOT, execRunner);
 	const fleetJobs = ports.fleet.read().jobs;
 	const notes = [checkout ? `${checkout.what}: ${checkout.fix}` : undefined, deadReportedResearch(fleetJobs), pendingParked(fleetJobs)].filter((note) => note !== undefined);
@@ -366,8 +395,14 @@ async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: read
 	};
 }
 
+/** A wait's time facts; `stable` drops the ticking duration so an unchanged queue still dedupes. */
+function waitFacts(wait: NextWait, stable: boolean): string {
+	const since = `queued ${wait.queued_at} (${QUEUED_AT_LABELS[wait.queued_at_source]})`;
+	return stable ? since : `waiting ${waitDuration(wait.waiting_seconds)}, ${since}`;
+}
+
 /** One-line-per-fact rendering: enough for the parent to act without reading files. */
-export function formatNext(result: NextResult): string {
+export function formatNext(result: NextResult, stable = false): string {
 	const lines: string[] = [];
 	if (result.warning) lines.push(`warning: ${result.warning}`);
 	if (result.mandate) {
@@ -386,7 +421,18 @@ export function formatNext(result: NextResult): string {
 		lines.push(`blocked: ${row.job.id}: waiting on ${row.waiting_on}${row.escalation_ids?.length ? `; cp_decide ${row.escalation_ids.join(", ")}` : ""}`);
 	}
 	if ((result.blocked?.length ?? 0) > 10) lines.push(`blocked: +${result.blocked!.length - 10} more jobs`);
-	for (const row of result.lined_up?.waiting ?? []) lines.push(`waiting: ${row.job_id} ${row.kind}, ${row.text} (starts on that CLI when a slot frees)`);
+	const waits = result.waits ?? [];
+	for (const row of result.lined_up?.waiting ?? []) {
+		const wait = waits.find((each) => each.job_id === row.job_id && each.queued_at_source === "native_wait");
+		const facts = wait ? `; ${waitFacts(wait, stable)}` : "";
+		lines.push(`waiting: ${row.job_id} ${row.kind}, ${row.text} (starts on that CLI when a slot frees)${facts}`);
+	}
+	// A native wait rides on its `waiting:` row and a dependency on its `blocked:` row; the rest get their own.
+	const queued = waits.filter((wait) => wait.queued_at_source !== "native_wait" && wait.kind !== "dependency");
+	for (const wait of queued.slice(0, WAITS_SHOWN)) {
+		lines.push(`queued: ${wait.job_id} \u2014 ${wait.reason}; ${waitFacts(wait, stable)}`);
+	}
+	if (queued.length > WAITS_SHOWN) lines.push(`queued: +${queued.length - WAITS_SHOWN} more waiting jobs`);
 	lines.push(`action: ${result.action.kind}${result.action.job_id ? ` ${result.action.job_id}` : ""} \u2014 ${operatorPaused(result) ? "no new dispatch; in-flight continues" : result.action.reason}`);
 	if (result.escalation_id) lines.push(`escalation: ${result.escalation_id}`);
 	// Operator pauses are the human's own: one count line, never an id for the parent to repeat.
@@ -411,12 +457,13 @@ function compactOther(result: NextResult): string {
 	return `${head} \u2014 ${result.action.kind}: ${result.action.reason}`;
 }
 
-/** A `cp_next` answer identical to the last one for the same scope is one line, not the whole block again. */
-export function dedupeNext(seen: Map<string, { text: string; at: string }>, scope: string, text: string, at: string): string {
+/** A `cp_next` answer identical to the last one for the same scope is one line; `text` compares (no ticking wait). */
+export function dedupeNext(seen: Map<string, { text: string; at: string }>, scope: string, shown: string, at: string,
+	text = shown): string {
 	const prev = seen.get(scope);
 	if (prev?.text === text) return `cp_next unchanged since ${prev.at}: nothing new — end the turn unless a wake-up brought news (cp_next full: true returns the whole answer).`;
 	seen.set(scope, { text, at });
-	return text;
+	return shown;
 }
 
 export interface NextSnapshotItem { kind: "job"; id: string; project: string; title: string | null; verdict: string; reason: string }

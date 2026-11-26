@@ -33,6 +33,7 @@ import { batchRiskHigh } from "../../src/risk-batch.ts";
 import { currentRuntime, escalateToolText } from "./helpers.ts";
 import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 import { SCHEDULE_RUN_ID } from "../../src/viewer/schedule-run-core.ts";
+import { homeQueueWaits } from "../../src/queue-wait-sources.ts";
 
 export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
 	const { commandPost, projectOf } = deps;
@@ -336,20 +337,24 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					},
 					queued: () => cmdPost.dispatchQueue.ids(),
 					waiting: () => cmdPost.nativeWait.list(),
+					waits: () => homeQueueWaits(cmdPost.home),
 				},
 				params.project,
 			);
 			// SAFETY: cpNext returns a JSON result for extension tool details.
-			let body = formatNext(result);
+			let body = formatNext(result), extra = "";
 			try {
 				writeNextSnapshot(cmdPost.fleet.home, result, isoTimestamp(new Date()), params.project);
 			} catch (error) {
-				body += `\nsnapshot: the viewer's Lined up strip was not updated (${String((error as Error).message ?? error).slice(0, 200)})`;
+				extra += `\nsnapshot: the viewer's Lined up strip was not updated (${String((error as Error).message ?? error).slice(0, 200)})`;
 			}
 			// A mission end is when the parent curates; say whether there is anything to curate so it never calls an empty one.
-			if (result.action.kind === "mission_end") body += `\nmemory: ${cmdPost.curationPlan().pending.length} pending candidate(s) \u2014 cp_memory curate only when above 0`;
+			if (result.action.kind === "mission_end") extra += `\nmemory: ${cmdPost.curationPlan().pending.length} pending candidate(s) \u2014 cp_memory curate only when above 0`;
 			if (params.full) seenNext.delete(params.project ?? "");
-			const text = dedupeNext(seenNext, params.project ?? "", body, isoTimestamp(new Date()));
+			body += extra;
+			// The ticking wait durations stay out of the comparison, so an unchanged queue is still "unchanged".
+			const stable = formatNext(result, true) + extra;
+			const text = dedupeNext(seenNext, params.project ?? "", body, isoTimestamp(new Date()), stable);
 			// picp-dez: details stay the full NextResult. pi sends tool content only, so an unchanged one-line text does not replay this block.
 			return { content: [{ type: "text", text }], details: result as unknown as Record<string, unknown> };
 		},

@@ -22,6 +22,8 @@ import { resolveAwaitingRows } from "../../src/awaiting-rows.ts";
 import { formatRevivePlan, formatReviveResult } from "../../src/revive.ts";
 import { nativeDriverSpec } from "../../src/drivers/registry.ts";
 import { NativeWaitQueuedError, queuedToolResult } from "../../src/native-wait-queue.ts";
+import { homeQueueWaits } from "../../src/queue-wait-sources.ts";
+import { waitDuration } from "../../src/viewer/queue-wait.ts";
 import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 
 export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
@@ -320,10 +322,21 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			// session id is the key, so a reload (a new extension instance, same
 			// session) still sees what the previous instance reported.
 			const dependencies = blockedJobs(post.ledger(), post.mandates.list(), isoTimestamp(), undefined, post.mandates.scheduleMandates(), openRunOf(post.mandates.scheduleRuns));
-			const blocked = [
-				...dependencies.map(({ job, waiting_on }) => ({ job_id: job.id, waiting_on })),
-				...(params.blocked ?? []).filter((row) => !dependencies.some(({ job }) => job.id === row.job_id)),
+			// Queue waits (src/viewer/queue-wait.ts) with the dispatcher's reason; ready, backlog and anchors aren't blocked.
+			const waits = homeQueueWaits(post.home);
+			const timed = (id: string, reason: string): string => {
+				const wait = waits.get(id), tail = wait ? ` · waiting ${waitDuration(wait.waiting_seconds)}` : "";
+				const room = MAX_CELL_CHARS - tail.length;
+				return reason.length > room ? `${reason.slice(0, room - 1)}…${tail}` : `${reason}${tail}`;
+			};
+			const derived = [
+				...dependencies.map(({ job, waiting_on }) => ({ job_id: job.id, waiting_on: timed(job.id, waiting_on) })),
+				...[...waits].filter(([id, wait]) => !["dependency", "ready", "backlog", "anchor"].includes(wait.kind)
+					&& !dependencies.some(({ job }) => job.id === id))
+					.map(([id, wait]) => ({ job_id: id, waiting_on: timed(id, wait.reason) })),
 			];
+			const named = (params.blocked ?? []).filter((row) => !derived.some(({ job_id }) => job_id === row.job_id));
+			const blocked = [...derived, ...named];
 			const result = renderSessionStatusBlock({
 				store: post.shippedSeen,
 				sessionId: tc.sessionId(),

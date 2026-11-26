@@ -64,6 +64,8 @@
 .job-note, .board-note { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .job-guide-link { display: flex; align-items: center; min-height: 44px; font-size: 12px; color: var(--muted); }
 .job-meta, .job-pr { font-size: 12px; color: var(--muted); }
+.job-wait-reason { overflow-wrap: anywhere; }
+.job-wait-time { white-space: nowrap; }
 .job-pr { display: flex; align-items: center; min-height: 44px; text-decoration: none; overflow-wrap: anywhere; }
 .job-ledger { font-size: 11px; color: var(--subtle); border: 1px solid var(--ledger-border); border-radius: 999px; padding: 1px 7px; }
 .job-row-done .job-ledger { display: none; }

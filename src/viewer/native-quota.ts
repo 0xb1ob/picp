@@ -26,6 +26,12 @@ const count = (value: unknown) => value === undefined || (Number.isInteger(value
 const validSwitches = (config: Json): boolean => only(config, [...SWITCHES, "max_concurrent", ...CODEX_SWITCHES, "codex_max_concurrent"])
 	&& [...SWITCHES, ...CODEX_SWITCHES].every((key) => config[key] === undefined || typeof config[key] === "boolean")
 	&& count(config.max_concurrent) && count(config.codex_max_concurrent);
+/** The validated `max_concurrent`/`codex_max_concurrent` in `data/native.json`; undefined when absent or invalid. */
+export function nativeLimit(stateDir: string, driver: string): number | undefined {
+	const config = readJson(join(dirname(stateDir), "data", "native.json"));
+	const value = config && validSwitches(config) ? config[driver === "codex" ? "codex_max_concurrent" : "max_concurrent"] : undefined;
+	return typeof value === "number" ? value : undefined;
+}
 const nativeSwitchOn = (config: Json): boolean => validSwitches(config) && SWITCHES.some((key) => config[key] === true);
 const at = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined);
 const version = (value: unknown) => value === undefined || (typeof value === "string" && value.length >= 1 && value.length <= 40);

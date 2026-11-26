@@ -15,6 +15,7 @@ import { EscalationStore } from "../../src/escalation.ts";
 import { MandateStore } from "../../src/mandate.ts";
 import type { NextResult, NextSnapshot } from "../../src/next.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
+import { nativeConfigFile } from "../../src/worker-driver.ts";
 import {
 	routeNamed,
 	COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MockProvider, type MockToolCall,
@@ -646,4 +647,32 @@ test("P23b-next-large-fleet: cp_next counts a large fleet in one pass and an inv
 	const end = (await p.run([call("torn", "cp_next", { project: "demo" })])).get("torn");
 	assert.equal(end?.isError, true, said(end));
 	assert.equal(said(end).match(/schedule-runs\.json is not valid JSON/g)?.length, 1, "the refusal is named once");
+});
+
+test("P23b-next-queued: each waiting job has its reason, queued-at and wait; a ticking wait alone is unchanged",
+	{ timeout: 300_000 }, async (t) => {
+	const h = await nextHome(t);
+	const p = h.parent();
+	const [parked, loose] = await p.jobs(["parked on claude", "no grant"]) as [string, string];
+	// A full Claude CLI (1/1) parked `parked` in the dispatch queue ten minutes ago, as cp_dispatch writes it.
+	const queuedAt = isoTimestamp(new Date(Date.now() - 10 * 60_000));
+	h.put(nativeConfigFile(""), JSON.stringify({ claude_research: true, max_concurrent: 1 }));
+	h.fleet([rec("cp-holder", { worker: { ...rec("cp-holder").worker!, driver: "claude" } })]);
+	const entry = { job_id: parked, request: {}, queued_at: queuedAt, waiting_driver: "claude", attempts: 0 };
+	h.put(LAYOUT.dispatchQueueFile, JSON.stringify({ schema_version: 1, entries: [entry] }));
+	const slot = `^queued: ${parked} \u2014 waiting for a Claude CLI slot \\(1/1\\); `;
+	const { result, text } = await p.next();
+	const since = `queued ${queuedAt} \\(entered the dispatch queue\\)$`;
+	assert.match(text, new RegExp(`${slot}waiting 1[01]m, ${since}`, "m"), text);
+	const none = `^queued: ${loose} \u2014 no grant or mandate covers it, so nothing will start it; `;
+	assert.match(text, new RegExp(`${none}waiting \\d+m, queued \\S+ \\(job created\\)$`, "m"), text);
+	const waits = result.waits?.map((wait) => [wait.job_id, wait.kind, wait.queued_at_source]);
+	assert.deepEqual(waits, [[parked, "cli_slot", "dispatch_queue"], [loose, "no_grant", "created"]]);
+	// cp_status_block carries the same reason and wait as a Blocked row, from the same helper.
+	const block = said(p.ok(await p.run([call("block", "cp_status_block", {})]), "block"));
+	const row = `^ {2}- ${parked} — .*\\(waiting on: waiting for a Claude CLI slot \\(1/1\\) · waiting 1[01]m\\)$`;
+	assert.match(block, new RegExp(`Blocked:[\\s\\S]*${row}`, "m"), block);
+	h.shift(5 * 60_000);
+	assert.match((await p.next()).text, /^cp_next unchanged since \S+: nothing new/, "only the wait moved: unchanged");
+	assert.match((await p.next({ project: "demo", full: true })).text, new RegExp(`${slot}waiting 1[56]m`, "m"));
 });
