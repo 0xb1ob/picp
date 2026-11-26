@@ -504,8 +504,12 @@ export interface SkillsResponse { generated_at: string; skills: { name: string; 
 export interface DecisionsResponse extends AwaitingResponse { decided: DecisionDetail[] }
 /** `ci` in the native vocabulary (green, failed, in_progress); `url` only a plain https link. */
 export interface ForwardedCi { ci: string; observed_at: string; url: string | null }
+/** A worker's role (src/viewer/worker-role.ts): `label` in full, `short` for a dense cell; "—" is unrecorded. */
+export interface WorkerRole { label: string; short: string }
 export interface FlightJob {
  id: string; project: string; title: string | null; phase: string; model: string | null; script_path: string | null;
+ /** The process running now (a reviewer, a repair), else the recorded profile; absent on older payloads. */
+ worker_role?: WorkerRole;
  /** The recorded CLI its worker spawned on (`pi`, `claude`, `codex`); null is unknown (no worker recorded) or a script.
   * `reviewer_driver`: the latest review or gate attempt's routed CLI, null when none is recorded.
   * `usage_unavailable`: its usage was not measured, not zero. `cost_unknown`: its USD cost is unknown, not $0 (C1b). */

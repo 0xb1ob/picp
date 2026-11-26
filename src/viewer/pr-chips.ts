@@ -8,9 +8,8 @@ import { headCi, jobHead, mergeReceipt, recordedReview } from "./overview-jobs.t
 import { parseObject } from "./overview-read.ts";
 import { fleetJobs, isSafeId, obj, readObject, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { readLines, startOffset } from "./tail.ts";
+import { PENDING_REVIEW_FILE } from "./worker-role.ts";
 
-/** Mirrors PENDING_REVIEW_FILE (src/contracts/reviews.ts): viewer modules import no contracts; a test pins drift. */
-export const PENDING_REVIEW_FILE = "pending.json";
 const EVENTS_BYTES = 256 * 1024;
 const CI_VIEW: Record<string, PrChip["ci"]> = { in_progress: "pending", green: "green", failed: "red", unreadable: "unreadable" };
 const LIVE = new Set(["waiting", "held", "launching", "awaiting_merge"]);

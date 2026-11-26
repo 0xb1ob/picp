@@ -66,8 +66,10 @@ test(name, { timeout: 300_000 }, async (t) => {
 	// late: three gate reads of 2 x 11 s (runs + jobs, each under the 12 s per-call cap) outlast the 60 s recheck
 	// bound, yet each fits the 30 s Actions CI budget.
 	writeFileSync(held.stateFile, mode === "late" ? "green:11000\n" : "green:6000\n");
+	// late: the next 60 s poll is due a full period after the startup reads; 70 s left a loaded CI runner 10 s of slack
+	// (shard 7 timed out there), so wait for two periods.
 	await waitFor(queries, (calls) => calls.slice(before).some((call) => call.state === "green"),
-		{ timeoutMs: mode === "late" ? 70_000 : 10_000, what: "watch captures green before subsequent gate faults" });
+		{ timeoutMs: mode === "late" ? 130_000 : 10_000, what: "watch captures green before subsequent gate faults" });
 	if (mode === "failure") writeFileSync(held.stateFile, "broken:6000\n");
 	if (mode !== "late") {
 		await child.prompt("Review this held diff and handle its actual wake-ups.");

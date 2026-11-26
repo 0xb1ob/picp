@@ -8,9 +8,10 @@
 
 import { closeSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
-import type { ContextUsage } from "./api-types.ts";
+import type { ContextUsage, WorkerRole } from "./api-types.ts";
 import { fileCache, scopedRealpath } from "./file-cache.ts";
 import { nativeParentLogFile } from "./native-parent-log.ts";
+import { workerRole } from "./worker-role.ts";
 
 export const PARENT_ID = "cp-parent";
 export const RECENT_LIMIT = 10;
@@ -29,6 +30,8 @@ export interface SessionRow {
 	project?: string | undefined;
 	job_id?: string | undefined;
 	role?: string | undefined;
+	/** Workers: the shared role label (src/viewer/worker-role.ts); "—" when unrecorded. */
+	worker_role?: WorkerRole;
 	profile?: string | undefined;
 	model?: string | undefined;
 	/** Workers: the session's latest thinking level, else the level routing recorded at dispatch; absent when unknown. */
@@ -157,7 +160,7 @@ export function workerDriver(job: Json | undefined): string | undefined {
 	return worker && job?.executor !== "script" ? str(worker.driver) ?? "pi" : undefined;
 }
 
-function workerRow(job: Json, status: Json | undefined): SessionRow | undefined {
+function workerRow(job: Json, status: Json | undefined, role: WorkerRole | undefined): SessionRow | undefined {
 	const id = str(job.job_id);
 	if (!id || !isSafeId(id) || job.executor === "script") return undefined;
 	const worker = obj(job.worker) ?? {};
@@ -171,6 +174,7 @@ function workerRow(job: Json, status: Json | undefined): SessionRow | undefined 
 		job_id: id,
 		project: str(job.project),
 		role: str(worker.role),
+		...(role ? { worker_role: role } : {}),
 		profile: str(status?.profile) ?? str(worker.profile),
 		model: str(status?.model) ?? str(worker.model),
 		thinking: str(obj(job.routing)?.thinking) ?? str(obj(status?.routing)?.thinking),
@@ -197,12 +201,14 @@ export function deriveSidebar(
 	status: (jobId: string) => Json | undefined,
 	parent: SessionRow,
 	limit = RECENT_LIMIT,
+	role: (job: Json, status: Json | undefined) => WorkerRole | undefined = () => undefined,
 ): Sidebar {
 	const active: Array<{ row: SessionRow; at: string }> = [];
 	const recent: Array<{ row: SessionRow; at: string }> = [];
 	for (const job of jobs) {
 		const id = str(job.job_id);
-		const row = workerRow(job, id ? status(id) : undefined);
+		const run = id ? status(id) : undefined;
+		const row = workerRow(job, run, role(job, run));
 		if (!row) continue;
 		if (row.phase === "done" || row.phase === "failed") recent.push({ row, at: finishedAt(job, row) });
 		else active.push({ row, at: str(job.dispatched_at) ?? "" });
@@ -281,7 +287,8 @@ export function parentRow(state: ViewerState, now = Date.now()): SessionRow {
 }
 
 export function sidebar(state: ViewerState, now = Date.now()): Sidebar {
-	return deriveSidebar(fleetJobs(state), (id) => readStatus(state, id), parentRow(state, now));
+	const role = (job: Json, run: Json | undefined) => workerRole(state.stateDir, job, run);
+	return deriveSidebar(fleetJobs(state), (id) => readStatus(state, id), parentRow(state, now), RECENT_LIMIT, role);
 }
 
 /** Session transcripts may only be read from these directories. */

@@ -21,6 +21,7 @@ import { deployView } from "./deploy-view.ts";
 import { jobReference, reviewFindings, rowReference } from "./evidence-timeline.ts";
 import { type CiSeen, reviewGuide } from "./review-guide.ts";
 import { quotaView } from "./quota-view.ts";
+import { workerRole } from "./worker-role.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
@@ -91,6 +92,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const ledgerStatus=str(job?.status) ?? null;
   const expected=phase==="done" ? "closed" : phase==="queued" ? "open" : "in_progress";
   return {id,project,title:str(job?.title) ?? null,phase,model:detail?.model ?? null,script_path:detail?.script_path ?? null,
+   worker_role:workerRole(state.stateDir,entry,status),
    driver:workerDriver(entry) ?? null,driver_note:driverNote(obj(entry?.routing)),usage_unavailable:status?.usage_unavailable===true,cost_unknown:status?.cost_unknown===true,
    elapsed_seconds:live?.elapsed_seconds ?? duration,limit_seconds:live?.limit_seconds ?? nonnegative(obj(entry?.bounds)?.wall_clock_seconds),head:head ?? null,
    ci:headCi(state,id,ci,head ?? null),ci_forwarded:forwardedCi(state,id,head),review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),

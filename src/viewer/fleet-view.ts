@@ -18,6 +18,8 @@ import { SHA } from "./git-read.ts";
 import { fleetJobs, isSafeId, type Json, num, obj, readLedger, readObject, readStatus, str, type ViewerState } from "./sessions.ts";
 import { fileCache, scoped } from "./file-cache.ts";
 import { grantCandidates } from "./overview-jobs.ts";
+import type { WorkerRole } from "./api-types.ts";
+import { workerRole } from "./worker-role.ts";
 // The only PR/MR URL shape that reaches the page; everything else is dropped server-side.
 import { isSafeChangeRequestUrl } from "../forge-url.ts";
 
@@ -201,6 +203,7 @@ export interface JobRow {
 	phase?: string | undefined;
 	run_phase?: string | undefined;
 	role?: string | undefined;
+	worker_role: WorkerRole;
 	model?: string | undefined;
 	script_path?: string | undefined;
 	scope?: string | undefined;
@@ -231,6 +234,7 @@ export function jobRow(state: ViewerState, entry: UsageJob, title: string | unde
 		phase: entry.phase,
 		run_phase: runPhase,
 		role: str(obj(job.worker)?.role),
+		worker_role: workerRole(state.stateDir, job, status),
 		model: job.executor === "script" ? undefined : str(status?.model) ?? str(obj(job.worker)?.model),
 		script_path: str(job.script_path),
 		scope: str(routing?.scope),
