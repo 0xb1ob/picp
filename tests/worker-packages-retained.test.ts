@@ -313,9 +313,11 @@ test("`-e` takes an entry-point file, and an extension directory has a documente
 		t.skip("pi docs/extensions.md not resolvable in this environment");
 		return;
 	}
-	// pi 0.87 wording: `pi --extension ./hello.ts` (`-e` is its alias, per `pi --help`).
-	assert.match(extensions, /pi --extension \.\/[\w-]+\.ts/, "`-e`/`--extension` is given an entry-point FILE");
-	assert.match(extensions, /subdirectories containing an `index\.ts`/, "a subdirectory entry point is `<sub>/index.ts`");
+	// pi 1.6 wording: "Test with `--extension` (or `-e`) flag:" then `pi -e ./my-extension.ts`.
+	const entry = /Test with `--extension` \(or `-e`\) flag:\s*```bash\s*pi -e \.\/[\w-]+\.ts/;
+	assert.match(extensions, entry, "`-e`/`--extension` is given an entry-point FILE");
+	const subdirectory = /`~\/\.pi\/agent\/extensions\/\*\/index\.ts`/;
+	assert.match(extensions, subdirectory, "a subdirectory entry point is `<sub>/index.ts`");
 });
 
 test("`--skill` is documented as additive even with `--no-skills` (the flag combination this rests on)", (t) => {
