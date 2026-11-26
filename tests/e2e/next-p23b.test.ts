@@ -668,6 +668,10 @@ test("P23b-next-queued: each waiting job has its reason, queued-at and wait; a t
 	assert.match(text, new RegExp(`${none}waiting \\d+m, queued \\S+ \\(job created\\)$`, "m"), text);
 	const waits = result.waits?.map((wait) => [wait.job_id, wait.kind, wait.queued_at_source]);
 	assert.deepEqual(waits, [[parked, "cli_slot", "dispatch_queue"], [loose, "no_grant", "created"]]);
+	// cp_status_block carries the same reason and wait as a Blocked row, from the same helper.
+	const block = said(p.ok(await p.run([call("block", "cp_status_block", {})]), "block"));
+	const row = `^ {2}- ${parked} — .*\\(waiting on: waiting for a Claude CLI slot \\(1/1\\) · waiting 1[01]m\\)$`;
+	assert.match(block, new RegExp(`Blocked:[\\s\\S]*${row}`, "m"), block);
 	h.shift(5 * 60_000);
 	assert.match((await p.next()).text, /^cp_next unchanged since \S+: nothing new/, "only the wait moved: unchanged");
 	assert.match((await p.next({ project: "demo", full: true })).text, new RegExp(`${slot}waiting 1[56]m`, "m"));

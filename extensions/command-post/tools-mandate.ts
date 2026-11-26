@@ -33,8 +33,7 @@ import { batchRiskHigh } from "../../src/risk-batch.ts";
 import { currentRuntime, escalateToolText } from "./helpers.ts";
 import { type ExtensionDeps, toolContextOf } from "./shared.ts";
 import { SCHEDULE_RUN_ID } from "../../src/viewer/schedule-run-core.ts";
-import { queueWaits } from "../../src/viewer/queue-wait.ts";
-import { resolveStateDir } from "../../src/viewer/sessions.ts";
+import { homeQueueWaits } from "../../src/queue-wait-sources.ts";
 
 export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
 	const { commandPost, projectOf } = deps;
@@ -338,7 +337,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					},
 					queued: () => cmdPost.dispatchQueue.ids(),
 					waiting: () => cmdPost.nativeWait.list(),
-					waits: () => queueWaits({ home: cmdPost.home, stateDir: resolveStateDir(cmdPost.home) }),
+					waits: () => homeQueueWaits(cmdPost.home),
 				},
 				params.project,
 			);

@@ -135,4 +135,7 @@ test("jobs-queued-time: a waiting job shows its reason, queued-at and live wait;
 	const page = await view.open("#job/cp-cli");
 	const shown = await page.waitText(/waited 37m/);
 	assert.match(shown, /waited 37m before dispatch · queued .*\(entered the dispatch queue\)/);
+	// A wait taken from the runner's refusal note, not a recorded queued_at, says which stamp it is.
+	const refusedPage = await (await view.open("#job/cp-refused")).waitText(/waited 22m/);
+	assert.match(refusedPage, /waited 22m before dispatch · queued .*\(first dispatch refused\)/);
 });

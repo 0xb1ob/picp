@@ -21,8 +21,13 @@ import { deployView } from "./deploy-view.ts";
 import { jobReference, reviewFindings, rowReference } from "./evidence-timeline.ts";
 import { type CiSeen, reviewGuide } from "./review-guide.ts";
 import { quotaView } from "./quota-view.ts";
-import { queueWaited, queueWaits } from "./queue-wait.ts";
+import { queueWaited, queueWaits, type QueueWaitSources } from "./queue-wait.ts";
+import { nativeLimit } from "./native-quota.ts";
 
+/** The viewer's contracts-free copies of the queue-wait sources (docs/storage.md); cp_next and the block use LAYOUT. */
+const viewerQueueSources = (state:ViewerState):QueueWaitSources => ({ledgerFile:join(runtimeRoot(state.home),"jobs.json"),
+ dispatchQueueFile:join(state.stateDir,"dispatch-queue.json"),nativeWaitFile:join(state.stateDir,"native-wait.json"),
+ maxConcurrent:driver=>nativeLimit(state.stateDir,driver)});
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
  const ledger=objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs",j=>typeof j.id === "string" && isSafeId(j.id) && LEDGER_STATUSES.includes(str(j.status) ?? ""));
@@ -70,7 +75,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
  const watched=readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
  const ciRows=Array.isArray(watched) ? watched.map(obj) : [];
  const ids=[...new Set([...ledger.map(j=>String(j.id)),...fleet.map(j=>String(j.job_id))])];
- const fleetById=firstById(fleet,"job_id"); const ledgerById=firstById(ledger,"id"); const waits=queueWaits(state,now);
+ const fleetById=firstById(fleet,"job_id"); const ledgerById=firstById(ledger,"id"); const waits=queueWaits(state,viewerQueueSources(state),now);
  const jobs:ViewerJob[]=ids.map(id=>{
   const entry=fleetById.get(id); const job=ledgerById.get(id);
   const detail=rows.get(id); const live=base.in_flight.find(j=>j.id===id);

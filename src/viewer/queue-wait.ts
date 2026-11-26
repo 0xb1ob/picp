@@ -1,14 +1,14 @@
 /**
  * Why a queued or waiting job has not started, read from the records the dispatcher itself reads: the ledger, the
- * fleet, both queues, data/native.json, the grants and the schedule runs. The one source for the Jobs page, cp_next and
- * cp_status_block; nothing here guesses past what those records say, and an unexplained wait reads `unknown`.
+ * fleet, both queues, the CLI slot limits, the grants and the schedule runs. The one source for the Jobs page, cp_next
+ * and cp_status_block; nothing here guesses past what those records say, and an unexplained wait reads `unknown`.
  */
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { QueuedAtSource, QueueWait, QueueWaitKind, QueueWaited } from "./api-types.ts";
 import { covers, dashboard, readMandates, scheduleMandates } from "./fleet-view.ts";
 import { strings, timestamp } from "./overview-read.ts";
 import { readScheduleRuns, type ScheduleRun } from "./schedule-run-core.ts";
-import { fleetJobs, obj, readObject, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
+import { fleetJobs, obj, readObject, str, type Json, type ViewerState } from "./sessions.ts";
 
 const LIVE_NATIVE: readonly string[] = ["launching", "waiting", "held"];
 const WORKING: readonly string[] = ["launching", "waiting"];
@@ -17,6 +17,15 @@ const CLI: Record<string, string> = { claude: "Claude", codex: "Codex" };
 const REFUSED = "dispatch refused";
 // The dispatcher's full-slot refusal (src/dispatch-driver.ts over nativeSlotRefusal in src/drivers/claude.ts).
 const OCCUPIED = /cannot run on the (Claude|Codex) CLI driver: \w+ concurrency is \d+/;
+
+/** The files and slot limits each caller resolves its own sanctioned way: LAYOUT in the parent, viewer copies here. */
+export interface QueueWaitSources {
+	ledgerFile: string;
+	dispatchQueueFile: string;
+	nativeWaitFile: string;
+	/** The slot count the dispatcher enforces for a CLI; undefined when this reader cannot know it. */
+	maxConcurrent: (driver: string) => number | undefined;
+}
 
 type Reason = [QueueWaitKind, string];
 type Stamp = [unknown, QueuedAtSource];
@@ -39,12 +48,6 @@ const refusals = (job: Json | undefined): Json[] => (Array.isArray(job?.comments
 const isOpenBlocker = (blocker: Json | undefined): boolean =>
 	!blocker || blocker.status !== "closed" || String(blocker.close_reason ?? "").startsWith("dropped:");
 
-function nativeMax(state: ViewerState, driver: string): number {
-	const config = readObject(join(dirname(state.stateDir), "data", "native.json"));
-	const value = config?.[driver === "codex" ? "codex_max_concurrent" : "max_concurrent"];
-	return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : 1;
-}
-
 function openRuns(state: ViewerState): ScheduleRun[] {
 	try {
 		return readScheduleRuns(join(state.stateDir, "schedule-runs.json")).filter((run) => run.phase !== "closed");
@@ -54,17 +57,19 @@ function openRuns(state: ViewerState): ScheduleRun[] {
 }
 
 /** The records one call reads once; every reason below is a pure function of them. */
-function snapshot(state: ViewerState, now: number) {
-	const ledger = rows(join(runtimeRoot(state.home), "jobs.json"), "jobs"), fleet = fleetJobs(state);
+function snapshot(state: ViewerState, sources: QueueWaitSources, now: number) {
+	const ledger = rows(sources.ledgerFile, "jobs"), fleet = fleetJobs(state);
 	const used = (driver: string): number => fleet.filter((r) => obj(r.worker)?.driver === driver
 		&& obj(r.worker)?.exited_at === undefined && LIVE_NATIVE.includes(String(r.phase))).length;
 	return {
 		ledger, byId: new Map(ledger.map((job) => [String(job.id), job])),
 		fleetById: new Map(fleet.map((record) => [String(record.job_id), record])),
-		queued: rows(join(state.stateDir, "dispatch-queue.json"), "entries"),
-		waiting: rows(join(state.stateDir, "native-wait.json"), "entries"),
-		cli: (driver: string): string =>
-			`waiting for a ${CLI[driver] ?? driver} CLI slot (${used(driver)}/${nativeMax(state, driver)})`,
+		queued: rows(sources.dispatchQueueFile, "entries"),
+		waiting: rows(sources.nativeWaitFile, "entries"),
+		cli: (driver: string): string => {
+			const max = sources.maxConcurrent(driver);
+			return `waiting for a ${CLI[driver] ?? driver} CLI slot (${used(driver)}${max === undefined ? " live" : `/${max}`})`;
+		},
 		runs: openRuns(state), grants: readMandates(state), schedules: scheduleMandates(state),
 		accounting: dashboard(state, now, Infinity).mandates, now,
 	};
@@ -140,8 +145,8 @@ function ledgerWait(s: Snapshot, job: Json): [...Reason, ...Stamp] {
 }
 
 /** Every queued or waiting job's wait: open or deferred jobs with no fleet record, and native-wait-queue entries. */
-export function queueWaits(state: ViewerState, now = Date.now()): Map<string, QueueWait> {
-	const s = snapshot(state, now), out = new Map<string, QueueWait>();
+export function queueWaits(state: ViewerState, sources: QueueWaitSources, now = Date.now()): Map<string, QueueWait> {
+	const s = snapshot(state, sources, now), out = new Map<string, QueueWait>();
 	const put = (id: string, [kind, reason, at, source]: [...Reason, ...Stamp]): void => {
 		if (!timestamp(at)) return;
 		out.set(id, { kind, reason, queued_at: at, queued_at_source: source, waiting_seconds: since(at, now) });
