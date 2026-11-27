@@ -1,0 +1,21 @@
+{
+  "text": "First paragraph: the operator explains what happened in detail. First paragraph: the operator explains what happened in detail. First paragraph: the operator explains what happened in detail. First paragraph: the operator explains what happened in detail. First paragraph: the operator explains what…",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "First paragraph: the operator explains what happened in detail. First paragraph: the operator explains what happened in detail. First paragraph: the operator explains what happened in detail. First paragraph: the operator explains what happened in detail. First paragraph: the operator explains what…"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Full reply: <https://cp.example.test/#sessions?view=you&transcript=1|the dashboard>"
+        }
+      ]
+    }
+  ]
+}

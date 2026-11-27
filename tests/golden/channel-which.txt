@@ -1,0 +1,100 @@
+{
+  "text": "Which question? Tap the answer you mean.",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Which question? Tap the answer you mean."
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Ship cp-demo now?"
+      }
+    },
+    {
+      "type": "actions",
+      "block_id": "cp_ask_ask-0a1b2c",
+      "elements": [
+        {
+          "type": "button",
+          "action_id": "cp_which_0_0",
+          "value": "ask-0a1b2c:0",
+          "text": {
+            "type": "plain_text",
+            "text": "Keep (recommended)",
+            "emoji": false
+          },
+          "style": "primary"
+        },
+        {
+          "type": "button",
+          "action_id": "cp_which_0_1",
+          "value": "ask-0a1b2c:1",
+          "text": {
+            "type": "plain_text",
+            "text": "Drop <now> & go",
+            "emoji": false
+          }
+        },
+        {
+          "type": "button",
+          "action_id": "cp_which_0_2",
+          "value": "ask-0a1b2c:2",
+          "text": {
+            "type": "plain_text",
+            "text": "Later",
+            "emoji": false
+          }
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Which branch?"
+      }
+    },
+    {
+      "type": "actions",
+      "block_id": "cp_ask_ask-0a1b2d",
+      "elements": [
+        {
+          "type": "button",
+          "action_id": "cp_which_1_0",
+          "value": "ask-0a1b2d:0",
+          "text": {
+            "type": "plain_text",
+            "text": "Keep",
+            "emoji": false
+          }
+        },
+        {
+          "type": "button",
+          "action_id": "cp_which_1_1",
+          "value": "ask-0a1b2d:1",
+          "text": {
+            "type": "plain_text",
+            "text": "Drop <now> & go",
+            "emoji": false
+          }
+        },
+        {
+          "type": "button",
+          "action_id": "cp_which_1_2",
+          "value": "ask-0a1b2d:2",
+          "text": {
+            "type": "plain_text",
+            "text": "Later (recommended)",
+            "emoji": false
+          },
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}

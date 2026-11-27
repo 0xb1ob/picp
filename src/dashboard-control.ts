@@ -38,6 +38,7 @@ import { restartRequest, restartState } from "./dashboard-restart.ts";
 import { parentRestartRequest } from "./parent-restart.ts";
 import { appendControlAudit, appendInboxLine } from "./viewer/control-audit.ts";
 import {
+	CHANNEL_PROVENANCE_VERSION, type ChannelOrigin, channelLine, channelOrigin,
 	CONTROL_PROTOCOL, CONTROL_TEXT_MAX, type ControlAuditLine, type ControlDeliver, type ControlKind, controlRecordFile, controlSocketFile,
 	dashboardMarker, DASHBOARD_ID_RE, INBOX_MAX_AGE_MS, type InboxLine, isAskId, readControlConfig, readControlRecord, readUploadMetadata,
 	REMOTE_PROVENANCE_VERSION, type RemoteDevice, remoteDevice, remoteLine, withEditor,
@@ -223,19 +224,23 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		const idle = ports.isIdle();
 		const deliverAs = kind === "abort" || idle ? undefined : !command && args.deliver === "steer" ? "steer" : "followUp";
 		const deliver: ControlDeliver = kind === "abort" ? "abort" : deliverAs ?? "prompt";
-		const supplied = kind === "message" && typeof args.client_id === "string" && DASHBOARD_ID_RE.test(args.client_id) ? args.client_id : null;
-		const duplicate = supplied !== null && (open.has(supplied) || recent.some(row=>row.id === supplied) || queue.some((entry) => entry.id === supplied) || handed.has(supplied));
-		const id = supplied && !duplicate ? supplied : newControlId(now());
 		// PR 1c: the viewer's remote gate names the paired device; a malformed one is journaled bare, then refused below.
 		const remote = remoteDevice(args.remote);
+		// Channel gateway: the chat thread, from the gateway's own journal; it names its answers' ids too.
+		const channel = command ? undefined : channelOrigin(args.channel);
+		const supplied = (kind === "message" || (kind === "answer" && channel)) && typeof args.client_id === "string" && DASHBOARD_ID_RE.test(args.client_id) ? args.client_id : null;
+		const duplicate = supplied !== null && (open.has(supplied) || recent.some(row=>row.id === supplied) || queue.some((entry) => entry.id === supplied) || handed.has(supplied));
+		const id = supplied && !duplicate ? supplied : newControlId(now());
 		const sessionFile = ports.sessionFile();
-		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, session_started_at: startedAt, ...(sessionFile ? {session_file: sessionFile} : {}), ...(images ? { images } : {}), ...(files ? { files } : {}), ...(remote ? { remote } : {}), ...(command ? { command: command.line } : {}) });
+		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, session_started_at: startedAt, ...(sessionFile ? {session_file: sessionFile} : {}), ...(images ? { images } : {}), ...(files ? { files } : {}), ...(remote ? { remote } : {}), ...(channel ? { channel } : {}), ...(command ? { command: command.line } : {}) });
 		if (!journaled.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${journaled.error})` };
 		const refuse = (status: number, reason: string): Reply => {
 			outcome(id, kind, askId, peer, "refused", reason);
 			return { ok: false, status, error: reason };
 		};
 		if (args.remote !== undefined && !remote) return refuse(400, "remote must be {device_id, name} of a paired device");
+		if (args.channel !== undefined && !channel) return refuse(400, 'channel must be {kind: "slack", team, channel, user, thread_ts}');
+		if (args.remote !== undefined && args.channel !== undefined) return refuse(400, "a message comes from a remote device or a channel, not both");
 		if (command && !command.ok) return refuse(400, command.reason);
 		const latest = readControlConfig(stateDir);
 		if (duplicate) return refuse(409, "client_id was already used; check the transcript before retrying");
@@ -277,11 +282,11 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (kind === "message" && deliver !== "steer" && (!idle || queue.length > 0 || inboxAt !== null || handing !== null)) {
 			const held = outcome(id, kind, askId, peer, "queued", null, false);
 			if (!held.ok) return refuse(500, `failed: audit journal unwritable (${held.error})`);
-			queue.push({ id, at: now().toISOString(), peer, text: text ?? "", askId, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(remote ? { remote } : {}) });
+			queue.push({ id, at: now().toISOString(), peer, text: text ?? "", askId, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(remote ? { remote } : {}), ...(channel ? { channel } : {}) });
 			settle(false);
 			return { ok: true, result: { id, state: "queued", deliver, editable: true } };
 		}
-		return handOver({ id, kind, askId, peer, text, images, files, ...(remote ? { remote } : {}) }, deliverAs, deliver, refuse, false);
+		return handOver({ id, kind, askId, peer, text, images, files, ...(remote ? { remote } : {}), ...(channel ? { channel } : {}) }, deliverAs, deliver, refuse, false);
 	};
 
 	/**
@@ -290,11 +295,12 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	 * a restarted bridge reloads only ids with no `injected` line, so it never hands one over twice. A direct send waits
 	 * up to `waitMs` for the sighting to answer delivered or queued, as before.
 	 */
-	type Handing = { id: string; kind: ControlKind; askId: string | null; peer: string | null; text: string | null; images?: string[]; files?: string[]; remote?: RemoteDevice; editors?: RemoteDevice[]; again?: true };
+	type Handing = { id: string; kind: ControlKind; askId: string | null; peer: string | null; text: string | null; images?: string[]; files?: string[]; remote?: RemoteDevice; editors?: RemoteDevice[]; channel?: ChannelOrigin; again?: true };
 	const handOver = async (entry: Handing, deliverAs: "steer" | "followUp" | undefined, deliver: ControlDeliver, refuse: (status: number, reason: string) => Reply, queued: boolean): Promise<Reply> => {
 		const { id, kind, askId, peer, text, images, files } = entry;
-		// PR 1c: the device line sits right above the marker, after the user's text, so typed text can never forge it.
+		// PR 1c: the device (then channel) line sits right above the marker, after the user's text: never forgeable.
 		const viaRemote = remoteLine(entry);
+		const viaChannel = entry.channel ? channelLine(entry.channel) : null;
 		const metadata = readUploadMetadata(stateDir, files ?? []);
 		const textFiles: { name: string; path: string; bytes: Uint8Array }[] = [];
 		for (const file of files ?? []) {
@@ -328,7 +334,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			const fallback = paths.length ? `${paths.join("\n")}\n\n` : "";
 			// One plain line per image before the marker: where the upload lives, and that it is swept (UPLOAD_MAX_AGE_MS = 7 days).
 			const imageLines = images?.length ? `${images.map((image) => `image: ${resolve(uploadFile(root, image)!)} (deleted after 7 days; copy it if needed longer)`).join("\n")}\n\n` : "";
-			const sent = `${text ? `${text}\n\n` : ""}${fallback}${imageLines}${fileText}${viaRemote ? `${viaRemote}\n` : ""}${dashboardMarker(id, askId, images, files, viaRemote !== null)}`;
+			const sent = `${text ? `${text}\n\n` : ""}${fallback}${imageLines}${fileText}${viaRemote ? `${viaRemote}\n` : ""}${viaChannel ? `${viaChannel}\n` : ""}${dashboardMarker(id, askId, images, files, viaRemote !== null, viaChannel !== null)}`;
 			result = ports.inject(sent, queued ? (ports.isIdle() ? undefined : "followUp") : deliverAs, inline.length ? inline : undefined);
 		} catch (error) {
 			open.delete(id);
@@ -365,7 +371,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	 * FIFO across a restart: the offline inbox turn (messages typed while no session ran) takes its place by time —
 	 * every held message older than its oldest line goes first (addendum 2 review).
 	 */
-	type Held = { id: string; at: string; peer: string | null; text: string; askId: string | null; images?: string[]; files?: string[]; remote?: RemoteDevice; editors?: RemoteDevice[] };
+	type Held = { id: string; at: string; peer: string | null; text: string; askId: string | null; images?: string[]; files?: string[]; remote?: RemoteDevice; editors?: RemoteDevice[]; channel?: ChannelOrigin };
 	const queue: Held[] = [];
 	/** The id last handed over (or INBOX), until it fails or a turn settles: one handoff per settled turn. */
 	let handing: string | null = null;
@@ -479,7 +485,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "hello") return { ok: true, result: { pid: process.pid, protocol: CONTROL_PROTOCOL } };
 		if (frame.op === "status") {
 			const file = ports.sessionFile();
-			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, ...(ports.prepareImage ? { images: true } : {}), ...(ports.parentRestartState ? { parent_restart: ports.parentRestartState() } : {}), ...(ports.command ? { commands: true } : {}) } };
+			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, channel_provenance: CHANNEL_PROVENANCE_VERSION, ...(ports.prepareImage ? { images: true } : {}), ...(ports.parentRestartState ? { parent_restart: ports.parentRestartState() } : {}), ...(ports.command ? { commands: true } : {}) } };
 		}
 		if (frame.op === "send" || frame.op === "abort") return request(args, frame.op);
 		// A bridge without prepareImage answers `unknown op send_images`: the viewer says restart, never drops the images.
@@ -555,7 +561,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	const journal = readQueueJournal(stateDir);
 	if (journal.error) log(`cp-bridge: dashboard queue unreadable, nothing reloaded: ${journal.error}\n`);
 	for (const message of journal.messages.values()) {
-		if (dashboardHeld(message)) queue.push({ id: message.id, at: message.at, peer: message.peer, text: message.text, askId: message.ask_id, ...(message.images ? { images: message.images } : {}), ...(message.files ? { files: message.files } : {}), ...(message.remote ? { remote: message.remote } : {}), ...(message.editors ? { editors: message.editors } : {}) });
+		if (dashboardHeld(message)) queue.push({ id: message.id, at: message.at, peer: message.peer, text: message.text, askId: message.ask_id, ...(message.images ? { images: message.images } : {}), ...(message.files ? { files: message.files } : {}), ...(message.remote ? { remote: message.remote } : {}), ...(message.editors ? { editors: message.editors } : {}), ...(message.channel ? { channel: message.channel } : {}) });
 	}
 	try {
 		await listen();
@@ -641,7 +647,9 @@ export function deliverInbox(stateDir: string, ports: Pick<ControlPorts, "inject
 		const state = message.ask_id ? asks?.get(message.ask_id) : undefined;
 		const note = message.ask_id && asks && state !== "open" ? ` (${message.ask_id} is ${state ?? "unknown"}, no longer open)` : "";
 		const via = remoteLine(message);
-		const tail = via ? `\n${via}\n${dashboardMarker(message.id, message.ask_id, undefined, undefined, true)}` : "";
+		const chat = message.channel ? channelLine(message.channel) : null;
+		const labels = [via, chat].filter((line): line is string => line !== null);
+		const tail = labels.length ? `\n${labels.join("\n")}\n${dashboardMarker(message.id, message.ask_id, undefined, undefined, via !== null, chat !== null)}` : "";
 		return `- ${message.at} (${message.id}): ${message.text}${note}${tail}`;
 	});
 	const dropped = stale.map((message) => `- dropped, held longer than 24 h: ${message.at} (${message.id})`);

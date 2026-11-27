@@ -1,0 +1,21 @@
+{
+  "text": "Decision needed on the dashboard: Approve the plan for cp-demo?",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Decision needed on the dashboard: Approve the plan for cp-demo?"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "<https://cp.example.test/#awaiting|Open on the dashboard>"
+        }
+      ]
+    }
+  ]
+}

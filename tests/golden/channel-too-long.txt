@@ -1,0 +1,12 @@
+{
+  "text": "Too long: 4,000 characters at most.",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Too long: 4,000 characters at most."
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "text": "Rotated ••• today.",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Rotated ••• today."
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "text": "Withdrawn",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Ship cp-demo now?"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Withdrawn"
+        }
+      ]
+    }
+  ]
+}
