@@ -30,8 +30,27 @@ export interface TurnBindingRecord {
 type Message = { role?: unknown; content?: unknown; timestamp?: unknown; stopReason?: unknown };
 const textOf = (content: unknown): string => typeof content === "string" ? content
 	: Array.isArray(content) ? content.map((part) => ((part as { type?: unknown })?.type === "text" ? String((part as { text?: unknown }).text ?? "") : "")).join("\n") : "";
-const REPLAY_LINE = /^- \S+ \((dc-\d{14}-[0-9a-f]{8})\): /gm;
-const REPLAY_CHANNEL = /\n\[cp-channel — [^\n]*\]\n\[cp-dashboard (dc-\d{14}-[0-9a-f]{8}) — from the dashboard[^\]\n]*; channel\]/g;
+const REPLAY_COUNT = /^\[cp-dashboard inbox — (\d+) message\(s\) /;
+const REPLAY_HEAD = /^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z \((dc-\d{14}-[0-9a-f]{8})\): /gm;
+const REPLAY_DROPPED = "\n- dropped, held longer than 24 h: ";
+const channelTail = (id: string): RegExp => new RegExp(`\\n\\[cp-channel — through slack, not this terminal: sent by [UW][A-Z0-9]{2,20} in [CDG][A-Z0-9]{2,20}\\]\\n\\[cp-dashboard ${id} — from the dashboard(?:; ask=ask-[a-f0-9]+)?(?:; remote)?; channel\\]$`);
+
+/**
+ * An inbox replay's ids. An entry is a chat request only when it ends in the bridge's channel tail naming its own id,
+ * and only while the entries found match the bridge's own header count: typed text cannot add an entry or a channel id.
+ */
+function replayIds(text: string): { ids: string[]; channel: string[] } {
+	const cut = text.indexOf(REPLAY_DROPPED);
+	const entries = cut < 0 ? text : text.slice(0, cut);
+	const heads = [...entries.matchAll(REPLAY_HEAD)];
+	const ids = heads.map((head) => head[1]!);
+	if (heads.length !== Number(REPLAY_COUNT.exec(text)?.[1])) return { ids, channel: [] };
+	const channel = heads.filter((head, i) => {
+		const body = entries.slice(head.index + head[0].length, heads[i + 1]?.index ?? entries.length).replace(/\n$/, "");
+		return channelTail(head[1]!).test(body);
+	});
+	return { ids, channel: channel.map((head) => head[1]!) };
+}
 
 /** Fed from the bridge's own turn events; `settled` writes one record and starts the next turn clean. */
 export class OperatorTurnBinding {
@@ -49,9 +68,9 @@ export class OperatorTurnBinding {
 		if (m?.role !== "user") return;
 		const text = textOf(m.content);
 		if (text.startsWith(INBOX_REPLAY_PREFIX)) {
-			const ids = new Set([...text.matchAll(REPLAY_LINE)].map((match) => match[1]!));
+			const { ids, channel } = replayIds(text);
 			for (const id of ids) this.#dc.add(id);
-			for (const match of text.matchAll(REPLAY_CHANNEL)) if (ids.has(match[1]!)) this.#channel.add(match[1]!);
+			for (const id of channel) this.#channel.add(id);
 			return;
 		}
 		const parsed = parseDashboardText(text);

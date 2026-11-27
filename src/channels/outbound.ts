@@ -226,12 +226,13 @@ export class ChannelOutbound {
 		});
 	}
 
-	/** Bindings for `requests`: cards or notices for the asks, then the reply; >1 thread gets only a link. */
+	/** One chat request's turn: its cards or notices, then the reply. A turn that consumed more ids gets only a link. */
 	#fromBinding(outbox: Outbox, record: TurnBindingRecord, byId: Map<string, RequestLine>, asks: Map<string, OperatorAsk>): void {
 		const requests = record.channel_dc_ids.map((id) => byId.get(id)).filter((line): line is RequestLine => line !== undefined);
 		if (requests.length === 0) return;
 		const threads = new Map(requests.map((request) => [`${request.channel} ${request.thread_ts}`, request]));
-		if (threads.size > 1) {
+		// Any second request, dashboard or chat, even in the same thread: the reply may be about another request.
+		if (requests.length > 1 || record.dc_ids.length > 1) {
 			for (const request of threads.values()) this.#add(outbox, { key: `ambiguous:${record.at}:${request.dc_id}`, kind: "notice", dc_id: request.dc_id, channel: request.channel, thread_ts: request.thread_ts });
 			return;
 		}

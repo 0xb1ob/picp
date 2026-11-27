@@ -1398,13 +1398,14 @@ id, an `answer` report's `{state, delivery, id, url, text}`), the ask guard's ow
 assistant message's last non-empty text block) — and at `agent_settled` appends one line to
 `state/operator/turn-bindings.jsonl` (0600, append-only, never rotated) for a turn that consumed at least one `dc-` id:
 `{v: 1, at, session_file, dc_ids, channel_dc_ids, ask_ids, send_ids, answer, reply: {ts, block, text?, truncated?},
-outcome}`. `channel_dc_ids` are the ids whose marker carried `; channel` (a replayed one also needs its channel line);
+outcome}`. `channel_dc_ids` are the ids whose marker carried `; channel` (a replayed entry counts only when it ends in its own
+channel line and marker and the entries match the replay header's count, so typed text adds no id);
 `reply` is the header guard's key (`message.timestamp`, block index), and only a turn with a channel id keeps the reply
 text, capped at 4,000 code points. The Claude CLI operator fires the same events into the same handlers (its
 session engine under `src/drivers/`), but its record holds no reply and its log's timestamps are its own, so the
 text — not the pointer — is what a reader uses. No model sees the file. A failure sets a status line and never fails
 the turn. Known limit: a Claude turn that throws outside the query never fires `agent_settled`, so its ids join the
-next record (the gateway's more-than-one-thread rule bounds that).
+next record (the gateway's one-request rule bounds that).
 
 `cp_parent doctor` and `version` read the live parent's `/doctor` and
 `/cp-version` output, including its mode and home. They require a settled
@@ -7303,8 +7304,8 @@ link-only "Decision needed on the dashboard" notice with no buttons, and typed t
 file) whose `channel_dc_ids` name journaled requests post, in that request's thread: one card per opened ask (question,
 one button per option label, the recommendation marked "(recommended)", a dashboard link) or a notice, then the reply —
 the `answer` report's text when its delivery is `report`, else the reply as written when ≤3 lines and ≤500 characters,
-else its first paragraph clipped to 300 characters plus a link. A turn bound to more than one thread posts only
-"Replied on the dashboard". Asks opened in a turn no chat request started stay on the dashboard and push. Every string
+else its first paragraph clipped to 300 characters plus a link. A turn that consumed more than one request id
+(dashboard or chat, even in one thread) posts only "Replied on the dashboard" in each bound thread, never reply text. Asks opened in a turn no chat request started stay on the dashboard and push. Every string
 is scrubbed first: home paths become `<home>`, secrets are redacted, and text still matching a secret pattern is never
 sent (the link-only fallback is). Templates: `src/channels/render.ts`, golden-pinned.
 

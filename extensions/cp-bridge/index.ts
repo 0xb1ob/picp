@@ -335,7 +335,7 @@ export default function (pi: ExtensionAPI): void {
 	const turnBinding = new OperatorTurnBinding();
 	// mz0: relays raised during the operator's own turn wait for it to settle, then go out as one message.
 	pi.on("agent_start", async (_event, ctx) => { sessionCtx = ctx ?? sessionCtx; consumer.started(); });
-	pi.on("tool_execution_end", async (event) => { askGuard.toolEnded(event as never); turnBinding.toolEnded(event as never); });
+	pi.on("tool_execution_end", async (event) => { askGuard.toolEnded(event as never); guarded("turn binding", () => turnBinding.toolEnded(event as never)); });
 	pi.on("agent_end", async (event) => { guarded("turn binding", () => turnBinding.agentEnd((event as { messages?: unknown }).messages)); });
 	pi.on("tool_call", async (event, ctx) => {
 		const reason = operatorToolRefusal(event.toolName, event.input, ctx?.cwd ?? process.cwd(), backstopTarget);
@@ -371,7 +371,7 @@ export default function (pi: ExtensionAPI): void {
 		observe([message]);
 		control?.observe(message);
 		guarded("answering a detected card", () => askGuard.userMessage(message, operatorAsks));
-		turnBinding.userMessage(message);
+		guarded("turn binding", () => turnBinding.userMessage(message));
 	});
 	pi.on("context", async (event) => {
 		const messages = (event as { messages?: unknown }).messages;
