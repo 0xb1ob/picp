@@ -8,6 +8,8 @@ import { test } from "node:test";
 import { type Json, jsonl, viewer, write } from "../harness/conversations.ts";
 
 const AT = "2026-11-26T08:00:00.000Z";
+/** The finished job closes today: the Jobs list shows only today's done rows, so a fixed date expires. */
+const CLOSED = new Date().toISOString();
 /** The marker src/send.ts writes per delivered send; a repair carries `purpose`. */
 const sent = (purpose?: string, receipt = "delivered") => ({
 	source: "cp", type: "prompt_sent", ts: AT,
@@ -40,7 +42,7 @@ function seed(stateDir: string) {
 		job("cp-review", "ship", "pr", "held", "implementer"), job("cp-gate", "research", "pipeline", "waiting", "planner"),
 		job("cp-qa", "research", "answer", "waiting", "qa"), job("cp-ops", "research", "local", "waiting", "ops"),
 		job("cp-custom", "ship", "pr", "waiting", "my-profile"), job("cp-bare", "ship", "pr", "waiting"),
-		{ ...job("cp-done", "ship", "pr", "done", "implementer"), closed_at: AT },
+		{ ...job("cp-done", "ship", "pr", "done", "implementer"), closed_at: CLOSED },
 	] });
 	const run = (id: string, ...parts: string[]) => join(stateDir, "runs", id, ...parts);
 	for (const id of Object.keys(EXPECTED)) {
