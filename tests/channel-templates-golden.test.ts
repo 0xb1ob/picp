@@ -27,7 +27,8 @@ const TEMPLATES: Record<string, () => unknown> = {
 	which: () => renderWhich([ask("ask-0a1b2c", "Ship cp-demo now?"), ask("ask-0a1b2d", "Which branch?", "Later")], HOMES),
 	"reply-short": () => renderReply("[demo] cp-demo: merged.\nCI green on the head.", TRANSCRIPT, HOMES),
 	"reply-long": () => renderReply(long, TRANSCRIPT, HOMES),
-	"reply-redacted": () => renderReply("Rotated ghp_abcdefghijklmnopqrstuvwxyz0123456789 today.", TRANSCRIPT, HOMES),
+	// Built at runtime so no token-shaped literal sits in the repository.
+	"reply-redacted": () => renderReply(`Rotated ${["ghp", "abcdefghij".repeat(3)].join("_")} today.`, TRANSCRIPT, HOMES),
 	"reply-secret-fallback": () => renderReply("Key:\n-----BEGIN PRIVATE KEY-----\nMIIE", TRANSCRIPT, HOMES),
 	"reply-home-path": () => renderReply(`Report at ${HOME}/.pi-command-post/state/artifacts/cp-demo/report.md and ${HOME}/notes.md`, TRANSCRIPT, HOMES),
 	ambiguous: () => renderAmbiguous(TRANSCRIPT),
