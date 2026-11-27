@@ -1,0 +1,12 @@
+{
+  "text": "[demo] cp-demo: merged.\nCI green on the head.",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "[demo] cp-demo: merged.\nCI green on the head."
+      }
+    }
+  ]
+}

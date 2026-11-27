@@ -25,6 +25,7 @@
  */
 import { spawn as spawnChild } from "node:child_process";
 import {
+	channelsConfigured,
 	childArgv,
 	childEnv,
 	DAEMON_PROTOCOL,
@@ -63,9 +64,10 @@ export const KILL_GRACE_MS = 10_000;
 /** Longer than the 45-min update timeout: a hold never outlives a dead updater for long. */
 export const HOLD_MAX_MS = 50 * 60_000;
 
-type Long = "parent" | "viewer" | "device-notify";
+type Long = "parent" | "viewer" | "device-notify" | "channel-gateway";
 const SENDER = "device-notify";
-const LONGS = ["parent", "viewer", SENDER] as const;
+const GATEWAY = "channel-gateway";
+const LONGS = ["parent", "viewer", SENDER, GATEWAY] as const;
 type Job = "health" | "update";
 
 export type InnerSignal = "SIGTERM" | "SIGKILL";
@@ -90,6 +92,8 @@ export interface InnerPorts {
 	log(line: string, atMs?: number): void;
 	/** Whether the home uses the remote feature (`remoteFeatureConfigured`): only then does the pairing-alert sender run. Absent: never. */
 	remoteConfigured?(): boolean;
+	/** Whether `data/channels.json` exists: only then does the channel gateway run. Absent: never. */
+	channelsConfigured?(): boolean;
 	/** The cloudflared controller's own I/O (`daemon-tunnel.ts`, remote dashboard PR 2c). Absent: no tunnel. */
 	tunnel?: TunnelIo;
 	/** `data/daemon.json` now: each viewer start takes its `boards_*` from it. Absent: the loaded copy. */
@@ -199,23 +203,26 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 	};
 
 	/**
-	 * The pairing-alert sender: started at begin, on every tick and on a hold's release while the home uses the remote
-	 * feature and it is idle (never started here, stopped or held). A crash restarts on its own backoff timer; a failed
-	 * one waits for a reload. It holds no fleet authority and never gates readiness.
+	 * The sender (remote feature) and the channel gateway (`data/channels.json`): started at begin, each tick and a hold's
+	 * release when idle; a crash restarts on its backoff, a failed one waits for a reload. Neither gates readiness.
 	 */
-	const startSender = (): void => {
+	const startOptional = (role: typeof SENDER | typeof GATEWAY, wanted: (() => boolean) | undefined, what: string): void => {
 		if (stopping || record.hold) return;
-		const unit = record.units[SENDER];
+		const unit = record.units[role];
 		if (unit && (unit.pid !== undefined || (unit.state !== "stopped" && unit.state !== "held"))) return;
-		let wanted = false;
+		let want = false;
 		try {
-			wanted = ports.remoteConfigured?.() ?? false;
+			want = wanted?.() ?? false;
 		} catch (error) {
-			ports.log(`cannot tell whether the remote feature is configured: ${(error as Error).message}`);
+			ports.log(`cannot tell whether ${what}: ${(error as Error).message}`);
 		}
-		if (!wanted) return;
-		record.units[SENDER] ??= long(prior?.units?.[SENDER]);
-		startLong(SENDER);
+		if (!want) return;
+		record.units[role] ??= long(prior?.units?.[role]);
+		startLong(role);
+	};
+	const startOptionals = (): void => {
+		startOptional(SENDER, ports.remoteConfigured, "the remote feature is configured");
+		startOptional(GATEWAY, ports.channelsConfigured, "data/channels.json exists");
 	};
 
 	const onLongExit = (role: Long, pid: number | undefined, code: number | null, signal: string | null): void => {
@@ -283,7 +290,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 		ports.log(`viewer hold released (${why})`);
 		if (record.units.viewer.pid === undefined && !stopping) startLong("viewer");
 		else save();
-		startSender();
+		startOptionals();
 		if (!stopping) tunnel?.reconcile();
 	};
 
@@ -320,7 +327,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 	const tick = (): void => {
 		if (stopping) return;
 		if (record.hold && now() >= Date.parse(record.hold.until)) release("its 50-min deadline passed");
-		startSender();
+		startOptionals();
 		if (!record.hold) tunnel?.reconcile();
 		tickJob("health");
 		tickJob("update");
@@ -334,7 +341,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 			record.units.viewer.state = "held";
 			save();
 		} else startLong("viewer");
-		startSender();
+		startOptionals();
 		if (!record.hold) tunnel?.reconcile();
 		const initial = { parent: record.units.parent.pid, viewer: record.units.viewer.pid };
 		later(() => {
@@ -404,7 +411,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 				return { ok: true };
 			case "hold":
 				record.hold = { until: iso(now() + HOLD_MAX_MS) };
-				for (const role of ["viewer", SENDER] as const) {
+				for (const role of ["viewer", SENDER, GATEWAY] as const) {
 					const unit = record.units[role];
 					if (unit?.pid !== undefined) terminate(role);
 					else if (unit) unit.state = "held";
@@ -487,6 +494,7 @@ if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process
 			send,
 			log,
 			remoteConfigured: () => remoteFeatureConfigured(paths.dataDir),
+			channelsConfigured: () => channelsConfigured(paths.dataDir),
 			readConfig: () => readDaemonConfig(paths.config),
 			tunnel: tunnelIo(paths, (config as DaemonConfig).home, { ...baseEnv(process.env), PATH: (config as DaemonConfig).path }, log),
 		},

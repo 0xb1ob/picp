@@ -24,7 +24,7 @@ import { basename } from "node:path";
 import { daemonPaths } from "${FILES}";
 const fake = new URL("../../../fake/", import.meta.url).pathname;
 const role = { "supervise.ts": "parent", "cli.ts": "viewer", "health.ts": "health", "update.ts": "update", "device-notify.ts": "device-notify",
-	"daemon-runtime.ts": "inner", "daemon.ts": "outer" }[basename(process.argv[1])];
+	"gateway.ts": "channel-gateway", "daemon-runtime.ts": "inner", "daemon.ts": "outer" }[basename(process.argv[1])];
 const take = () => {
 	const file = fake + role + ".mode";
 	if (!existsSync(file)) return "run";
@@ -76,13 +76,14 @@ function rig(t: TestContext, { scale = 1, inner = "real" as "real" | "stub", out
 	const scratch = createScratchHome();
 	const home = scratch.path, paths = daemonPaths(home);
 	const app = join(home, "app"), fake = join(home, "fake"), fakeBin = join(home, "fake bin");
-	for (const dir of [paths.dataDir, join(app, "src/service"), join(app, "src/viewer"), join(app, "src/push"), join(app, "src/tunnel"), fake, fakeBin]) mkdirSync(dir, { recursive: true });
+	for (const dir of [paths.dataDir, join(app, "src/service"), join(app, "src/viewer"), join(app, "src/push"), join(app, "src/channels"), join(app, "src/tunnel"), fake, fakeBin]) mkdirSync(dir, { recursive: true });
 	const stubbed = new Set(["supervise.ts", "health.ts", "update.ts", ...(inner === "stub" ? ["daemon-runtime.ts"] : [])]);
 	for (const name of [...OUTER_SOURCES, ...INNER_SOURCES]) if (!stubbed.has(name)) copyFileSync(join(REPO_ROOT, "src/service", name), join(app, "src/service", name));
 	copyFileSync(join(REPO_ROOT, "src/tunnel/cloudflared.ts"), join(app, "src/tunnel/cloudflared.ts"));
 	for (const name of stubbed) writeFileSync(join(app, "src/service", name), STUB);
 	writeFileSync(join(app, "src/viewer/cli.ts"), STUB);
 	writeFileSync(join(app, "src/push/device-notify.ts"), STUB);
+	writeFileSync(join(app, "src/channels/gateway.ts"), STUB);
 	// A stand-in outer lives in an app of its own: the CLI is always the real daemon.ts.
 	const stubApp = join(home, "stub-app");
 	if (outer === "stub") {
@@ -416,6 +417,7 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	const due = (ms: number) => new Date(started + ms).toISOString();
 	assert.match(status(), new RegExp(`^parent: running pid ${parent!.pid}, 0 restart\\(s\\)\nviewer: running pid ${viewer!.pid}, 0 restart\\(s\\)\nhealth: idle, next ${due(180_000)}\nupdate: idle, next ${due(600_000)}$`, "m"));
 	assert.deepEqual(r.starts("device-notify"), []);
+	assert.deepEqual(r.starts("channel-gateway"), [], "no data/channels.json: no channel gateway");
 
 	// The viewer is restarted 10 s after any exit, with the boards_* keys data/daemon.json holds then (a Settings save),
 	// not the copy this inner loaded at its start.
@@ -476,6 +478,15 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	await r.until("the sender restart", () => r.starts("device-notify").length === 2);
 	assert.match(r.log(), new RegExp(`device-notify pid ${sender!.pid} exited \\(SIGKILL\\); restart 1 in 5s`));
 
+	// Channel gateway phase 1: data/channels.json starts the gateway on the next tick, once, with the core env.
+	writeFileSync(join(r.paths.dataDir, "channels.json"), "{}");
+	await r.until("the channel gateway", () => r.starts("channel-gateway").length === 1);
+	const [gateway] = r.starts("channel-gateway");
+	assert.deepEqual([gateway!.argv, roleEnv(gateway!.env)], [[], { ...core, CP_DAEMON_ROLE: "channel-gateway" }]);
+	await sleep(1_000);
+	assert.equal(r.starts("channel-gateway").length, 1, "started once");
+	assert.match(status(), new RegExp(`^channel-gateway: running pid ${gateway!.pid}, 0 restart\\(s\\)$`, "m"));
+
 	// hold stops the viewer and the sender until release, at most 50 min.
 	const viewers = r.starts("viewer").length;
 	assert.deepEqual(await op("hold"), { id: "hold", ok: true });
@@ -515,7 +526,7 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	assert.ok(killAt - termAt >= 9_000 && killAt - termAt < 18_000, `${killAt - termAt} ms`);
 	assert.match(r.log(), /stopped \(oneshots left running\)/);
 	assert.ok(alive(update!.pid), "the update run outlives the daemon");
-	for (const role of ["viewer", "device-notify"]) assert.equal(r.starts(role).every((e) => !alive(e.pid)), true, role);
+	for (const role of ["viewer", "device-notify", "channel-gateway"]) assert.equal(r.starts(role).every((e) => !alive(e.pid)), true, role);
 });
 
 test("P14-daemon-runtime-fail: a parent crash loop backs off and fails; exit 78 is never restarted; a failed spawn has no pid; another protocol is refused", { timeout: 300_000 }, async (t) => {

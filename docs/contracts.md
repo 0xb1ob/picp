@@ -48,6 +48,7 @@ Schema version: `SCHEMA_VERSION = 1`. Every persisted file carries
   - [The decision details pane](#the-decision-details-pane)
 - [Web Push](#web-push)
 - [Dashboard control](#dashboard-control)
+- [Channel gateway (phase 1)](#channel-gateway-phase-1)
 - [Status view](#status-view)
 - [Watch](#watch)
 - [Doctor](#doctor)
@@ -1389,6 +1390,22 @@ misses again, its segments tagged by ids, then the human line it answers, then t
 else `general`. Records are keyed by `session_file`, the assistant `message.timestamp` and the text block's index;
 the operator Full transcript applies `split` and folds `superseded`/`hidden` behind a toggle. The transcript is never
 edited. A guard failure sets the `header-guard` status line and never fails the turn.
+
+**Operator turn binding** (`src/operator-turn-binding.ts`, channel gateway phase 1). The bridge feeds one accumulator
+from its own turn events — `message_start` (the end-anchored dashboard marker it appended, or every `(dc-…)` line of
+its offline-inbox replay), `tool_execution_end` of a successful `cp_parent` (an opened ask's `ask-` id, a send's `ps-`
+id, an `answer` report's `{state, delivery, id, url, text}`), the ask guard's own card, and `agent_end` (the last
+assistant message's last non-empty text block) — and at `agent_settled` appends one line to
+`state/operator/turn-bindings.jsonl` (0600, append-only, never rotated) for a turn that consumed at least one `dc-` id:
+`{v: 1, at, session_file, dc_ids, channel_dc_ids, ask_ids, send_ids, answer, reply: {ts, block, text?, truncated?},
+outcome}`. `channel_dc_ids` are the ids whose marker carried `; channel` (a replayed entry counts only when it ends in its own
+channel line and marker and the entries match the replay header's count, so typed text adds no id);
+`reply` is the header guard's key (`message.timestamp`, block index), and only a turn with a channel id keeps the reply
+text, capped at 4,000 code points. The Claude CLI operator fires the same events into the same handlers (its
+session engine under `src/drivers/`), but its record holds no reply and its log's timestamps are its own, so the
+text — not the pointer — is what a reader uses. No model sees the file. A failure sets a status line and never fails
+the turn. Known limit: a Claude turn that throws outside the query never fires `agent_settled`, so its ids join the
+next record (the gateway's one-request rule bounds that).
 
 `cp_parent doctor` and `version` read the live parent's `/doctor` and
 `/cp-version` output, including its mode and home. They require a settled
@@ -7126,6 +7143,18 @@ and never into the body; a `; remote` marker without a well-formed line above it
 bridge appends its own marker after the user's text, typed text can neither forge nor strip the label. Local
 messages and journals without `remote` keep their exact bytes.
 
+**Channel provenance (channel gateway phase 1).** The socket `send` frame takes `channel: {kind: "slack", team,
+channel, user, thread_ts}` next to `remote` (`channelOrigin`, `src/viewer/control-files.ts`: Slack id shapes only, no
+names, no text); only the channel gateway sends it, and only after the bridge's `status` answers `channel_provenance` ≥ 1
+(`CHANNEL_PROVENANCE_VERSION`). The bridge journals it on the `request` line, refuses a malformed one 400 after that
+line and `remote` plus `channel` together 400, honours the gateway's `client_id` for a channel `answer` as for a message,
+keeps `channel` through the dashboard queue, a restart reload and the offline inbox (`held` lines), and injects one line
+directly above the marker (below a `[cp-remote …]` line, if any) —
+`[cp-channel — through slack, not this terminal: sent by U… in D…]` — with a trailing `; channel` field on the marker.
+`parseDashboardText` reads it into `channel: {kind, user, channel}` (`SessionEntry.channel`) and never into the body; a
+`; channel` marker without its line is not a marker, so typed text can neither forge nor strip it. The viewer's HTTP
+routes never accept the field from a body.
+
 **Device CLI owner socket (PR 1c, `src/viewer/device-control.ts`).** The viewer process that owns the store serves
 `state/devices/control.sock` (0600, bound under umask 077) beside `state/devices/control.json` (0600: version, pid,
 socket, 32-byte token, started_at) in a 0700 directory. Frames are newline JSON `{v: 1, token, op, args}` of at most
@@ -7222,6 +7251,78 @@ trusted like your terminal. The operator instruction is defence in depth, not a 
 approved exception to the ask-only push rule; a push reaching the push service is not proof a phone showed it, and
 permission, absent push setup or a push-service outage is reported as such, never as delivered. The durable pairing
 event and its dashboard notice are the guarantee.
+
+## Channel gateway (phase 1)
+
+One Slack request round trip, as an internal app in the human's own workspace (`src/channels/`). The gateway holds no
+authority: it never calls the parent, never writes `asks.jsonl`, never answers a card itself; its only writes into the
+operator path are the control socket's `send` (with channel provenance, above) and offline-inbox `held` lines.
+
+**Role.** cp-daemon's `channel-gateway` child (`src/channels/gateway.ts`) runs only while `data/channels.json` exists:
+the sender's restart rules, held and released with the viewer by an update, stopped with the others, never a readiness
+condition; `cp-daemon status` lists it and a failed one is a `/doctor` warning. Env: the core keys plus
+`CP_DAEMON_ROLE=channel-gateway`. One per home (`state/channels/gateway.lock`). A bad config or token file exits 78.
+
+**Config.** `data/channels.json`, strict: `{"slack": {"token_file": "/abs/path", "team_id": "T…", "user_ids": ["U…"]
+(1-10), "channel_ids": ["C…"|"G…"] (0-20), "dashboard_url"?: "https://…"}}`. Links point at `dashboard_url`, else the
+viewer's `public_url`, else the live tunnel origin, else the message says to open the dashboard.
+
+**Token file.** Outside the CP runtime root, a regular file (no symlink) this user owns, mode no wider than 0600 (wider
+refuses: "mode 0644; chmod 600 it"), holding `SLACK_APP_TOKEN=xapp-…` and `SLACK_BOT_TOKEN=xoxb-…` lines. Read once,
+held in memory, never logged or printed; errors name a path, mode or field only. `xapp-` tokens are a secret pattern.
+
+**Slack setup** (the human, after merge). Create an app from scratch in your own workspace; Socket Mode on; an
+app-level token with `connections:write` (the `xapp-` token); bot token scopes `app_mentions:read`, `im:history`,
+`chat:write`; event subscriptions `app_mention` and `message.im`; Interactivity on (Socket Mode delivers it, no request
+URL); App Home → Messages tab on; install to the workspace (the `xoxb-` token).
+
+**Socket Mode.** One outbound WebSocket on Node's global `WebSocket` (no dependency, no listener) to the URL
+`apps.connections.open` returns; each envelope is acked by `{envelope_id}` before any work and envelopes are handled
+one at a time; `disconnect` or a close reconnects with a fresh URL (1 s doubling to 60 s, reset on `hello`).
+`CP_CHANNELS_SLACK_API` overrides the Web API base only for an `http://127.0.0.1:<port>/` test seam.
+
+**Inbound.** Only `app_mention` and `message` with `channel_type: "im"`. The gateway's own echo and message edits are
+ignored; a bot, any other `subtype` or no `user` is refused. Allowlist on every event and every tap: `team_id`, the user
+in `user_ids`, the channel a DM or in `channel_ids`, and never a shared channel (`is_ext_shared_channel`). Anything
+else gets no reply and one `refused` line `{at, reason, via: "event"|"action", team?, user?, channel?}` — never its
+text. Only the allowlisted user's own line is delivered (no thread-context capture); in a channel, a thread reply is
+received only when it @mentions the bot. The text (leading mentions stripped) is at most 4,000 code points, else one
+"Too long" reply and nothing is sent. The thread is `thread_ts ?? ts`. A new thread mints a `dc-` id, journals
+`request {dc_id, at, team, channel, thread_ts, user, kind, chars, parent?, ask_id?}` (never the text) in
+`state/channels/journal.jsonl` (0600), posts "Got it. Queued." in the thread, then sends. A reply in a thread that has
+requests: exactly one open chat-answerable card there → `<ask-id>: <text>` as a message; two or more → one "Which
+question?" post with every card's buttons (`routed which`), nothing sent; none → a new message with `parent`. A button
+(`block_actions`, value `<ask-id>:<i>`) sends `{kind: "answer", ask_id, label}`, the dashboard click's frame, only
+while the ask is open and chat-answerable. With no operator session a message is held in the offline inbox (never
+waking a session; an answer is refused) and the 24 h rule applies.
+
+**Chat-answerable.** An operator ask with no `source_escalation`, or one whose escalation is `product_ambiguity`,
+`scope_expansion`, `conflicting_acceptance` or `loop_exhausted`. Any other kind, or one that cannot be read, gets a
+link-only "Decision needed on the dashboard" notice with no buttons, and typed text is never its answer.
+
+**Outbound** (`src/channels/outbound.ts`, every 500 ms). New turn bindings (the first pass baselines at the end of the
+file) whose `channel_dc_ids` name journaled requests post, in that request's thread: one card per opened ask (question,
+one button per option label, the recommendation marked "(recommended)", a dashboard link) or a notice, then the reply —
+the `answer` report's text when its delivery is `report`, else the reply as written when ≤3 lines and ≤500 characters,
+else its first paragraph clipped to 300 characters plus a link. A turn that consumed more than one request id
+(dashboard or chat, even in one thread) posts only "Replied on the dashboard" in each bound thread, never reply text. Asks opened in a turn no chat request started stay on the dashboard and push. Every string
+is scrubbed first: home paths become `<home>`, secrets are redacted, and text still matching a secret pattern is never
+sent (the link-only fallback is). Templates: `src/channels/render.ts`, golden-pinned.
+
+**Receipts and mirror.** The status message is edited as the request moves: "Queued behind the operator's current
+turn.", "Delivered.", "Operator offline: held for up to 24 h.", "Dropped: <reason>", "Not delivered: <reason>" (from the
+bridge's answer, `state/operator/dashboard.jsonl` outcomes and the inbox's `delivered`/`dropped`). When `asks.jsonl`
+answers or withdraws a posted card, the card is edited to "Answered: <label>" or "Withdrawn" with its buttons removed.
+
+**Ledger and retry.** `state/channels/outbox.json` (0600), the push sweep's shape: one item per Slack message keyed by
+purpose, written before any network call; each write is a `chat.postMessage` or, once it has a `ts`, a `chat.update`
+of the current version. At most one write per second per channel, in order per channel; a 429 waits its `Retry-After`
+(rounded up to the record's second), other faults back off 30 s doubling to 900 s; five attempts, then `failed`, one log
+line and a `delivery` journal line. Settled items are pruned past 200.
+
+**Never pushed to a channel.** Artifact bodies, worker output, diffs, plans, evidence text, home paths, tokens, pairing
+codes and links, the device list, protocol traffic, and anything about another request: the gateway posts only the
+templates above, filled from the ask, the reply or answer report text and receipts.
 
 ## Reading the plan
 

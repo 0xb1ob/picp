@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { type Json, jsonl, viewer, write } from "../harness/conversations.ts";
 
-const AT = "2026-11-26T08:00:00.000Z";
+/** A few minutes before the run, never before local midnight: the Jobs list shows only done rows finished today. */
+const AT = new Date(Math.max(Date.now() - 5 * 60_000, new Date().setHours(0, 0, 0, 0))).toISOString();
 /** The marker src/send.ts writes per delivered send; a repair carries `purpose`. */
 const sent = (purpose?: string, receipt = "delivered") => ({
 	source: "cp", type: "prompt_sent", ts: AT,

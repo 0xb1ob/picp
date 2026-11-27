@@ -33,6 +33,8 @@ export interface SessionEntry {
  dashboard_id?: string; ask_id?: string; ask?: TranscriptAsk;
  /** Full transcript: a dashboard message from a paired remote device — its sender (null: a local message a device edited) and remote editors. */
  remote?: {sender: {device_id: string; name: string} | null; editors: {device_id: string; name: string}[]};
+ /** Full transcript: a message the channel gateway delivered — the chat sender's and channel's Slack ids. */
+ channel?: {kind: "slack"; user: string; channel: string};
  /** Full transcript: the upload ids a dashboard message's marker names (`; images=`), shown as thumbnails from `/api/operator/uploads/<id>`. */
  images?: string[];
  /** Text upload ids and display metadata from the upload journal; links serve text/plain only. */

@@ -20,8 +20,11 @@ export const EXIT_CONFIG = 78;
 export const OUTER_SOURCES = ["daemon.ts", "daemon-outer.ts", "daemon-files.ts", "daemon-control.ts", "daemon-backend.ts"] as const;
 export const LOG_MAX_BYTES = 5 * 1024 * 1024;
 
-/** `device-notify` (remote dashboard PR 2): the pairing-alert sender, run only on a home with the remote feature. */
-export type Role = "parent" | "viewer" | "device-notify" | "health" | "update";
+/**
+ * `device-notify` (remote dashboard PR 2): the pairing-alert sender, run only on a home with the remote feature.
+ * `channel-gateway` (channel gateway phase 1): the Slack gateway, run only while `data/channels.json` exists.
+ */
+export type Role = "parent" | "viewer" | "device-notify" | "channel-gateway" | "health" | "update";
 export type Backend = "systemd" | "detached";
 
 const RUNTIME_DIR = ".pi-command-post";
@@ -183,13 +186,15 @@ export function childEnv(config: DaemonConfig, role: Role, base: Record<string, 
 			return { ...base, ...core, ...host, ...boardsEnv(config), CP_DAEMON_ROLE: "viewer" };
 		case "device-notify":
 			return { ...base, ...core, CP_DAEMON_ROLE: "device-notify" };
+		case "channel-gateway":
+			return { ...base, ...core, CP_DAEMON_ROLE: "channel-gateway" };
 		case "health":
 		case "update":
 			return { ...base, ...core, ...port, ...host, CP_DAEMON_JOB: role };
 	}
 }
 
-const SCRIPTS: Record<Role, string> = { parent: "src/service/supervise.ts", viewer: "src/viewer/cli.ts", "device-notify": "src/push/device-notify.ts", health: "src/service/health.ts", update: "src/service/update.ts" };
+const SCRIPTS: Record<Role, string> = { parent: "src/service/supervise.ts", viewer: "src/viewer/cli.ts", "device-notify": "src/push/device-notify.ts", "channel-gateway": "src/channels/gateway.ts", health: "src/service/health.ts", update: "src/service/update.ts" };
 
 /** The script a role runs: also the `ps` needle that identifies a recorded pid as ours. */
 export function roleScript(config: Pick<DaemonConfig, "app">, role: Role): string {
@@ -232,11 +237,11 @@ export interface ChildExit {
 
 export type RestartDecision = { action: "restart"; delayMs: number } | { action: "stopped" } | { action: "failed"; result: "exit-code" | "start-limit-hit" };
 
-/** The sender (`device-notify`) follows the supervisor's rules, and like the viewer stays down while an update holds. */
-export function decideRestart(role: "parent" | "viewer" | "device-notify", history: RestartHistory, exit: ChildExit, now: number): RestartDecision {
+/** The sender and the channel gateway follow the supervisor's rules and, like the viewer, stay down while held. */
+export function decideRestart(role: "parent" | "viewer" | "device-notify" | "channel-gateway", history: RestartHistory, exit: ChildExit, now: number): RestartDecision {
 	if (exit.requested) return { action: "stopped" };
 	if (role === "viewer") return history.held ? { action: "stopped" } : { action: "restart", delayMs: VIEWER_RESTART_MS };
-	if (exit.code === 0 || (role === "device-notify" && history.held)) return { action: "stopped" };
+	if (exit.code === 0 || (role !== "parent" && history.held)) return { action: "stopped" };
 	if (exit.code === EXIT_CONFIG) return { action: "failed", result: "exit-code" };
 	if (history.starts.filter((at) => now - at < START_LIMIT_INTERVAL_MS).length >= START_LIMIT_BURST) return { action: "failed", result: "start-limit-hit" };
 	return { action: "restart", delayMs: restartDelay(history.restarts + 1) };
@@ -301,10 +306,13 @@ export interface RuntimeRecord {
 	started_at: string;
 	/** The outer's start: timers carry over across reloads of the same outer only. */
 	daemon_started_at: string;
-	/** `device-notify` is absent on a home without the remote feature, and in records written before it existed. */
-	units: { parent: LongUnit; viewer: LongUnit; "device-notify"?: LongUnit; health: OneshotUnit; update: OneshotUnit };
+	/** Absent: `device-notify` with no remote feature, `channel-gateway` with no `data/channels.json`; older records. */
+	units: { parent: LongUnit; viewer: LongUnit; "device-notify"?: LongUnit; "channel-gateway"?: LongUnit; health: OneshotUnit; update: OneshotUnit };
 	hold?: { until: string };
 }
+
+/** Channel gateway phase 1: this file's presence starts the `channel-gateway` role (src/channels/config.ts). */
+export const channelsConfigured = (dataDir: string): boolean => existsSync(join(dataDir, "channels.json"));
 
 export const readDaemonState = (paths: DaemonPaths): DaemonState | undefined => readJson<DaemonState>(paths.state);
 export const readDaemonRuntime = (paths: DaemonPaths): RuntimeRecord | undefined => readJson<RuntimeRecord>(paths.runtime);

@@ -247,8 +247,8 @@ function status(paths: DaemonPaths, config: DaemonConfig | undefined, ports: Cli
 		lines.push(`cp-daemon: running pid ${pid}${state ? ` since ${state.started_at} (${state.backend}), outer ${state.outer_hash.slice(0, 12)}` : ""}`);
 		if (state) lines.push(`inner: ${state.inner.state}${state.inner.detail ? ` (${state.inner.detail})` : ""}${state.inner.pid ? ` pid ${state.inner.pid}` : ""}, ${state.inner.restarts} restart(s)`);
 		if (runtime) {
-			// `device-notify` (the pairing-alert sender) only on a home with the remote feature, and only in newer records.
-			for (const role of ["parent", "viewer", "device-notify"] as const) {
+			// `device-notify` (the pairing-alert sender) and `channel-gateway` only when configured, and only in newer records.
+			for (const role of ["parent", "viewer", "device-notify", "channel-gateway"] as const) {
 				const unit = runtime.units[role];
 				if (unit) lines.push(`${role}: ${unit.state}${unit.result ? ` (${unit.result})` : ""}${unit.pid ? ` pid ${unit.pid}` : ""}, ${unit.restarts} restart(s)`);
 			}

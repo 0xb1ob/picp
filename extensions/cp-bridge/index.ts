@@ -51,6 +51,7 @@ import { OPERATOR_NOTE } from "../../src/operator-note.ts";
 import { operatorCacheWarming } from "../../src/operator-cache-warming.ts";
 import { AskGuard, lastAssistantText } from "../../src/ask-guard.ts";
 import { HeaderGuard } from "../../src/header-guard.ts";
+import { OperatorTurnBinding } from "../../src/operator-turn-binding.ts";
 import { operatorStartContext } from "../../src/operator-context.ts";
 import { OperatorJobsQuerySchema, operatorJobs } from "../../src/operator-ledger.ts";
 import { ALWAYS_AVAILABLE, registryProbe } from "../../src/routing.ts";
@@ -330,9 +331,12 @@ export default function (pi: ExtensionAPI): void {
 	const guarded = <T>(what: string, fn: () => T): T | undefined => {
 		try { return fn(); } catch (error) { setStatusLine(sessionCtx, "ask-guard", `ask guard: ${what} failed (${(error as Error).message})`); return undefined; }
 	};
+	// Channel gateway: per settled turn, the dc- ids it consumed and what it produced (src/operator-turn-binding.ts).
+	const turnBinding = new OperatorTurnBinding();
 	// mz0: relays raised during the operator's own turn wait for it to settle, then go out as one message.
 	pi.on("agent_start", async (_event, ctx) => { sessionCtx = ctx ?? sessionCtx; consumer.started(); });
-	pi.on("tool_execution_end", async (event) => askGuard.toolEnded(event as never));
+	pi.on("tool_execution_end", async (event) => { askGuard.toolEnded(event as never); guarded("turn binding", () => turnBinding.toolEnded(event as never)); });
+	pi.on("agent_end", async (event) => { guarded("turn binding", () => turnBinding.agentEnd((event as { messages?: unknown }).messages)); });
 	pi.on("tool_call", async (event, ctx) => {
 		const reason = operatorToolRefusal(event.toolName, event.input, ctx?.cwd ?? process.cwd(), backstopTarget);
 		if (!reason) return undefined;
@@ -343,7 +347,7 @@ export default function (pi: ExtensionAPI): void {
 		const { context, outcome } = event as { context?: { contextMessages?: unknown }; outcome?: string };
 		if (outcome !== undefined && outcome !== "completed") return undefined; // an aborted or failed run is never nudged
 		const result = guarded("settle check", () => askGuard.beforeSettle(lastAssistantText(context?.contextMessages), operatorAsks));
-		if (result?.card) setStatusLine(sessionCtx, "ask-guard", `ask guard: opened ${result.card.id} for a question asked in prose`);
+		if (result?.card) { setStatusLine(sessionCtx, "ask-guard", `ask guard: opened ${result.card.id} for a question asked in prose`); turnBinding.askOpened(result.card.id); }
 		if (result?.continue) headerGuard.askNudged(); // the re-send was forced back: it never added headers
 		if (result) return result.continue ? { entries: result.entries, continue: true } : undefined;
 		// issue 589: only when the ask guard stayed quiet
@@ -354,6 +358,7 @@ export default function (pi: ExtensionAPI): void {
 		sessionCtx = ctx ?? sessionCtx;
 		// pi emits agent_start for every loop, a forced continuation included: a run ends only when it settles
 		askGuard.runEnded(); headerGuard.runEnded();
+		guarded("turn binding", () => turnBinding.settled(operatorStateDir(), sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE ?? null));
 		consumer.settled({ idle: sessionCtx?.isIdle?.() ?? false, pending: (sessionCtx?.hasPendingMessages?.() ?? true) || deferredRelays > 0 });
 		// cp-y43c: hand one queued dashboard message over from a macrotask: pi defers a prompt sent inside agent_settled
 		// behind its own settle-time turns and refuses it if one of them compacts (never seen, never failed).
@@ -366,6 +371,7 @@ export default function (pi: ExtensionAPI): void {
 		observe([message]);
 		control?.observe(message);
 		guarded("answering a detected card", () => askGuard.userMessage(message, operatorAsks));
+		guarded("turn binding", () => turnBinding.userMessage(message));
 	});
 	pi.on("context", async (event) => {
 		const messages = (event as { messages?: unknown }).messages;

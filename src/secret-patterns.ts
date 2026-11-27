@@ -12,6 +12,7 @@ export const SECRET_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = Obje
 	{ name: "github token", re: GITHUB_TOKEN_RE },
 	{ name: "aws access key id", re: /\b(AKIA|ASIA)[A-Z0-9]{16}\b/ },
 	{ name: "slack token", re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/ },
+	{ name: "slack app token", re: /\bxapp-\d-[A-Za-z0-9-]{10,}\b/ },
 	{ name: "bearer token", re: /\bBearer\s+[A-Za-z0-9._-]{20,}/ },
 	{ name: "inline credential assignment", re: /\b[A-Z][A-Z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)\s*=\s*\S{8,}/ },
 ]);

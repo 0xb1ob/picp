@@ -38,7 +38,7 @@ export const INBOX_MAX_HELD = 20;
 /** A held message older than this is dropped and reported at delivery, never injected. */
 export const INBOX_MAX_AGE_MS = 24 * 3_600_000;
 export type InboxLine =
-	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; remote?: RemoteDevice }
+	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; remote?: RemoteDevice; channel?: ChannelOrigin }
 	| { type: "delivered"; id: string; at: string }
 	| { type: "dropped"; id: string; at: string; reason: string };
 
@@ -179,9 +179,37 @@ export function readControlRecord(stateDir: string): { state: "absent" } | { sta
 	return { state: "ok", record: raw as ControlRecord };
 }
 
-/** The trailing marker keeps ask/images ordering; files and then `; remote` are additive final fields. */
-export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], files?: readonly string[], remote = false): string {
-	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}${files?.length ? `; files=${files.join(",")}` : ""}${remote ? "; remote" : ""}]`;
+/** The trailing marker keeps ask/images ordering; files, `; remote` and then `; channel` are additive final fields. */
+export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], files?: readonly string[], remote = false, channel = false): string {
+	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}${files?.length ? `; files=${files.join(",")}` : ""}${remote ? "; remote" : ""}${channel ? "; channel" : ""}]`;
+}
+
+/**
+ * Channel gateway phase 1: the chat thread a message came from — only ever the gateway's own allowlisted, journaled
+ * request (src/channels/inbound.ts), never a viewer body. Slack ids only; no names, no text.
+ */
+export type ChannelOrigin = { kind: "slack"; team: string; channel: string; user: string; thread_ts: string };
+/** What a transcript entry shows: who sent it, and where. */
+export type ChannelSender = { kind: "slack"; user: string; channel: string };
+/** The bridge's `status` reply carries this; the gateway sends only to a bridge that keeps channel provenance. */
+export const CHANNEL_PROVENANCE_VERSION = 1;
+const SLACK_TEAM_RE = /^T[A-Z0-9]{2,20}$/;
+const SLACK_CHANNEL_RE = /^[CDG][A-Z0-9]{2,20}$/;
+const SLACK_USER_RE = /^[UW][A-Z0-9]{2,20}$/;
+export function channelOrigin(value: unknown): ChannelOrigin | undefined {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const { kind, team, channel, user, thread_ts, ...rest } = value as Record<string, unknown>;
+	if (Object.keys(rest).length || kind !== "slack") return undefined;
+	if (typeof team !== "string" || !SLACK_TEAM_RE.test(team) || typeof channel !== "string" || !SLACK_CHANNEL_RE.test(channel)) return undefined;
+	if (typeof user !== "string" || !SLACK_USER_RE.test(user) || typeof thread_ts !== "string" || !/^\d{10}\.\d{6}$/.test(thread_ts)) return undefined;
+	return { kind, team, channel, user, thread_ts };
+}
+const CHANNEL_LINE_RE = /^\[cp-channel — through slack, not this terminal: sent by ([UW][A-Z0-9]{2,20}) in ([CDG][A-Z0-9]{2,20})\]$/;
+/** The line injected right above the marker (and below a remote line), after the user's text. */
+export const channelLine = (origin: ChannelOrigin): string => `[cp-channel — through slack, not this terminal: sent by ${origin.user} in ${origin.channel}]`;
+function parseChannelLine(line: string): ChannelSender | undefined {
+	const match = CHANNEL_LINE_RE.exec(line);
+	return match ? { kind: "slack", user: match[1]!, channel: match[2]! } : undefined;
 }
 
 /**
@@ -228,25 +256,27 @@ function parseRemoteLine(line: string): RemoteInvolvement | undefined {
 	return out;
 }
 
-const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?(; remote)?\\]\\s*$`);
+const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?(; remote)?(; channel)?\\]\\s*$`);
 
 /**
- * A marker with `; remote` is a remote message: its line directly above the marker names the devices (`remote`) and is
- * not part of the body. Only the bridge writes that flag, after the user's text, so typed text can neither forge nor
- * remove it; a flagged marker without a well-formed line is not a marker.
+ * `; channel` / `; remote`: the bridge's `[cp-channel …]` line sits right above the marker, a `[cp-remote …]` one above
+ * that; neither is body. Typed text comes first, so it can't forge or strip them; a flag without its line is no marker.
  */
-export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; images?: string[]; files?: string[]; remote?: RemoteInvolvement } | undefined {
+export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; images?: string[]; files?: string[]; remote?: RemoteInvolvement; channel?: ChannelSender } | undefined {
 	const match = MARKER_RE.exec(text);
 	if (!match) return undefined;
 	let body = text.slice(0, match.index).trimEnd();
-	let remote: RemoteInvolvement | undefined;
-	if (match[5]) {
+	const lastLine = <T>(parse: (line: string) => T | undefined): T | undefined => {
 		const cut = body.lastIndexOf("\n");
-		remote = parseRemoteLine(body.slice(cut + 1));
-		if (!remote) return undefined;
-		body = body.slice(0, Math.max(cut, 0)).trimEnd();
-	}
-	return { body, id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { images: match[3].split(",") } : {}), ...(match[4] ? { files: match[4].split(",") } : {}), ...(remote ? { remote } : {}) };
+		const parsed = parse(body.slice(cut + 1));
+		if (parsed) body = body.slice(0, Math.max(cut, 0)).trimEnd();
+		return parsed;
+	};
+	const channel = match[6] ? lastLine(parseChannelLine) : undefined;
+	if (match[6] && !channel) return undefined;
+	const remote = match[5] ? lastLine(parseRemoteLine) : undefined;
+	if (match[5] && !remote) return undefined;
+	return { body, id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { images: match[3].split(",") } : {}), ...(match[4] ? { files: match[4].split(",") } : {}), ...(remote ? { remote } : {}), ...(channel ? { channel } : {}) };
 }
 
 export const isAskId = (value: unknown): value is string => typeof value === "string" && ASK_ID_RE.test(value);
@@ -270,7 +300,7 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
  * and one `upload` line per stored attachment: ids, mime, bytes and optional display names, never contents.
  */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice; command?: string }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice; channel?: ChannelOrigin; command?: string }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting" | "restarted" | "dropped" | "cancelled"; reason: string | null }
 	/** cp-y43c: a dashboard-queued message's text replaced before its handoff; every revision stays in the journal. */
 	| { type: "edited"; by: "bridge"; id: string; at: string; peer: string | null; text: string; remote?: RemoteDevice }

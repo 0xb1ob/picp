@@ -1,0 +1,86 @@
+[
+  {
+    "text": "Got it. Queued.",
+    "blocks": [
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": "Got it. Queued."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "text": "Queued behind the operator's current turn.",
+    "blocks": [
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": "Queued behind the operator's current turn."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "text": "Delivered.",
+    "blocks": [
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": "Delivered."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "text": "Operator offline: held for up to 24 h.",
+    "blocks": [
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": "Operator offline: held for up to 24 h."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "text": "Dropped: held longer than 24 h",
+    "blocks": [
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": "Dropped: held longer than 24 h"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "text": "Not delivered: the offline inbox is unwritable at &lt;home&gt;/state",
+    "blocks": [
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": "Not delivered: the offline inbox is unwritable at &lt;home&gt;/state"
+          }
+        ]
+      }
+    ]
+  }
+]

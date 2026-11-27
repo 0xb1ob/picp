@@ -9,7 +9,7 @@
  * `injected` preceded. Its text is the request's, replaced by each `edited` line in journal order. Read-only.
  */
 import { readFileSync, statSync } from "node:fs";
-import { controlJournalFile, DASHBOARD_ID_RE, type RemoteDevice, remoteDevice, withEditor } from "./control-files.ts";
+import { type ChannelOrigin, channelOrigin, controlJournalFile, DASHBOARD_ID_RE, type RemoteDevice, remoteDevice, withEditor } from "./control-files.ts";
 
 export interface QueuedMessage {
 	id: string;
@@ -24,6 +24,8 @@ export interface QueuedMessage {
 	/** Remote dashboard PR 1c: the paired device that sent it, and every remote device that edited it (first-edit order). */
 	remote?: RemoteDevice;
 	editors?: RemoteDevice[];
+	/** Channel gateway: the chat thread it came from, carried to the handoff's `[cp-channel …]` line. */
+	channel?: ChannelOrigin;
 	/** The latest outcome, or `requested` before the first one. */
 	state: string;
 	/** True once a handoff (`injected`) line exists: never queued, edited or handed over again. */
@@ -55,11 +57,11 @@ export function readQueueJournal(stateDir: string): { messages: Map<string, Queu
 		if (!line || typeof line.id !== "string" || !DASHBOARD_ID_RE.test(line.id)) continue;
 		if (line.type === "request") {
 			if (line.kind !== "message" || messages.has(line.id) || typeof line.at !== "string") continue;
-			const images = strings(line.images), files = strings(line.files), remote = remoteDevice(line.remote);
+			const images = strings(line.images), files = strings(line.files), remote = remoteDevice(line.remote), channel = channelOrigin(line.channel);
 			messages.set(line.id, {
 				id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, text: typeof line.text === "string" ? line.text : "", ask_id: typeof line.ask_id === "string" ? line.ask_id : null,
 				deliver: typeof line.deliver === "string" ? line.deliver : "prompt", ...(images ? { images } : {}), ...(files ? { files } : {}),
-				...(remote ? { remote } : {}), state: "requested", injected: false, edits: 0,
+				...(remote ? { remote } : {}), ...(channel ? { channel } : {}), state: "requested", injected: false, edits: 0,
 			});
 			continue;
 		}

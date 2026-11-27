@@ -27,8 +27,7 @@ export type SenderLease = { ok: true; release(): void } | { ok: false; holder: n
  * shortcut: two senders replacing the same stale lease at once can both win; the daemon starts one per home, so upgrade
  * to an flock only if a second launcher ever appears.
  */
-export function acquireSenderLease(stateDir: string, pid: number, isSender: (pid: number) => boolean): SenderLease {
-	const file = deviceNotifyLeaseFile(stateDir);
+export function acquireSenderLease(stateDir: string, pid: number, isSender: (pid: number) => boolean, file = deviceNotifyLeaseFile(stateDir)): SenderLease {
 	const holder = (): number | null => {
 		try {
 			const value = (JSON.parse(readFileSync(file, "utf8")) as { pid?: unknown }).pid;
