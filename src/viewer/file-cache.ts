@@ -1,6 +1,6 @@
 import { realpathSync, statSync, type Stats } from "node:fs";
 
-const identity = (s: Stats) => `${s.dev}:${s.ino}:${s.mtimeMs}:${s.ctimeMs}:${s.size}`;
+export const identity = (s: Stats): string => `${s.dev}:${s.ino}:${s.mtimeMs}:${s.ctimeMs}:${s.size}`;
 
 let scope: Map<string, string | {error: unknown}> | undefined;
 let memo: Map<string, unknown> | undefined;

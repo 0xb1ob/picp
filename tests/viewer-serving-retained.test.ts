@@ -10,7 +10,8 @@ import { createScratchHome } from "./harness/index.ts";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { refreshStream, refreshStreams } from "../src/viewer/refresh-stream.ts";
-import { createResource, POLL_MS, pollStream, type Stream } from "../viewer-app/resource.ts";
+import type { ViewName } from "../src/viewer/view-sources.ts";
+import { createResource, FRESH_MS, POLL_MS, pollStream, type Stream } from "../viewer-app/resource.ts";
 import { applyDelta, diffJson } from "../src/viewer/json-delta.ts";
 import { readObject } from "../src/viewer/sessions.ts";
 import { routingEvents } from "../src/viewer/overview-health.ts";
@@ -71,7 +72,8 @@ test("refreshes coalesce, failed GETs preserve stale data, hidden requests canno
  resource.setVisible(true); streams[1]!.dispatchEvent(new Event("open"));
  pending[3]!.resolve(new Response('{"n":2}')); await tick();
  assert.equal(resource.snapshot().status, "live");
- t.mock.timers.tick(5001); assert.equal(resource.snapshot().status,"stale","a stalled GET must not leave an old success live forever");
+ t.mock.timers.tick(FRESH_MS - 1); assert.equal(resource.snapshot().status,"live","the 30 s clock refresh lands well inside the window");
+ t.mock.timers.tick(2); assert.equal(resource.snapshot().status,"stale","a stalled GET must not leave an old success live forever");
  streams[1]!.dispatchEvent(new Event("error")); assert.equal(resource.snapshot().status, "stale");
  resource.dispose(); assert.equal(streams[1]!.closed, true);
 });
@@ -123,18 +125,19 @@ test("delta responses: the held version is sent as base, a delta is applied, a m
  resource.dispose();
 });
 
-// `refreshStream` backpressure: a 25-byte tick never fills a real socket buffer.
-test("view SSE emits immediately without a transcript, respects backpressure, and clears its clock once", t => {
+// `refreshStream` backpressure: a refresh frame never fills a real socket buffer.
+test("view SSE emits immediately without a transcript, merges changes while the client cannot take them, and stops once", t => {
  t.mock.timers.enable({apis:["setInterval"]});
  const req = Object.assign(new EventEmitter(),{method:"GET"});
- const chunks: string[] = []; let accepts = false;
+ const chunks: string[] = []; let accepts = false, change: (views: readonly ViewName[]) => void = () => {}, subscribed = 0;
  const res = Object.assign(new EventEmitter(),{writeHead:() => {},write:(chunk:string) => {chunks.push(chunk);return accepts;},end:() => {}});
- refreshStream(req as IncomingMessage,res as unknown as ServerResponse);
- assert.equal(refreshStreams(),1); assert.match(chunks[0]!,/retry: 2000\n\nevent: refresh\ndata: \{\}/); assert.doesNotMatch(chunks.join(""),/id:/);
- t.mock.timers.tick(6000); assert.equal(chunks.length,1);
- accepts = true; res.emit("drain"); t.mock.timers.tick(2000); assert.equal(chunks.length,2);
+ refreshStream(req as IncomingMessage,res as unknown as ServerResponse,["overview","jobs"],(_views,onChange) => { change = onChange; subscribed++; return () => { subscribed--; }; });
+ assert.equal(refreshStreams(),1); assert.equal(chunks[0],'retry: 2000\n\nevent: refresh\ndata: {"views":["overview","jobs"]}\n\n'); assert.doesNotMatch(chunks.join(""),/id:/);
+ change(["jobs"]); change(["overview"]); t.mock.timers.tick(60_000); assert.equal(chunks.length,1,"a client that cannot take more gets nothing, not even a heartbeat");
+ accepts = true; res.emit("drain"); assert.deepEqual(chunks.slice(1),['event: refresh\ndata: {"views":["overview","jobs"]}\n\n'],"drain writes one merged frame");
+ t.mock.timers.tick(25_000); assert.equal(chunks.at(-1),": hb\n\n");
  req.emit("close"); res.emit("error",new Error("closed"));
- assert.equal(refreshStreams(),0); t.mock.timers.tick(6000);assert.equal(chunks.length,2);
+ assert.deepEqual([refreshStreams(),subscribed],[0,0]); const written = chunks.length; change(["overview"]); t.mock.timers.tick(60_000); assert.equal(chunks.length,written);
 });
 
 // `bindHostRefusal` accepts: an accepted host binds, which this runner cannot do for a tailnet, LAN or ULA address.

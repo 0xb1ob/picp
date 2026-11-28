@@ -7,6 +7,8 @@ interface Dependencies {
  stream(url: string): Stream;
 }
 export const POLL_MS = 2000;
+/** A live read turns stale this long after its last success: the server's 30 s clock refresh lands twice in it. */
+export const FRESH_MS = 75_000;
 /**
  * Quick Tunnels carry no SSE, so the quick listener's app polls: a two-second clock speaking the stream's events.
  * `createResource` keeps doing the rest — it opens this only while visible, coalesces overlapping refreshes and closes it on hide/dispose.
@@ -64,7 +66,7 @@ export function createResource<T>(url: string, streamUrl: string, deps: Dependen
    }
    version = response.headers.get("x-cp-version");
    clearTimeout(freshness);
-   freshness = setTimeout(() => { state.status = "stale"; state.error = "Refresh delayed"; publish(); },5000);
+   freshness = setTimeout(() => { state.status = "stale"; state.error = "Refresh delayed"; publish(); },FRESH_MS);
    state = {data, status:connected ? "live" : "stale", error:null}; publish();
   } catch {
    if (generation !== current || disposed) return;
