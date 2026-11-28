@@ -889,3 +889,14 @@ test("P21-render-css: the served stylesheet ellipsizes long one-line cells, grid
 	assert.ok(tracks.length === 9 && title(+wide[1]!) >= 240 && title(+wide[1]!) >= 1.5 * fixed[0]!, `Title ${title(+wide[1]!)}px at ${wide[1]}px`);
 	assert.ok(title(1440) >= 45 * 7 && +wide[1]! <= 1200, `Title ${title(1440)}px at 1440 fits 45 characters; 9 columns by 1200 px`);
 });
+
+test("P21-lag-log: CP_VIEW_LAG_LOG=<ms> makes cp-view write one event-loop lag line per interval; unset, it writes none", { timeout: 180_000 }, async (t) => {
+	assert.equal(process.env.CP_VIEW_LAG_LOG, undefined, "the unset half needs a test environment without the variable");
+	const [logged, quiet] = await Promise.all([dashboard(t, { requireTailnet: false, env: { CP_VIEW_LAG_LOG: "300" } }), dashboard(t, { requireTailnet: false })]);
+	const lines = (output: string) => output.split("\n").filter((line) => line.startsWith("cp-view: loop-lag"));
+	const seen = await until(() => lines(logged.output()), (list) => list.length >= 2, "two lag lines", 10_000);
+	for (const line of seen) assert.match(line, /^cp-view: loop-lag p50=\d+\.\d p99=\d+\.\d max=\d+\.\d$/);
+	await new Promise((done) => setTimeout(done, 1_000));
+	assert.deepEqual(lines(quiet.output()), [], "no lag line without the variable");
+	assert.equal((await logged.get("/healthz")).status, 200, "the readout leaves the viewer serving");
+});

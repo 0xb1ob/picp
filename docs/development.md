@@ -83,6 +83,14 @@ Live-model suites are operator-run only and skipped by default:
 [tests/e2e/README.md](../tests/e2e/README.md) and
 [tests/harness/README.md](../tests/harness/README.md).
 
+### Dashboard load measurement
+
+`CP_VIEW_LAG_LOG=<ms> bin/cp-view …` writes one `cp-view: loop-lag p50= p99= max=` stderr line per interval (off when unset).
+`node tests/harness/dashboard-probe.ts --url <viewer> --hashes '#sessions?view=you&transcript=1,#jobs' --seconds 60` opens
+desktop tabs with real streams (GETs only) and prints requests/min, bytes/min per path, streams, `/healthz` p50/p99 and
+control TTFB as one JSON line. `node tests/harness/dashboard-change-driver.ts --home "$(mktemp -d)" --seed 1800 --seconds 75`
+seeds a fixture home and changes it on a fixed rhythm; it writes only under `--home` and refuses the live home.
+
 ### Worker compaction telemetry
 
 `extensions/worker-reporter/compaction.ts` appends `worker-compaction-observation` custom session entries (`v: 1`);

@@ -4,6 +4,7 @@
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { type ClientRequest, request as httpRequest } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -81,22 +82,37 @@ export async function operatorSession(t: Context, stateDir: string, isIdle = () 
 	return { injected, control };
 }
 
-/** `read`: the app has parsed the reply's JSON and its state updates have run (set one macrotask after `json()`). */
-type Requested = { method: string; path: string; headers: Record<string, string>; body: string | null; status: number; read: boolean };
+/**
+ * `read`: the app has parsed the reply's JSON and its state updates have run (set one macrotask after `json()`).
+ * `bytes`: the body as sent (content-length, else the decoded length); `ms`: request start to response headers.
+ */
+type Requested = { method: string; path: string; headers: Record<string, string>; body: string | null; status: number; read: boolean; bytes: number; ms: number };
+
+/** One real stream of a `liveStream` tab: its URL path, the bytes and events it carried, and `refresh` data seen. */
+export type StreamLog = { path: string; bytes: number; events: number; comments: number; data: string[] };
+
+/**
+ * `liveStream`: the app's EventSource connects to the viewer and speaks what the server sends (default: a fake that
+ * speaks only on `refresh()`/`signal()`); `origin`: a viewer not on 127.0.0.1:`port`; `getOnly`: a write is never sent.
+ */
+export type TabOptions = { liveStream?: boolean; origin?: string; getOnly?: boolean };
 
 /**
  * Opens the served app at `hash`; `hold`-matched requests wait for `release()`; `headers` ride on every request (a
  * remote device's cookie); `wide` makes min-width media queries match, a desktop tab with no layout.
  */
-export async function openTab(t: Context, port: number, hash: string, storage: Map<string, string> = new Map(), hold?: RegExp, extra: Record<string, string> = {}, wide = false) {
+export async function openTab(t: Context, port: number, hash: string, storage: Map<string, string> = new Map(), hold?: RegExp, extra: Record<string, string> = {}, wide = false, options: TabOptions = {}) {
 	let release = () => {};
 	const held = new Promise<void>((done) => (release = done));
-	const origin = `http://127.0.0.1:${port}`;
-	const page = await call(port, "/", { headers: extra });
+	const origin = options.origin ? new URL(options.origin).origin : `http://127.0.0.1:${port}`;
+	const load = (path: string) => options.origin
+		? fetch(new URL(path, origin), { headers: extra }).then(async (reply) => ({ status: reply.status, text: await reply.text() }))
+		: call(port, path, { headers: extra });
+	const page = await load("/");
 	if (page.status !== 200) throw new Error(`GET / answered ${page.status}: ${page.text.slice(0, 200)}`);
 	const script = /<script type="module" src="([^"]+)"/.exec(page.text)?.[1];
 	if (!script) throw new Error("the served page names no app script");
-	const code = (await call(port, script, { headers: extra })).text;
+	const code = (await load(script)).text;
 	const { window, document, Event, CustomEvent, EventTarget: DomEventTarget, HTMLElement } = parseHTML(page.text) as unknown as Record<string, any>;
 	HTMLElement.prototype.scrollIntoView ??= () => {}; // linkedom has no layout
 	const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -108,9 +124,11 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	let closed = false;
 	const requests: Requested[] = [];
 	const started: string[] = []; // every request as the app makes it, before a `hold` answers
-	const location = { hash, pathname: "/", search: "", origin, host: `127.0.0.1:${port}`, protocol: "http:", get href() { return `${origin}/${location.hash}`; }, assign() {}, replace() {}, reload() {} };
+	const location = { hash, pathname: "/", search: "", origin, host: new URL(origin).host, protocol: "http:", get href() { return `${origin}/${location.hash}`; }, assign() {}, replace() {}, reload() {} };
 	const confirms: string[] = [];
-	const sources = new Set<EventTarget>(); // the app's streams: they speak only when the test calls `refresh()`
+	const sources = new Set<EventTarget>(); // the app's streams: fake ones speak only when the test calls `refresh()`
+	const streams: StreamLog[] = [];
+	const refused: string[] = []; // writes a `getOnly` tab answered itself
 	let answerConfirm = true;
 	const browserFetch = async (input: string | URL | Request, init: RequestInit = {}) => {
 		if (closed) return new Promise<Response>(() => {});
@@ -119,10 +137,17 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 		if (hold?.test(url.pathname)) await held;
 		const headers = new Headers({ ...extra, ...Object.fromEntries(new Headers(init.headers)) });
 		const method = (init.method ?? "GET").toUpperCase();
+		if (options.getOnly && method !== "GET" && method !== "HEAD") {
+			refused.push(`${method} ${url.pathname}`);
+			return new Response(null, { status: 405 });
+		}
 		headers.set("sec-fetch-site", "same-origin");
 		if (method !== "GET" && method !== "HEAD") headers.set("origin", origin);
+		const sentAt = performance.now();
 		const response = await fetch(url, { ...init, headers });
-		const row: Requested = { method, path: `${url.pathname}${url.search}`, headers: Object.fromEntries(headers), body: typeof init.body === "string" ? init.body : null, status: response.status, read: false };
+		const length = response.headers.get("content-length");
+		const row: Requested = { method, path: `${url.pathname}${url.search}`, headers: Object.fromEntries(headers), body: typeof init.body === "string" ? init.body : null, status: response.status, read: false, bytes: Number(length ?? 0), ms: performance.now() - sentAt };
+		if (length === null) void response.clone().arrayBuffer().then((body) => { row.bytes = body.byteLength; }, () => {});
 		requests.push(row);
 		const json = response.json.bind(response);
 		response.json = () => json().finally(() => void setTimeout(() => { row.read = true; }, 0));
@@ -142,7 +167,9 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 		requestAnimationFrame: (fn: (at: number) => void) => track(setTimeout)(() => fn(performance.now()), 16), cancelAnimationFrame: clearTimeout,
 		localStorage: { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, String(v)), removeItem: (k: string) => void storage.delete(k) },
 		matchMedia: (query: string) => ({ matches: wide && /min-width/.test(query), addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
-		EventSource: class extends EventTarget { onmessage = null; onerror = null; constructor() { super(); sources.add(this); } close() { sources.delete(this); } },
+		EventSource: options.liveStream
+			? liveEventSource(origin, extra, sources, streams, () => closed)
+			: class extends EventTarget { onmessage = null; onerror = null; constructor() { super(); sources.add(this); } close() { sources.delete(this); } },
 		confirm: (text: string) => (confirms.push(text), answerConfirm),
 	};
 	for (const [key, value] of Object.entries({ location, localStorage: sandbox.localStorage, matchMedia: sandbox.matchMedia, confirm: sandbox.confirm, navigator: sandbox.navigator, scrollTo() {}, requestAnimationFrame: sandbox.requestAnimationFrame })) {
@@ -151,12 +178,19 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	sandbox.self = sandbox.globalThis = window;
 	createContext(sandbox);
 	runInContext(code, sandbox, { filename: script });
-	const close = () => { closed = true; for (const handle of timers) clearTimeout(handle); timers.clear(); };
+	const close = () => {
+		closed = true;
+		for (const handle of timers) clearTimeout(handle);
+		timers.clear();
+		if (options.liveStream) for (const source of [...sources]) (source as unknown as { close(): void }).close();
+	};
 	t.after(close);
 	const root = document.getElementById("app") as Element;
 	const text = () => root.textContent ?? "";
 	return {
-		window, document, root, requests, started, confirms, storage, close, text, release,
+		window, document, root, requests, started, confirms, storage, close, text, release, streams, refused,
+		/** Streams connected to the viewer right now (a `liveStream` tab; a fake stream never connects). */
+		openStreams: () => [...sources].filter((source) => (source as { readyState?: number }).readyState === 1).length,
 		/** The page's global scope: a test adds what linkedom lacks (a ResizeObserver) before the screen mounts. */
 		globals: sandbox,
 		/** Every open stream fires `type` ("open", "error"), as a browser's EventSource does on connect or loss. */
@@ -178,7 +212,100 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 		type: (el: Element, value: string) => { (el as unknown as { value: string }).value = value; el.dispatchEvent(new Event("input", { bubbles: true })); },
 		decline: () => { answerConfirm = false; },
 		accept: () => { answerConfirm = true; },
-		reopen: (next = hash) => (close(), openTab(t, port, next, storage, undefined, extra, wide)),
+		reopen: (next = hash) => (close(), openTab(t, port, next, storage, undefined, extra, wide, options)),
+	};
+}
+
+/**
+ * A browser's EventSource over a real `http.request`: SSE frames become events with `.data`, comments are counted, a
+ * dropped stream reconnects after the server's `retry:` and a non-200 or non-SSE answer closes it for good.
+ */
+function liveEventSource(origin: string, extra: Record<string, string>, sources: Set<EventTarget>, streams: StreamLog[], tabClosed: () => boolean) {
+	return class LiveEventSource extends EventTarget {
+		readyState = 0;
+		onopen: ((event: Event) => void) | null = null;
+		onmessage: ((event: Event) => void) | null = null;
+		onerror: ((event: Event) => void) | null = null;
+		readonly url: string;
+		#log: StreamLog;
+		#req: ClientRequest | null = null;
+		#retry = 3000;
+		#again: ReturnType<typeof setTimeout> | undefined;
+		constructor(url: string) {
+			super();
+			this.url = new URL(url, origin).href;
+			const at = new URL(this.url);
+			this.#log = { path: `${at.pathname}${at.search}`, bytes: 0, events: 0, comments: 0, data: [] };
+			streams.push(this.#log);
+			sources.add(this);
+			this.#connect();
+		}
+		close() {
+			this.readyState = 2;
+			clearTimeout(this.#again);
+			this.#req?.destroy();
+			this.#req = null;
+			sources.delete(this);
+		}
+		#fire(type: string, data?: string) {
+			if ((this.readyState === 2 && type !== "error") || tabClosed()) return;
+			const event = new globalThis.Event(type);
+			if (data !== undefined) Object.defineProperty(event, "data", { value: data });
+			this.dispatchEvent(event);
+			const handler = type === "open" ? this.onopen : type === "error" ? this.onerror : type === "message" ? this.onmessage : null;
+			handler?.call(this, event);
+		}
+		#lost() {
+			if (this.readyState === 2) return;
+			this.readyState = 0;
+			this.#req = null;
+			this.#fire("error");
+			this.#again = setTimeout(() => this.#connect(), this.#retry);
+		}
+		#connect() {
+			if (this.readyState === 2 || tabClosed()) return;
+			const req = httpRequest(this.url, { headers: { ...extra, accept: "text/event-stream", "cache-control": "no-cache" } }, (res) => {
+				if (res.statusCode !== 200 || !String(res.headers["content-type"]).startsWith("text/event-stream")) {
+					res.resume();
+					this.close();
+					this.#fire("error");
+					return;
+				}
+				this.readyState = 1;
+				this.#fire("open");
+				let buffer = "", type = "", data: string[] = [];
+				res.setEncoding("utf8");
+				res.on("data", (chunk: string) => {
+					this.#log.bytes += Buffer.byteLength(chunk);
+					buffer += chunk;
+					const lines = buffer.split(/\r\n|\r|\n/);
+					buffer = lines.pop() ?? "";
+					for (const line of lines) {
+						if (line === "") {
+							if (data.length) {
+								this.#log.events++;
+								if (type === "refresh") this.#log.data.push(data.join("\n"));
+								this.#fire(type || "message", data.join("\n"));
+							}
+							type = "";
+							data = [];
+						} else if (line.startsWith(":")) this.#log.comments++;
+						else {
+							const colon = line.indexOf(":");
+							const field = colon < 0 ? line : line.slice(0, colon), value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
+							if (field === "event") type = value;
+							else if (field === "data") data.push(value);
+							else if (field === "retry" && /^\d+$/.test(value)) this.#retry = Number(value);
+						}
+					}
+				});
+				res.on("end", () => this.#lost());
+				res.on("error", () => this.#lost());
+			});
+			req.on("error", () => this.#lost());
+			req.end();
+			this.#req = req;
+		}
 	};
 }
 
