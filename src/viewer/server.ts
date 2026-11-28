@@ -172,10 +172,11 @@ function viewKey(req: IncomingMessage): string {
 
 /**
  * A strong ETag for this principal and URL at the current source revisions of `views`, computed without building the
- * view; the process nonce makes a pre-restart tag miss.
+ * view; the process nonce makes a pre-restart tag miss. Undefined when the revision read throws: the view answers untagged.
  */
-function viewEtag(req: IncomingMessage, options: ViewerOptions, views: readonly ViewName[]): string {
-	const revision = revisions(options, options.clock?.());
+function viewEtag(req: IncomingMessage, options: ViewerOptions, views: readonly ViewName[]): string | undefined {
+	let revision: Map<ViewName, string>;
+	try { revision = revisions(options, options.clock?.(), views); } catch { return undefined; }
 	return `"${processNonce()}.${createHash("sha1").update([viewKey(req), ...views.map((view) => revision.get(view))].join("|")).digest("hex")}"`;
 }
 
@@ -188,9 +189,10 @@ function notModified(req: IncomingMessage, res: ServerResponse, etag: string): b
 }
 
 /** `respond` with the ETag header to send on its 200, unless the client already holds this revision of `views`. */
-function conditional(req: IncomingMessage, res: ServerResponse, options: ViewerOptions, views: readonly ViewName[], respond: (tag: { etag: string }) => void): void {
+function conditional(req: IncomingMessage, res: ServerResponse, options: ViewerOptions, views: readonly ViewName[], respond: (tag: { etag?: string }) => void): void {
 	const etag = viewEtag(req, options, views);
-	if (!notModified(req, res, etag)) respond({ etag });
+	if (etag === undefined) respond({});
+	else if (!notModified(req, res, etag)) respond({ etag });
 }
 
 /**

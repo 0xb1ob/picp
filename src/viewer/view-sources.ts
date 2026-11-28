@@ -115,12 +115,12 @@ export function changedViews(before: Sources, after: Sources): Set<ViewName> {
 	return out;
 }
 
-/** Per view: the sha1 of its sources' sorted identities and the clock bucket of `now`. */
-export function revisions(state: ViewerState, now = Date.now()): Map<ViewName, string> {
-	const lines = new Map<ViewName, string[]>(VIEW_NAMES.map((view) => [view, []]));
-	for (const [key, source] of sources(state, now)) for (const view of source.views) lines.get(view)!.push(`${key}=${source.id}`);
+/** Per view in `views` (default all): the sha1 of its sources' sorted identities and the clock bucket of `now`. */
+export function revisions(state: ViewerState, now = Date.now(), views: Views = VIEW_NAMES): Map<ViewName, string> {
+	const lines = new Map<ViewName, string[]>(views.map((view) => [view, []]));
+	for (const [key, source] of sources(state, now)) for (const view of source.views) lines.get(view)?.push(`${key}=${source.id}`);
 	const bucket = Math.floor(now / CLOCK_MS);
-	return new Map(VIEW_NAMES.map((view) => [view, createHash("sha1").update(`${bucket}\n${lines.get(view)!.sort().join("\n")}`).digest("hex")]));
+	return new Map(views.map((view) => [view, createHash("sha1").update(`${bucket}\n${lines.get(view)!.sort().join("\n")}`).digest("hex")]));
 }
 
 /** `?views=a,b` (1–14 known names, duplicates dropped) or the legacy `?view=a`, in VIEW_NAMES order; else undefined. */
