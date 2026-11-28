@@ -171,19 +171,31 @@ function viewKey(req: IncomingMessage): string {
 }
 
 /**
- * A strong ETag for this principal and URL at the current source revisions of `views`, computed without building the
- * view; the process nonce makes a pre-restart tag miss. Undefined when the revision read throws: the view answers untagged.
+ * A strong ETag for this principal and URL at the current source revisions of `views`, computed without building
+ * the view; the process nonce makes a pre-restart tag miss. Undefined when the revision read throws: untagged.
  */
 function viewEtag(req: IncomingMessage, options: ViewerOptions, views: readonly ViewName[]): string | undefined {
 	let revision: Map<ViewName, string>;
-	try { revision = revisions(options, options.clock?.(), views); } catch { return undefined; }
+	try {
+		revision = revisions(options, options.clock?.(), views);
+	} catch (error) {
+		(options.log ?? ((line) => process.stderr.write(line)))(`cp-view: ${views.join("+")} revision read failed (${error instanceof Error ? error.name : "error"}); answering untagged\n`);
+		return undefined;
+	}
 	return `"${processNonce()}.${createHash("sha1").update([viewKey(req), ...views.map((view) => revision.get(view))].join("|")).digest("hex")}"`;
 }
 
-/** A 304 with `etag` and no body when `If-None-Match` lists it (a proxy's `W/` form matches; `*` does not). */
+/** The tag of a keyed-delta body at revision `etag`: a delta is another representation than the full body. */
+const deltaEtag = (etag: string): string => `${etag.slice(0, -1)}.d"`;
+
+/**
+ * A 304 with `etag` and no body when `If-None-Match` lists it (a proxy's `W/` form matches; `*` does not). A delta
+ * tag matches only a request that names a delta base: a full request holding a delta's tag gets the full body.
+ */
 function notModified(req: IncomingMessage, res: ServerResponse, etag: string): boolean {
 	const asked = req.headers["if-none-match"];
-	if (typeof asked !== "string" || !asked.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) return false;
+	const held = typeof req.headers["x-cp-delta-base"] === "string" ? [etag, deltaEtag(etag)] : [etag];
+	if (typeof asked !== "string" || !asked.split(",").some((tag) => held.includes(tag.trim().replace(/^W\//, "")))) return false;
 	send(res, 304, "application/json; charset=utf-8", "", { ...JSON_CSP, etag });
 	return true;
 }
@@ -207,7 +219,8 @@ function sendView(req: IncomingMessage, res: ServerResponse, value: unknown, ext
 	const version = viewVersions.record(key, json);
 	if (base !== undefined) {
 		const delta = JSON.stringify(diffJson(JSON.parse(base), JSON.parse(json)) ?? {});
-		if (delta.length < json.length / 2) return send(res, 200, "application/json; charset=utf-8", delta, { ...JSON_CSP, ...extra, "x-cp-version": version, "x-cp-delta-base": asked as string });
+		const tagged: Record<string, string> = extra.etag ? { etag: deltaEtag(extra.etag) } : {};
+		if (delta.length < json.length / 2) return send(res, 200, "application/json; charset=utf-8", delta, { ...JSON_CSP, ...extra, ...tagged, "x-cp-version": version, "x-cp-delta-base": asked as string });
 	}
 	send(res, 200, "application/json; charset=utf-8", json, { ...JSON_CSP, ...extra, "x-cp-version": version });
 }

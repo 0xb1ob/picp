@@ -48,8 +48,23 @@ const statId = (path: string): string => { try { return identity(statSync(path))
 const list = (dir: string): string[] => { try { return readdirSync(dir); } catch { return []; } };
 
 type Transcripts = Array<[key: string, path: string, views: Views]>;
-/** Per state dir: live job ids and resolved transcripts, reused while their inputs' stat identities and bucket hold. */
-const derived = new Map<string, { live?: [string, string[]]; transcripts?: [string, Transcripts] }>();
+type Derived = { live?: [string, string[]]; transcripts?: [string, Transcripts] };
+/** Per state dir: live job ids and resolved transcripts, reused while their inputs' stat identities hold. */
+const derived = new Map<string, Derived>();
+/** State dirs a process keeps derived reads for; the least recently read goes first. */
+export const DERIVED_MAX = 16;
+let parses = 0;
+
+/** The derived-read memo: state dirs held and the fleet or session parses done so far in this process. */
+export const derivedReads = (): { homes: number; parses: number } => ({ homes: derived.size, parses });
+
+function memoFor(stateDir: string): Derived {
+	const memo = derived.get(stateDir) ?? {};
+	derived.delete(stateDir);
+	derived.set(stateDir, memo);
+	if (derived.size > DERIVED_MAX) derived.delete(derived.keys().next().value!);
+	return memo;
+}
 
 function liveIds(state: ViewerState): string[] {
 	return fleetJobs(state).flatMap((job) => {
@@ -72,7 +87,7 @@ function transcripts(state: ViewerState, live: readonly string[]): Transcripts {
 }
 
 /** One stat pass over every declared source of `state`; fleet and session records are parsed only when they move. */
-export function sources(state: ViewerState, now = Date.now()): Sources {
+export function sources(state: ViewerState): Sources {
 	const out: Sources = new Map();
 	const put = (key: string, path: string, views: Views) => out.set(key, { id: statId(path), views });
 	const tree = (key: string, dir: string, views: Views) => {
@@ -93,16 +108,14 @@ export function sources(state: ViewerState, now = Date.now()): Sources {
 		else if (name === "artifacts" || name === "boards") put(name, path, REPORTS);
 		else if (!IGNORED.has(name) && !IGNORED_SUFFIX.test(name)) put(name, path, VIEW_NAMES);
 	}
-	// The bucket bounds a missed input (a transcript's first record, a realpath) to one CLOCK_MS, as for any source.
-	const bucket = Math.floor(now / CLOCK_MS), id = (key: string) => out.get(key)?.id ?? "absent";
-	const memo = derived.get(state.stateDir) ?? {};
-	derived.set(state.stateDir, memo);
-	const liveKey = `${bucket}|${id("fleet.json")}`;
-	if (memo.live?.[0] !== liveKey) memo.live = [liveKey, liveIds(state)];
+	const id = (key: string) => out.get(key)?.id ?? "absent";
+	const memo = memoFor(state.stateDir);
+	const liveKey = id("fleet.json");
+	if (memo.live?.[0] !== liveKey) { parses++; memo.live = [liveKey, liveIds(state)]; }
 	const live = memo.live[1];
 	for (const job of live) tree(`runs/${job}`, join(state.stateDir, "runs", job), RUNS);
 	const inputs = [liveKey, id("sessions"), id("sessions/cp-parent-control.json"), id(`sessions/${OPERATOR_SESSIONS_FILE}`), ...live.map((job) => id(`runs/${job}/status.json`))].join("|");
-	if (memo.transcripts?.[0] !== inputs) memo.transcripts = [inputs, transcripts(state, live)];
+	if (memo.transcripts?.[0] !== inputs) { parses++; memo.transcripts = [inputs, transcripts(state, live)]; }
 	for (const [key, path, views] of memo.transcripts[1]) put(key, path, views);
 	return out;
 }
@@ -118,7 +131,7 @@ export function changedViews(before: Sources, after: Sources): Set<ViewName> {
 /** Per view in `views` (default all): the sha1 of its sources' sorted identities and the clock bucket of `now`. */
 export function revisions(state: ViewerState, now = Date.now(), views: Views = VIEW_NAMES): Map<ViewName, string> {
 	const lines = new Map<ViewName, string[]>(views.map((view) => [view, []]));
-	for (const [key, source] of sources(state, now)) for (const view of source.views) lines.get(view)?.push(`${key}=${source.id}`);
+	for (const [key, source] of sources(state)) for (const view of source.views) lines.get(view)?.push(`${key}=${source.id}`);
 	const bucket = Math.floor(now / CLOCK_MS);
 	return new Map(views.map((view) => [view, createHash("sha1").update(`${bucket}\n${lines.get(view)!.sort().join("\n")}`).digest("hex")]));
 }
@@ -142,7 +155,7 @@ function tick(state: ViewerState, watch: Watch, now: () => number): void {
 	const at = now(), bucket = Math.floor(at / CLOCK_MS);
 	let changed: Set<ViewName>;
 	try {
-		const next = sources(state, at);
+		const next = sources(state);
 		changed = bucket !== watch.bucket ? new Set(VIEW_NAMES) : changedViews(watch.last, next);
 		watch.last = next;
 	} catch {
@@ -164,7 +177,7 @@ export function subscribe(state: ViewerState, views: Views, onChange: (changed: 
 	let watch = watches.get(state.stateDir);
 	if (!watch) {
 		// A throwing first read leaves no ticker: the pass runs before the timer exists.
-		const at = now(), last = sources(state, at);
+		const at = now(), last = sources(state);
 		const created: Watch = { subscribers: new Set(), last, bucket: Math.floor(at / CLOCK_MS), timer: setInterval(() => tick(state, created, now), TICK_MS) };
 		created.timer.unref();
 		watches.set(state.stateDir, watch = created);

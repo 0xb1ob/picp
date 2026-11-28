@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { request, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
+import { createServer as createHttpServer, request, type IncomingHttpHeaders, type IncomingMessage, type Server } from "node:http";
 import { type AddressInfo, connect, createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { runInNewContext } from "node:vm";
@@ -351,6 +351,124 @@ test("P21-etag: screen GETs carry a strong ETag; a match is an empty 304 until a
 	assert.equal(phone.status, 200);
 	const revalidated = await call(remote.port, "/api/jobs", { headers: { cookie, "if-none-match": String(phone.headers.etag) } });
 	assert.deepEqual([revalidated.status, revalidated.headers["cache-control"]], [304, "no-store"], "a remote 304 stays no-store");
+});
+
+test("P21-etag-delta: a keyed delta carries its own ETag, so a full request holding it gets the full body, never a 304", { timeout: 120_000 }, async (t) => {
+	// PR #889 finding: a delta tagged like the full body let a full request revalidate onto a delta it never applied.
+	const at = "2026-09-26T12:00:00Z", ids = Array.from({ length: 200 }, (_, i) => `cp-run-${i}`);
+	const status = (cost: number) => JSON.stringify({ phase: "idle", started_at: at, exited_at: at, usage: { cost_usd: cost, total_tokens: 100 } });
+	const view = await serve(t, { clock: () => 0 }, (put) => {
+		put(".pi-command-post/jobs.json", { jobs: ids.map((id) => ({ id, title: id, status: "in_progress", labels: ["project:demo", "kind:ship"] })) });
+		put(LAYOUT.fleetFile, { jobs: ids.map((id) => ({ job_id: id, project: "demo", kind: "ship", phase: "held", dispatched_at: at })) });
+		for (const id of ids) put(`${LAYOUT.runs}/${id}/status.json`, status(1));
+	});
+	const first = await view.get("/api/jobs");
+	writeFileSync(join(view.home, LAYOUT.runs, "cp-run-7", "status.json"), status(42));
+	const delta = await view.get("/api/jobs", { "x-cp-delta-base": String(first.headers["x-cp-version"]), "if-none-match": String(first.headers.etag) });
+	const held = String(delta.headers.etag);
+	assert.deepEqual([delta.status, delta.headers["x-cp-delta-base"]], [200, first.headers["x-cp-version"]], "a changed revision on a held base is a delta");
+	assert.match(held, /^"[0-9a-f]+\.[0-9a-f]{40}\.d"$/, "the delta's tag names it a delta");
+	const full = await view.get("/api/jobs", { "if-none-match": held });
+	assert.equal(full.status, 200, "a full request holding the delta's tag gets the full body");
+	assert.equal(full.headers.etag, held.replace(/\.d"$/, '"'), "the full body is tagged as the full revision");
+	assert.ok(Array.isArray((JSON.parse(full.body.toString()) as { jobs?: unknown }).jobs), "the full body, not a delta");
+	const again = await view.get("/api/jobs", { "x-cp-delta-base": String(delta.headers["x-cp-version"]), "if-none-match": held });
+	assert.equal(again.status, 304, "a delta request holding the delta's tag is unchanged");
+});
+
+test("P21-etag-untagged: a revision read that throws answers the view 200 with no ETag and logs one line without the body", { timeout: 60_000 }, async (t) => {
+	const lines: string[] = [];
+	const view = await serve(t, { clock: () => { throw new Error("secret-ish payload"); }, log: (line) => lines.push(line) }, (put) => put(LAYOUT.fleetFile, { jobs: [] }));
+	const reply = await view.get("/api/jobs");
+	assert.deepEqual([reply.status, reply.headers.etag], [200, undefined]);
+	assert.ok(Array.isArray((JSON.parse(reply.body.toString()) as { jobs?: unknown }).jobs), "the view itself is served");
+	assert.deepEqual(lines.filter((line) => /revision read failed/.test(line)), ["cp-view: jobs revision read failed (Error); answering untagged\n"], "one line, no error text or payload");
+});
+
+/** The tab's screen GETs from `index` on, the stream and the control status left out. */
+const screenGets = (tab: Tab, index = 0) => tab.requests.slice(index).filter((r) => r.method === "GET" && /^\/api\/(sessions|jobs|overview|workspace\/status)\b/.test(r.path));
+
+test("P21-one-stream: a wide composer page holds one stream for all its views, refetches only what changed, and revalidates with 304s on show", { timeout: 180_000 }, async (t) => {
+	const at = new Date().toISOString();
+	const view = await live(t, { requireTailnet: true, clock: () => 0 });
+	const transcript = join(view.home, "operator-chat.jsonl");
+	const line = (text: string) => `${JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", content: [{ type: "text", text }] } })}\n`;
+	view.put(join(LAYOUT.state, "sessions", "operator-sessions.jsonl"), `${JSON.stringify({ at, session_file: transcript })}\n`);
+	view.put("operator-chat.jsonl", line("First operator line"));
+	view.put(".pi-command-post/jobs.json", { jobs: [{ id: "cp-live", title: "Live job", status: "in_progress", labels: ["project:demo", "kind:ship"] }] });
+	view.put(LAYOUT.fleetFile, { jobs: [{ job_id: "cp-live", project: "demo", kind: "ship", phase: "waiting", dispatched_at: at }] });
+	const tab = await openTab(t, view.port, "#sessions?view=you&transcript=1", new Map(), undefined, {}, true, { liveStream: true });
+	await tab.waitText(/First operator line/);
+	await sleep(1_000);
+	assert.equal(tab.openStreams(), 1, `one stream for the page, not one per resource: ${JSON.stringify(tab.streams.map((s) => s.path))}`);
+	const views = new URL(tab.streams.at(-1)!.path, "http://x").searchParams.get("views")!.split(",");
+	for (const name of ["jobs", "overview", "sessions"]) assert.ok(views.includes(name), `the stream covers ${name}: ${views}`);
+	assert.ok(tab.requests.some((r) => r.path.startsWith("/api/jobs")) && tab.requests.some((r) => r.path.startsWith("/api/workspace/status")), "jobs and overview resources are mounted");
+
+	const before = tab.requests.length;
+	appendFileSync(transcript, line("Second operator line"));
+	await tab.waitText(/Second operator line/, 3_000);
+	await sleep(1_500);
+	const after = screenGets(tab, before).map((r) => r.path);
+	assert.ok(after.some((path) => path.startsWith("/api/sessions")), `a transcript change refetches sessions: ${after}`);
+	assert.deepEqual(after.filter((path) => !path.startsWith("/api/sessions")), [], "and nothing else");
+
+	visible(tab, false);
+	await until(() => tab.openStreams(), (n) => n === 0, "the hidden page's stream closing");
+	const shownAt = tab.requests.length;
+	visible(tab, true);
+	await until(() => tab.openStreams(), (n) => n === 1, "one stream on show");
+	const shown = await until(() => screenGets(tab, shownAt), (list) => list.length >= 3, "the revalidating GETs on show");
+	await sleep(500);
+	for (const get of screenGets(tab, shownAt)) assert.deepEqual([get.path, Boolean(get.headers["if-none-match"]), get.status], [get.path, true, 304], "an unchanged view is a 304");
+	assert.ok(shown.length >= 3);
+	assert.equal(tab.openStreams(), 1, "still one stream");
+});
+
+test("P21-reconnect: a stream a proxy's 502 closed reopens with backoff after the restart, revalidates once and keeps updating", { timeout: 180_000 }, async (t) => {
+	// A restart behind a proxy: its 502 closes the EventSource for good, which a browser never retries itself.
+	// Negative control: without live-stream.ts's backoff reopen this fails at "reconnects".
+	const scratch = createScratchHome(); t.after(() => scratch.cleanup());
+	const app = await buildViewer({ stateDir: join(scratch.path, LAYOUT.state) });
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const stateDir = join(home.path, LAYOUT.state);
+	mkdirSync(stateDir, { recursive: true });
+	const ledger = (title: string) => ({ jobs: [{ id: "cp-live", title, status: "in_progress", labels: ["project:demo", "kind:ship"] }] });
+	const fleet = (phase: string) => ({ jobs: [{ job_id: "cp-live", project: "demo", kind: "ship", phase, dispatched_at: new Date().toISOString() }] });
+	mkdirSync(join(home.path, ".pi-command-post"), { recursive: true });
+	writeFileSync(join(home.path, ".pi-command-post", "jobs.json"), JSON.stringify(ledger("Before restart")));
+	writeFileSync(join(stateDir, "fleet.json"), JSON.stringify(fleet("waiting")));
+	const options: ViewerOptions = { home: home.path, stateDir, host: "127.0.0.1", port: 0, app, requireTailnet: true, clock: () => 0 };
+	const listen = (server: Server, port: number) => new Promise<void>((done) => server.listen(port, "127.0.0.1", done));
+	const stop = (server: Server) => new Promise<void>((done) => { server.close(() => done()); server.closeAllConnections(); });
+	const first = createViewer(options);
+	await listen(first, 0);
+	options.port = (first.address() as AddressInfo).port;
+	const tab = await openTab(t, options.port, "#jobs", new Map(), undefined, {}, false, { liveStream: true });
+	await tab.waitText(/Before restart/);
+	await until(() => tab.openStreams(), (n) => n === 1, "the first stream");
+
+	await stop(first);
+	let refused = 0;
+	const proxy = createHttpServer((req, res) => { if (req.url?.startsWith("/api/stream")) refused++; res.writeHead(502); res.end(); });
+	await listen(proxy, options.port);
+	await until(() => refused, (n) => n >= 1, "the stream closed by the 502", 10_000);
+	await sleep(500);
+	swap(join(home.path, ".pi-command-post", "jobs.json"), ledger("Changed while down"));
+	await stop(proxy);
+	const downAt = tab.requests.length;
+	const second = createViewer(options);
+	await listen(second, options.port);
+	t.after(() => stop(second));
+	await until(() => tab.openStreams(), (n) => n === 1, "reconnects", 35_000);
+	await tab.waitText(/Changed while down/, 5_000);
+	const revalidated = tab.requests.slice(downAt).filter((r) => r.path === "/api/jobs" && r.status !== 502);
+	assert.ok(revalidated.length >= 1 && revalidated.every((r) => r.headers["if-none-match"]), "the reconnect revalidates with the held ETag");
+	assert.equal(revalidated[0]!.status, 200, "a revision changed while down is a 200");
+	swap(join(stateDir, "fleet.json"), fleet("held"));
+	swap(join(home.path, ".pi-command-post", "jobs.json"), ledger("After restart"));
+	await tab.waitText(/After restart/, 2_500);
+	assert.equal(tab.openStreams(), 1, "one stream after the restart");
 });
 
 /** `bin/cp-view` with `tailscale` answered by `script`; returns once the process exits on its own (a refusal). */

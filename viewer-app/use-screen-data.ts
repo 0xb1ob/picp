@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { liveStreamFor } from "./live-stream.ts";
 import { createResource, pollStream, type Snapshot } from "./resource.ts";
 /** `url` null reads nothing and stays connecting: a hook its caller cannot skip still fetches only when needed. */
 export function useScreenData<T>(url: string | null, streamUrl: string): Snapshot<T> {
@@ -9,7 +10,7 @@ export function useScreenData<T>(url: string | null, streamUrl: string): Snapsho
   if (url === null) return;
   // The quick tunnel's listener renders <meta name="cp-refresh" content="poll"> (src/viewer/app-page.ts); local and named keep SSE.
   const poll = document.querySelector('meta[name="cp-refresh"]')?.getAttribute("content") === "poll";
-  const resource = createResource<T>(url,streamUrl,poll ? {fetch: (u,i) => fetch(u,i), stream: pollStream} : undefined);
+  const resource = createResource<T>(url,streamUrl,{fetch: (u,i) => fetch(u,i), stream: poll ? pollStream : liveStreamFor});
   const unsubscribe = resource.subscribe(setValue);
   const visibility = () => resource.setVisible(!document.hidden);
   document.addEventListener("visibilitychange",visibility); visibility();

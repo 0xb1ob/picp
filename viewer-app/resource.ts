@@ -41,10 +41,13 @@ export function createResource<T>(url: string, streamUrl: string, deps: Dependen
  let generation = 0, visible = false, connected = false, trailing = false, disposed = false;
  // The server version `state.data` holds (`x-cp-version`); null asks for a full body next time.
  let version: string | null = null;
+ // The ETag of the revision `state.data` holds, sent as If-None-Match: an unchanged view costs the server a 304.
+ let etag: string | null = null;
  let source: Stream | null = null, request: AbortController | null = null;
  let freshness: ReturnType<typeof setTimeout> | undefined;
  const listeners = new Set<(state: Snapshot<T>) => void>();
  const publish = () => { state = {...state}; for (const listener of listeners) listener(state); };
+ const arm = () => { clearTimeout(freshness); freshness = setTimeout(() => { state.status = "stale"; state.error = "Refresh delayed"; publish(); },FRESH_MS); };
  const refresh = async () => {
   if (!visible || disposed) return;
   if (request) { trailing = true; return; }
@@ -52,7 +55,16 @@ export function createResource<T>(url: string, streamUrl: string, deps: Dependen
   let code: number | undefined;
   try {
    const base = version && state.data ? version : null;
-   const response = await deps.fetch(url,{signal:controller.signal,...(base ? {headers:{"x-cp-delta-base":base}} : {})});
+   const tag = etag && state.data ? etag : null;
+   const headers = {...(base ? {"x-cp-delta-base":base} : {}), ...(tag ? {"if-none-match":tag} : {})};
+   const response = await deps.fetch(url,{signal:controller.signal,...(base || tag ? {headers} : {})});
+   if (response.status === 304 && tag) {
+    if (generation !== current || disposed) return;
+    arm();
+    const status = connected ? "live" : "stale";
+    if (state.status !== status || state.error !== null || state.code !== undefined) { state = {data:state.data,status,error:null}; publish(); }
+    return;
+   }
    if (!response.ok) { code = response.status; throw new Error("Overview unavailable"); }
    const body = await response.json() as T;
    if (generation !== current || disposed) return;
@@ -62,16 +74,16 @@ export function createResource<T>(url: string, streamUrl: string, deps: Dependen
     try {
      if (echoed !== base || !state.data) throw new Error("delta for another base");
      data = applyDelta(state.data, body as Delta);
-    } catch { version = null; trailing = true; return; }
+    } catch { version = null; etag = null; trailing = true; return; }
    }
    version = response.headers.get("x-cp-version");
-   clearTimeout(freshness);
-   freshness = setTimeout(() => { state.status = "stale"; state.error = "Refresh delayed"; publish(); },FRESH_MS);
+   etag = response.headers.get("etag");
+   arm();
    state = {data, status:connected ? "live" : "stale", error:null}; publish();
   } catch {
    if (generation !== current || disposed) return;
    // A remote 401 is a revoked or expired device: protected data goes, never shown stale (the local listener never answers 401).
-   if (code === 401) { state.data = null; version = null; }
+   if (code === 401) { state.data = null; version = null; etag = null; }
    clearTimeout(freshness); state.status = state.data ? "stale" : "offline"; state.error = "Refresh failed";
    if (code === undefined) delete state.code; else state.code = code;
    publish();
@@ -102,6 +114,6 @@ export function createResource<T>(url: string, streamUrl: string, deps: Dependen
    catch { error(); }
    void refresh();
   },
-  dispose() { disposed = true; visible = false; version = null; disconnect(); listeners.clear(); },
+  dispose() { disposed = true; visible = false; version = null; etag = null; disconnect(); listeners.clear(); },
  };
 }
