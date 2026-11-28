@@ -200,11 +200,52 @@ function notModified(req: IncomingMessage, res: ServerResponse, etag: string): b
 	return true;
 }
 
+/** Screen builds waiting for their turn, oldest first. */
+const builds: Array<() => void> = [];
+let draining = false;
+
+/**
+ * Runs `build` after the builds queued before it, one per event-loop turn: one change refetches several views at
+ * once, and back to back they held `/healthz` and every other request for their sum. An aborted request is skipped.
+ */
+function queueBuild(res: ServerResponse, build: () => void): void {
+	builds.push(() => {
+		if (res.destroyed || res.writableEnded) return;
+		try { build(); } catch { if (!res.headersSent) sendJson(res, 500, { error: "internal error" }); else res.destroy(); }
+	});
+	// A request that finds the queue idle always builds afresh: only a burst shares builds (see `once`).
+	if (!draining) { draining = true; builtViews.clear(); setImmediate(drainBuilds); }
+}
+
+function drainBuilds(): void {
+	builds.shift()?.();
+	if (builds.length) setImmediate(drainBuilds); else draining = false;
+}
+
 /** `respond` with the ETag header to send on its 200, unless the client already holds this revision of `views`. */
 function conditional(req: IncomingMessage, res: ServerResponse, options: ViewerOptions, views: readonly ViewName[], respond: (tag: { etag?: string }) => void): void {
 	const etag = viewEtag(req, options, views);
-	if (etag === undefined) respond({});
-	else if (!notModified(req, res, etag)) respond({ etag });
+	if (etag === undefined) queueBuild(res, () => respond({}));
+	else if (!notModified(req, res, etag)) queueBuild(res, () => respond({ etag }));
+}
+
+/** Views built since the build queue last left idle, per principal and URL, with the ETag each was built at. */
+const builtViews = new Map<string, { etag: string; value: unknown }>();
+const BUILT_VIEWS_MAX = 64;
+
+/**
+ * `build()`, or the value built in this queue burst for the same principal, URL and ETag: tabs refetching one
+ * change share one build, as a client holding that tag would keep its data (a 304).
+ */
+function once<T>(req: IncomingMessage, tag: { etag?: string }, build: () => T): T {
+	if (!tag.etag) return build();
+	const key = viewKey(req), held = builtViews.get(key);
+	if (held?.etag === tag.etag) return held.value as T;
+	const value = build();
+	builtViews.delete(key);
+	builtViews.set(key, { etag: tag.etag, value });
+	if (builtViews.size > BUILT_VIEWS_MAX) builtViews.delete(builtViews.keys().next().value!);
+	return value;
 }
 
 /**
@@ -408,7 +449,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			}));
 			return;
 		case "/api/jobs":
-			conditional(req, res, options, ["jobs"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => jobsView(options)), tag)));
+			conditional(req, res, options, ["jobs"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, once(req, tag, () => statScope(() => jobsView(options))), tag)));
 			return;
 		case "/api/jobs/history": {
 			const out = statScope(() => ledgerHistoryView(options, url.searchParams, Date.now()));
@@ -416,7 +457,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		}
 		case "/api/board":
-			conditional(req, res, options, ["board"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => boardView(options)), tag)));
+			conditional(req, res, options, ["board"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, once(req, tag, () => statScope(() => boardView(options))), tag)));
 			return;
 		case "/api/reports":
 			conditional(req, res, options, ["reports"], (tag) => sendView(req, res, reportsView(options, warn), tag));
@@ -430,10 +471,10 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			conditional(req, res, options, ["schedules"], (tag) => sendView(req, res, statScope(() => schedulesView(options, warn)), tag));
 			return;
 		case "/api/overview":
-			conditional(req, res, options, ["overview"], (tag) => sendView(req, res, statScope(() => overview(options)), tag));
+			conditional(req, res, options, ["overview"], (tag) => sendView(req, res, once(req, tag, () => statScope(() => overview(options))), tag));
 			return;
 		case "/api/map":
-			conditional(req, res, options, ["map"], (tag) => afterWarm(res, options, "map", () => sendView(req, res, statScope(() => dependencyMap(options)), tag)));
+			conditional(req, res, options, ["map"], (tag) => afterWarm(res, options, "map", () => sendView(req, res, once(req, tag, () => statScope(() => dependencyMap(options))), tag)));
 			return;
 		case "/api/dashboard":
 			sendJson(res, 200, statScope(() => dashboard(options)));
