@@ -10,7 +10,7 @@ import { createScratchHome } from "./harness/index.ts";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { refreshStream, refreshStreams } from "../src/viewer/refresh-stream.ts";
-import type { ViewName } from "../src/viewer/view-sources.ts";
+import { activeTicks, subscribe, type ViewName } from "../src/viewer/view-sources.ts";
 import { createResource, FRESH_MS, POLL_MS, pollStream, type Stream } from "../viewer-app/resource.ts";
 import { applyDelta, diffJson } from "../src/viewer/json-delta.ts";
 import { readObject } from "../src/viewer/sessions.ts";
@@ -138,6 +138,16 @@ test("view SSE emits immediately without a transcript, merges changes while the 
  t.mock.timers.tick(25_000); assert.equal(chunks.at(-1),": hb\n\n");
  req.emit("close"); res.emit("error",new Error("closed"));
  assert.deepEqual([refreshStreams(),subscribed],[0,0]); const written = chunks.length; change(["overview"]); t.mock.timers.tick(60_000); assert.equal(chunks.length,written);
+});
+
+// `refreshStream` with a throwing first source read: every real source read is defensive, so only forged state throws.
+// Before the fix the throw escaped the request handler and left a stream with no close handler.
+test("a throwing first source read ends the stream and leaves no stream, ticker or handler behind", () => {
+ const req = Object.assign(new EventEmitter(),{method:"GET"}); let ended = false;
+ const res = Object.assign(new EventEmitter(),{writeHead:() => {},write:() => true,end:() => { ended = true; }});
+ const state = { get home(): string { throw new Error("unreadable"); }, stateDir: "/nonexistent/cp-throwing-state" };
+ refreshStream(req as IncomingMessage,res as unknown as ServerResponse,["jobs"],(views,onChange) => subscribe(state,views,onChange));
+ assert.deepEqual([ended,refreshStreams(),activeTicks(),req.listenerCount("close"),res.listenerCount("drain")],[true,0,0,0,0]);
 });
 
 // `bindHostRefusal` accepts: an accepted host binds, which this runner cannot do for a tailnet, LAN or ULA address.

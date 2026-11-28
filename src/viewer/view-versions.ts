@@ -18,6 +18,9 @@ function touch(key: string): Map<string, string> {
 	return versions;
 }
 
+/** This process's nonce (reset with `viewVersions.reset`): an ETag minted before a restart never matches after it. */
+export const processNonce = (): string => nonce;
+
 function dropOldest(key: string, versions: Map<string, string>): void {
 	const [version, json] = versions.entries().next().value!;
 	versions.delete(version);

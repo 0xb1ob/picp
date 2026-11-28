@@ -21,17 +21,18 @@ export function refreshStream(req: IncomingMessage, res: ServerResponse, views: 
   pending.clear(); ready = res.write(frame(changed));
  };
  const drain = () => { ready = true; flush(); };
- res.on("drain", drain);
- const unsubscribe = feed(views, (changed) => { for (const view of changed) pending.add(view); flush(); });
- const heartbeat = setInterval(() => { if (ready) ready = res.write(": hb\n\n"); }, HEARTBEAT_MS);
- // A remote session is re-checked on its own clock whether or not the client keeps up: a revoke closes it within 2 s.
- const validity = stillValid ? setInterval(() => { if (!stillValid()) { stop(); res.destroy(); } }, 2000) : undefined;
- active++;
+ let unsubscribe = () => {}, heartbeat: ReturnType<typeof setInterval> | undefined, validity: ReturnType<typeof setInterval> | undefined;
  const stop = () => {
   if (closed) return;
   closed = true; active--; clearInterval(heartbeat); clearInterval(validity); unsubscribe();
   res.off("drain", drain); req.off("close", stop);
   // A response can emit an error after close; stop remains an idempotent sink.
  };
- req.on("close", stop); res.on("error", stop);
+ active++;
+ req.on("close", stop); res.on("error", stop); res.on("drain", drain);
+ // A throwing first source read ends this stream; the client's EventSource retries after `retry`.
+ try { unsubscribe = feed(views, (changed) => { for (const view of changed) pending.add(view); flush(); }); } catch { stop(); res.end(); return; }
+ heartbeat = setInterval(() => { if (ready) ready = res.write(": hb\n\n"); }, HEARTBEAT_MS);
+ // A remote session is re-checked on its own clock whether or not the client keeps up: a revoke closes it within 2 s.
+ validity = stillValid ? setInterval(() => { if (!stillValid()) { stop(); res.destroy(); } }, 2000) : undefined;
 }

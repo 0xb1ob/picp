@@ -47,8 +47,32 @@ export type Sources = Map<string, { id: string; views: Views }>;
 const statId = (path: string): string => { try { return identity(statSync(path)); } catch { return "absent"; } };
 const list = (dir: string): string[] => { try { return readdirSync(dir); } catch { return []; } };
 
-/** One stat pass over every declared source of `state`. */
-export function sources(state: ViewerState): Sources {
+type Transcripts = Array<[key: string, path: string, views: Views]>;
+/** Per state dir: live job ids and resolved transcripts, reused while their inputs' stat identities and bucket hold. */
+const derived = new Map<string, { live?: [string, string[]]; transcripts?: [string, Transcripts] }>();
+
+function liveIds(state: ViewerState): string[] {
+	return fleetJobs(state).flatMap((job) => {
+		const id = str(job.job_id), phase = str(job.phase);
+		return id && isSafeId(id) && phase !== "done" && phase !== "failed" ? [id] : [];
+	});
+}
+
+function transcripts(state: ViewerState, live: readonly string[]): Transcripts {
+	const out: Transcripts = [];
+	const parent = resolveSessionFile(state, PARENT_ID);
+	if (parent) out.push(["transcript:parent", parent, TRANSCRIPT]);
+	const operator = readOperatorSessions(join(state.stateDir, "sessions"))[0];
+	if (operator) out.push(["transcript:operator", sessionLogFile(operator.file), TRANSCRIPT]);
+	for (const id of live) {
+		const file = resolveSessionFile(state, id);
+		if (file) out.push([`transcript:${id}`, file, WORKER_TRANSCRIPT]);
+	}
+	return out;
+}
+
+/** One stat pass over every declared source of `state`; fleet and session records are parsed only when they move. */
+export function sources(state: ViewerState, now = Date.now()): Sources {
 	const out: Sources = new Map();
 	const put = (key: string, path: string, views: Views) => out.set(key, { id: statId(path), views });
 	const tree = (key: string, dir: string, views: Views) => {
@@ -69,17 +93,17 @@ export function sources(state: ViewerState): Sources {
 		else if (name === "artifacts" || name === "boards") put(name, path, REPORTS);
 		else if (!IGNORED.has(name) && !IGNORED_SUFFIX.test(name)) put(name, path, VIEW_NAMES);
 	}
-	const parent = resolveSessionFile(state, PARENT_ID);
-	if (parent) put("transcript:parent", parent, TRANSCRIPT);
-	const operator = readOperatorSessions(join(state.stateDir, "sessions"))[0];
-	if (operator) put("transcript:operator", sessionLogFile(operator.file), TRANSCRIPT);
-	for (const job of fleetJobs(state)) {
-		const id = str(job.job_id), phase = str(job.phase);
-		if (!id || !isSafeId(id) || phase === "done" || phase === "failed") continue;
-		tree(`runs/${id}`, join(state.stateDir, "runs", id), RUNS);
-		const transcript = resolveSessionFile(state, id);
-		if (transcript) put(`transcript:${id}`, transcript, WORKER_TRANSCRIPT);
-	}
+	// The bucket bounds a missed input (a transcript's first record, a realpath) to one CLOCK_MS, as for any source.
+	const bucket = Math.floor(now / CLOCK_MS), id = (key: string) => out.get(key)?.id ?? "absent";
+	const memo = derived.get(state.stateDir) ?? {};
+	derived.set(state.stateDir, memo);
+	const liveKey = `${bucket}|${id("fleet.json")}`;
+	if (memo.live?.[0] !== liveKey) memo.live = [liveKey, liveIds(state)];
+	const live = memo.live[1];
+	for (const job of live) tree(`runs/${job}`, join(state.stateDir, "runs", job), RUNS);
+	const inputs = [liveKey, id("sessions"), id("sessions/cp-parent-control.json"), id(`sessions/${OPERATOR_SESSIONS_FILE}`), ...live.map((job) => id(`runs/${job}/status.json`))].join("|");
+	if (memo.transcripts?.[0] !== inputs) memo.transcripts = [inputs, transcripts(state, live)];
+	for (const [key, path, views] of memo.transcripts[1]) put(key, path, views);
 	return out;
 }
 
@@ -94,7 +118,7 @@ export function changedViews(before: Sources, after: Sources): Set<ViewName> {
 /** Per view: the sha1 of its sources' sorted identities and the clock bucket of `now`. */
 export function revisions(state: ViewerState, now = Date.now()): Map<ViewName, string> {
 	const lines = new Map<ViewName, string[]>(VIEW_NAMES.map((view) => [view, []]));
-	for (const [key, source] of sources(state)) for (const view of source.views) lines.get(view)!.push(`${key}=${source.id}`);
+	for (const [key, source] of sources(state, now)) for (const view of source.views) lines.get(view)!.push(`${key}=${source.id}`);
 	const bucket = Math.floor(now / CLOCK_MS);
 	return new Map(VIEW_NAMES.map((view) => [view, createHash("sha1").update(`${bucket}\n${lines.get(view)!.sort().join("\n")}`).digest("hex")]));
 }
@@ -115,10 +139,10 @@ const watches = new Map<string, Watch>();
 export const activeTicks = (): number => watches.size;
 
 function tick(state: ViewerState, watch: Watch, now: () => number): void {
-	const bucket = Math.floor(now() / CLOCK_MS);
+	const at = now(), bucket = Math.floor(at / CLOCK_MS);
 	let changed: Set<ViewName>;
 	try {
-		const next = sources(state);
+		const next = sources(state, at);
 		changed = bucket !== watch.bucket ? new Set(VIEW_NAMES) : changedViews(watch.last, next);
 		watch.last = next;
 	} catch {
@@ -139,7 +163,9 @@ function tick(state: ViewerState, watch: Watch, now: () => number): void {
 export function subscribe(state: ViewerState, views: Views, onChange: (changed: ViewName[]) => void, now: () => number = Date.now): () => void {
 	let watch = watches.get(state.stateDir);
 	if (!watch) {
-		const created: Watch = { subscribers: new Set(), last: sources(state), bucket: Math.floor(now() / CLOCK_MS), timer: setInterval(() => tick(state, created, now), TICK_MS) };
+		// A throwing first read leaves no ticker: the pass runs before the timer exists.
+		const at = now(), last = sources(state, at);
+		const created: Watch = { subscribers: new Set(), last, bucket: Math.floor(at / CLOCK_MS), timer: setInterval(() => tick(state, created, now), TICK_MS) };
 		created.timer.unref();
 		watches.set(state.stateDir, watch = created);
 	}

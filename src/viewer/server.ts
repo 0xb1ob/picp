@@ -22,6 +22,7 @@
  * The opt-in boards-only listener (boards-server.ts) never reaches `dispatch`: it shares only `serveBoard` and `send`.
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -42,7 +43,7 @@ import { filesView } from "./files-view.ts";
 import { dependencyMap } from "./mandates-map-view.ts";
 import { APP_CSP, appPage, type ViewerApp } from "./app-page.ts";
 import { refreshStream, refreshStreams } from "./refresh-stream.ts";
-import { streamViews, subscribe } from "./view-sources.ts";
+import { revisions, streamViews, subscribe, type ViewName } from "./view-sources.ts";
 import { awaitingScreen, decidedScreen, decisionsScreen } from "./decision-views.ts";
 import { BOARD_CSP, BOARD_CSS, type BoardWarn, contentType, listBoards, onceWarner, readBoard, resolveBoardFile } from "./boards.ts";
 import { gitView, listOrRead, roots } from "./explorer.ts";
@@ -66,7 +67,7 @@ import { evidenceLookup, readRunning, readVersion } from "./version-view.ts";
 import { SHA } from "./git-read.ts";
 import { accessOf, canRead, streamValidity } from "./access.ts";
 import { diffJson } from "./json-delta.ts";
-import { viewVersions } from "./view-versions.ts";
+import { processNonce, viewVersions } from "./view-versions.ts";
 import { strictHost } from "./host-config.ts";
 import type { BoardsListener } from "./boards-server.ts";
 import { DEVICE_NOTICES_PATH, DEVICES_PATH, DEVICES_REVOKE_PATH, type DeviceRoutes, handleDeviceNotices, handleDevicesList, handleDevicesWrite, PAIR_CREATE_PATH } from "./devices-api.ts";
@@ -163,14 +164,42 @@ export function sendJson(res: ServerResponse, status: number, value: unknown, ex
 	send(res, status, "application/json; charset=utf-8", JSON.stringify(value), { ...JSON_CSP, ...extra });
 }
 
+/** The principal and URL a screen response is kept or tagged for. */
+function viewKey(req: IncomingMessage): string {
+	const access = accessOf(req);
+	return `${access.kind === "remote" ? `remote:${access.device_id}` : "local"}|${req.url ?? "/"}`;
+}
+
+/**
+ * A strong ETag for this principal and URL at the current source revisions of `views`, computed without building the
+ * view; the process nonce makes a pre-restart tag miss.
+ */
+function viewEtag(req: IncomingMessage, options: ViewerOptions, views: readonly ViewName[]): string {
+	const revision = revisions(options, options.clock?.());
+	return `"${processNonce()}.${createHash("sha1").update([viewKey(req), ...views.map((view) => revision.get(view))].join("|")).digest("hex")}"`;
+}
+
+/** A 304 with `etag` and no body when `If-None-Match` lists it (a proxy's `W/` form matches; `*` does not). */
+function notModified(req: IncomingMessage, res: ServerResponse, etag: string): boolean {
+	const asked = req.headers["if-none-match"];
+	if (typeof asked !== "string" || !asked.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) return false;
+	send(res, 304, "application/json; charset=utf-8", "", { ...JSON_CSP, etag });
+	return true;
+}
+
+/** `respond` with the ETag header to send on its 200, unless the client already holds this revision of `views`. */
+function conditional(req: IncomingMessage, res: ServerResponse, options: ViewerOptions, views: readonly ViewName[], respond: (tag: { etag: string }) => void): void {
+	const etag = viewEtag(req, options, views);
+	if (!notModified(req, res, etag)) respond({ etag });
+}
+
 /**
  * A 200 screen view tagged `x-cp-version`. With `x-cp-delta-base` naming a version still held for this principal and
  * URL, the body is a keyed delta (json-delta.ts) and the base is echoed; otherwise the full body, as before.
  */
 function sendView(req: IncomingMessage, res: ServerResponse, value: unknown, extra: Record<string, string> = {}): void {
 	const json = JSON.stringify(value);
-	const access = accessOf(req);
-	const key = `${access.kind === "remote" ? `remote:${access.device_id}` : "local"}|${req.url ?? "/"}`;
+	const key = viewKey(req);
 	const asked = req.headers["x-cp-delta-base"];
 	const base = typeof asked === "string" ? viewVersions.base(key, asked) : undefined;
 	const version = viewVersions.record(key, json);
@@ -341,8 +370,12 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 		case "/api/sessions": {
    const tier=url.searchParams.get("view");
    if (tier !== null) {
-    const view=["you","parent","workers"].includes(tier) ? sessionsView(options,tier as "you" | "parent" | "workers",url.searchParams.get("id"),{transcript:url.searchParams.get("transcript") === "1",session:url.searchParams.get("session")}) : undefined;
-    if (view) sendView(req,res,view); else sendJson(res,404,{error:"no such session"}); return;
+    if (!["you","parent","workers"].includes(tier)) { sendJson(res,404,{error:"no such session"}); return; }
+    conditional(req,res,options,["sessions"],(tag) => {
+     const view=sessionsView(options,tier as "you" | "parent" | "workers",url.searchParams.get("id"),{transcript:url.searchParams.get("transcript") === "1",session:url.searchParams.get("session")});
+     if (view) sendView(req,res,view,tag); else sendJson(res,404,{error:"no such session"});
+    });
+    return;
    }
 			send(res, 200, "application/json; charset=utf-8", JSON.stringify({ ...sidebar(options), boards: listBoards(options, warn) }));
 			return;
@@ -354,13 +387,13 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			});
 			return;
 		case "/api/workspace/status":
-			afterWarm(res, options, "stats", () => {
+			conditional(req, res, options, ["overview", "stats"], (tag) => afterWarm(res, options, "stats", () => {
 				const out = statScope(() => workspaceStatus(options, url.searchParams, Date.now()));
-				if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
-			});
+				if (out.status === 200) sendView(req, res, out.body, tag); else sendJson(res, out.status, out.body);
+			}));
 			return;
 		case "/api/jobs":
-			afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => jobsView(options))));
+			conditional(req, res, options, ["jobs"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => jobsView(options)), tag)));
 			return;
 		case "/api/jobs/history": {
 			const out = statScope(() => ledgerHistoryView(options, url.searchParams, Date.now()));
@@ -368,10 +401,10 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		}
 		case "/api/board":
-			afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => boardView(options))));
+			conditional(req, res, options, ["board"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => boardView(options)), tag)));
 			return;
 		case "/api/reports":
-			sendView(req, res, reportsView(options, warn));
+			conditional(req, res, options, ["reports"], (tag) => sendView(req, res, reportsView(options, warn), tag));
 			return;
 		case "/api/handoffs": {
 			const out = statScope(() => handoffsView(options, url.searchParams, Date.now()));
@@ -379,25 +412,25 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		}
 		case "/api/schedules":
-			sendView(req, res, statScope(() => schedulesView(options, warn)));
+			conditional(req, res, options, ["schedules"], (tag) => sendView(req, res, statScope(() => schedulesView(options, warn)), tag));
 			return;
 		case "/api/overview":
-			sendView(req, res, statScope(() => overview(options)));
+			conditional(req, res, options, ["overview"], (tag) => sendView(req, res, statScope(() => overview(options)), tag));
 			return;
 		case "/api/map":
-			afterWarm(res, options, "map", () => sendView(req, res, statScope(() => dependencyMap(options))));
+			conditional(req, res, options, ["map"], (tag) => afterWarm(res, options, "map", () => sendView(req, res, statScope(() => dependencyMap(options)), tag)));
 			return;
 		case "/api/dashboard":
 			sendJson(res, 200, statScope(() => dashboard(options)));
 			return;
 		case "/api/awaiting":
-			sendView(req, res, statScope(() => awaitingScreen(options)));
+			conditional(req, res, options, ["awaiting"], (tag) => sendView(req, res, statScope(() => awaitingScreen(options)), tag));
 			return;
 		case "/api/decided":
-			sendView(req, res, statScope(() => decidedScreen(options)));
+			conditional(req, res, options, ["decided"], (tag) => sendView(req, res, statScope(() => decidedScreen(options)), tag));
 			return;
 		case "/api/decisions":
-			sendView(req, res, statScope(() => decisionsScreen(options)));
+			conditional(req, res, options, ["decisions"], (tag) => sendView(req, res, statScope(() => decisionsScreen(options)), tag));
 			return;
 		case "/api/job": {
 			const job = jobDetail(options, url.searchParams.get("id") ?? "");
@@ -458,14 +491,19 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 					else send(res, 404, "text/plain; charset=utf-8", "no such report image\n");
 					return;
 				}
-				const report = match ? jobReport(options, match[1]!) : undefined;
-				if (report) sendView(req, res, report);
-				else sendJson(res, 404, { error: "no such report" });
+				if (!match) { sendJson(res, 404, { error: "no such report" }); return; }
+				conditional(req, res, options, ["report"], (tag) => {
+					const report = jobReport(options, match[1]!);
+					if (report) sendView(req, res, report, tag);
+					else sendJson(res, 404, { error: "no such report" });
+				});
 				return;
 			}
 			if (url.pathname.startsWith("/api/job/")) {
 				const match = /^\/api\/job\/([^/]+)(\/events|\/transcript)?$/.exec(url.pathname);
 				let id = ""; try { id = decodeURIComponent(match?.[1] ?? ""); } catch { /* Invalid encoding is not a job id. */ }
+				const etag = match && !match[2] ? viewEtag(req, options, ["job"]) : undefined;
+				if (etag && notModified(req, res, etag)) return;
 				const job = jobView(options, id);
 				if (job && match?.[2] === "/transcript") { sendView(req, res, readWorkerTranscript(options, id)); return; }
 				if (job && match?.[2]) {
@@ -480,7 +518,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 				const running = merge && SHA.test(merge) ? readRunning(merge, versionOptions, job.job.finished_at)
 					.catch(() => ({ checkout: "unknown" as const, since: null, why: "version read failed", processes: [] })) : Promise.resolve(undefined);
 				const lookup = evidenceLookup(versionOptions).catch(() => ({ supported: false, why: "evidence lookup could not be checked" }));
-				Promise.all([running, lookup]).then(([ran, evidence_lookup]) => sendView(req, res, { ...job, ...(ran ? { running: ran } : {}), evidence_lookup }))
+				Promise.all([running, lookup]).then(([ran, evidence_lookup]) => sendView(req, res, { ...job, ...(ran ? { running: ran } : {}), evidence_lookup }, etag ? { etag } : {}))
 					.catch(() => { if (!res.headersSent) sendJson(res, 500, { error: "internal" }); });
 				return;
 			}
