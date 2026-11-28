@@ -19,6 +19,7 @@ import { viewerConfigFile } from "../../src/viewer/host-config.ts";
 import { applyDelta } from "../../src/viewer/json-delta.ts";
 import { createRemoteViewer } from "../../src/viewer/remote-server.ts";
 import { createViewer, pollingStreams, type ViewerOptions } from "../../src/viewer/server.ts";
+import { activeTicks } from "../../src/viewer/view-sources.ts";
 import { dashboard, openTab, startViewer, type Tab, until } from "../harness/dashboard.ts";
 import { createScratchHome, git, REPO_ROOT } from "../harness/index.ts";
 import { call, remoteRig } from "../harness/remote.ts";
@@ -251,11 +252,18 @@ test("P21-live-stream: a screen stream names its view at once with a 2 s retry a
 	await until(() => stream.chunks.length, (n) => n >= 1, "the opening refresh");
 	assert.match(stream.chunks[0]!, /^retry: 2000\n\nevent: refresh\ndata: \{"views":\["overview"\]\}\n\n$/);
 	assert.equal(pollingStreams(), 1, "one open stream");
+	const second = await sse(t, view.port, "/api/stream?view=jobs");
+	await until(() => second.chunks.length, (n) => n >= 1, "the second stream's opening refresh");
+	assert.deepEqual([pollingStreams(), activeTicks()], [2, 1], "two streams on one home share one ticker");
 	swap(join(view.stateDir, "fleet.json"), { jobs: [] });
 	assert.ok((await stream.next(3_000, "the fleet change's refresh")).includes("overview"));
 	assert.doesNotMatch(stream.chunks.join(""), /id:/);
 	stream.res.destroy();
+	await until(() => pollingStreams(), (n) => n === 1, "the first closed stream");
+	assert.equal(activeTicks(), 1, "the ticker outlives a stream while another reads it");
+	second.res.destroy();
 	assert.equal(await until(() => pollingStreams(), (n) => n === 0, "the closed stream's clock"), 0);
+	assert.equal(activeTicks(), 0, "the last stream's close stops the ticker");
 });
 
 test("P21-push-idle: at idle a stream carries its opening refresh and only heartbeat comments; a bad views list is a 404", { timeout: 60_000 }, async (t) => {
@@ -306,6 +314,42 @@ test("P21-legacy-stream: a pre-push tab's ?view=jobs stream gets a refresh for a
 	mkdirSync(join(view.stateDir, "boards", "demo"));
 	await sleep(3_000);
 	assert.equal(stream.views().length, 3, "a board change is no jobs refresh");
+});
+
+test("P21-etag: screen GETs carry a strong ETag; a match is an empty 304 until a source changes, per URL, principal and process; control has none", { timeout: 180_000 }, async (t) => {
+	const view = await serve(t, { requireTailnet: true, clock: () => 0 }, (put) => put(LAYOUT.fleetFile, { jobs: [] }));
+	const first = await view.get("/api/jobs");
+	const etag = String(first.headers.etag);
+	assert.equal(first.status, 200);
+	assert.match(etag, /^"[0-9a-f]+\.[0-9a-f]{40}"$/);
+	const same = await view.get("/api/jobs", { "if-none-match": etag, "accept-encoding": "gzip" });
+	assert.deepEqual([same.status, same.body.length, same.headers["content-encoding"], same.headers.etag], [304, 0, undefined, etag], "an empty, uncompressed 304");
+	assert.equal((await view.get("/api/jobs", { "if-none-match": `"other", W/${etag}` })).status, 304, "a list and a proxy's weak form match");
+	assert.equal((await view.get("/api/jobs", { "if-none-match": "*" })).status, 200, "* is not honoured");
+	assert.equal((await view.get("/api/board", { "if-none-match": etag })).status, 200, "an ETag is per URL");
+	swap(join(view.stateDir, "fleet.json"), { jobs: [{ job_id: "cp-a", project: "demo", kind: "ship", phase: "waiting", dispatched_at: new Date().toISOString() }] });
+	const changed = await view.get("/api/jobs", { "if-none-match": etag });
+	assert.equal(changed.status, 200, "a fleet change is a new revision");
+	assert.notEqual(changed.headers.etag, etag);
+	assert.match(changed.body.toString(), /cp-a/);
+	for (const path of ["/api/overview", "/api/board", "/api/map", "/api/awaiting", "/api/decided", "/api/decisions", "/api/reports", "/api/schedules", "/api/sessions?view=parent", "/api/workspace/status?from=2026-09-26T00:00:00Z&to=2026-09-27T00:00:00Z&tz=UTC", "/api/job/cp-a"]) {
+		const full = await view.get(path);
+		assert.match(String(full.headers.etag), /^"[0-9a-f]+\.[0-9a-f]{40}"$/, path);
+		assert.deepEqual([full.status, (await view.get(path, { "if-none-match": String(full.headers.etag) })).status], [200, 304], path);
+	}
+	for (const path of ["/api/operator/control", "/api/stats", "/api/job/nope", "/api/report/cp-none", "/api/sessions?view=nope"]) assert.equal((await view.get(path)).headers.etag, undefined, path);
+
+	const restarted = await startViewer(t, { home: view.home });
+	const after = await restarted.get("/api/jobs", { headers: { "if-none-match": String(changed.headers.etag) } });
+	assert.equal(after.status, 200, "a pre-restart ETag never matches");
+	assert.notEqual(String(after.headers.etag).split(".")[0], String(changed.headers.etag).split(".")[0], "each process mints its own nonce");
+
+	const { pair, remote } = await remoteRig(t);
+	const cookie = pair("Phone").cookie;
+	const phone = await call(remote.port, "/api/jobs", { headers: { cookie } });
+	assert.equal(phone.status, 200);
+	const revalidated = await call(remote.port, "/api/jobs", { headers: { cookie, "if-none-match": String(phone.headers.etag) } });
+	assert.deepEqual([revalidated.status, revalidated.headers["cache-control"]], [304, "no-store"], "a remote 304 stays no-store");
 });
 
 /** `bin/cp-view` with `tailscale` answered by `script`; returns once the process exits on its own (a refusal). */
