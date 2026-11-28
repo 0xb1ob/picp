@@ -1,0 +1,1 @@
+- Dashboard change driver (push refresh, Slice 1 review findings): it resolves every layout path inside `--home` and refuses an absolute or escaping one before writing; e2e `P21-driver-refuses` pins exit 3 with zero writes for a home overlapping the live home and for an unmarked non-empty directory.

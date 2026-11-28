@@ -4,7 +4,8 @@
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { request, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import { type AddressInfo, connect, createServer } from "node:net";
 import { dirname, join } from "node:path";
@@ -1007,4 +1008,33 @@ test("P21-lag-log: CP_VIEW_LAG_LOG=<ms> makes cp-view write one event-loop lag l
 	await new Promise((done) => setTimeout(done, 1_000));
 	assert.deepEqual(lines(quiet.output()), [], "no lag line without the variable");
 	assert.equal((await logged.get("/healthz")).status, 200, "the readout leaves the viewer serving");
+});
+
+test("P21-driver-refuses: the change driver exits 3 with zero writes on a home overlapping the live one or an unmarked non-empty dir", { timeout: 60_000 }, (t) => {
+	// Slice 1 review finding (PR #887): a refusal must happen before the marker or any fixture file is written.
+	const root = mkdtempSync(join(tmpdir(), "cp-driver-refuse-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const user = join(root, "user"), live = join(root, "live"), unmarked = join(root, "unmarked");
+	for (const [dir, file] of [[join(user, ".pi-command-post"), "fleet.json"], [live, "fleet.json"], [unmarked, "notes.txt"]] as const) {
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, file), "{}\n");
+	}
+	const snapshot = () => (readdirSync(root, { recursive: true }) as string[]).sort().map((path) => {
+		const s = statSync(join(root, path));
+		return `${path} ${s.size} ${s.mtimeMs}`;
+	}).join("\n");
+	const drive = (home: string) => spawnSync(process.execPath, [join(REPO_ROOT, "tests/harness/dashboard-change-driver.ts"), "--home", home, "--seed", "5", "--seconds", "0.3"], {
+		env: { ...process.env, HOME: user, CP_HOME: live }, encoding: "utf8", timeout: 30_000,
+	});
+	const before = snapshot();
+	for (const [home, why] of [[live, /live home/], [join(live, "inner"), /live home/], [root, /live home/], [join(user, ".pi-command-post"), /live home/], [unmarked, /not empty and not seeded/]] as const) {
+		const run = drive(home);
+		assert.equal(run.status, 3, `${home} is refused with exit 3: ${run.stderr}`);
+		assert.match(run.stderr, why);
+		assert.equal(snapshot(), before, `refusing ${home} writes nothing`);
+	}
+	const scratch = join(root, "scratch");
+	const seeded = drive(scratch);
+	assert.equal(seeded.status, 0, `a fresh scratch home is driven: ${seeded.stderr}`);
+	assert.notEqual(snapshot(), before, "the snapshot sees the writes of an accepted run");
 });

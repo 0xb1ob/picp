@@ -64,10 +64,7 @@ export function listenPlan(home: string, env: NodeJS.ProcessEnv, requireTailnet:
 	}
 }
 
-/**
- * `CP_VIEW_LAG_LOG=<ms>`: one `cp-view: loop-lag p50= p99= max=` stderr line (milliseconds) per interval, the event-loop
- * delay since the last line. Off when unset; any other value than a positive integer is named and ignored.
- */
+/** Logs event-loop lag (`cp-view: loop-lag p50= p99= max=`, ms) to stderr every `CP_VIEW_LAG_LOG` ms; off unless set. */
 export function startLagLog(env: NodeJS.ProcessEnv, err: (line: string) => void): void {
 	const raw = env.CP_VIEW_LAG_LOG;
 	if (raw === undefined || raw === "") return;

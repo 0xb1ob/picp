@@ -5,7 +5,7 @@
  */
 import { appendFileSync, existsSync, mkdirSync, readdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { layoutForHome, runtimeRootFor } from "../../src/contracts/layout.ts";
 import { describeHome } from "../../src/home.ts";
@@ -34,7 +34,12 @@ if (clash) refuse(`it is, holds or sits inside the live home ${clash}`);
 if (existsSync(home) && readdirSync(home).length > 0 && !existsSync(join(home, MARKER))) refuse(`not empty and not seeded by this driver (no ${MARKER})`);
 
 const L = layoutForHome("multi", home);
-const at = (path: string) => join(home, path);
+const at = (path: string) => {
+	const full = resolve(home, path);
+	if (isAbsolute(path) || !full.startsWith(`${home}${sep}`)) refuse(`layout path ${path} is absolute or leaves --home`);
+	return full;
+};
+const paths = { fleet: at(L.fleetFile), jobs: at(L.jobsFile), runs: at(L.runs), sessions: at(L.sessions) };
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
 const atomic = (path: string, value: unknown) => {
 	mkdirSync(dirname(path), { recursive: true });
@@ -42,7 +47,7 @@ const atomic = (path: string, value: unknown) => {
 	renameSync(`${path}.tmp`, path);
 };
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `cp-fixture-${String(i).padStart(4, "0")}`);
-const transcript = at(join(L.sessions, "operator", "chat.jsonl"));
+const transcript = join(paths.sessions, "operator", "chat.jsonl");
 const line = (role: "user" | "assistant", text: string) => `${JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role, content: [{ type: "text", text }] } })}\n`;
 
 const jobIds = ids(seed), liveIds = jobIds.slice(-LIVE_JOBS);
@@ -52,12 +57,12 @@ const fleet = { jobs: jobIds.map((id, i) => liveIds.includes(id)
 const ledger = { jobs: jobIds.map((id, i) => ({ id, title: `Fixture job ${i}`, labels: ["project:demo", "kind:ship", "delivery:pr"], status: liveIds.includes(id) ? "in_progress" : "closed", created_at: iso(90_000_000), ...(liveIds.includes(id) ? {} : { closed_at: iso(80_000_000 + i * 1000) }) })) };
 mkdirSync(home, { recursive: true });
 writeFileSync(join(home, MARKER), `seeded ${new Date().toISOString()} with ${seed} jobs\n`);
-atomic(at(L.fleetFile), fleet);
-atomic(at(L.jobsFile), ledger);
-for (const id of liveIds) atomic(at(join(L.runs, id, "status.json")), { phase: "working", started_at: iso(3_600_000) });
+atomic(paths.fleet, fleet);
+atomic(paths.jobs, ledger);
+for (const id of liveIds) atomic(join(paths.runs, id, "status.json"), { phase: "working", started_at: iso(3_600_000) });
 mkdirSync(dirname(transcript), { recursive: true });
 writeFileSync(transcript, Array.from({ length: 40 }, (_, i) => line(i % 2 ? "assistant" : "user", `Seed message ${i}`)).join(""));
-writeFileSync(operatorSessionsFile(at(L.sessions)), `${JSON.stringify({ at: iso(3_600_000), session_file: transcript })}\n`);
+writeFileSync(operatorSessionsFile(paths.sessions), `${JSON.stringify({ at: iso(3_600_000), session_file: transcript })}\n`);
 
 const writes = { fleet: 0, jobs: 0, transcript: 0 };
 const timers = [
@@ -65,12 +70,12 @@ const timers = [
 		writes.fleet++;
 		const job = fleet.jobs.find((j) => j.job_id === liveIds[0])!;
 		job.phase = job.phase === "waiting" ? "held" : "waiting";
-		atomic(at(L.fleetFile), fleet);
+		atomic(paths.fleet, fleet);
 	}, EVERY.fleet),
 	setInterval(() => {
 		writes.jobs++;
 		ledger.jobs.find((j) => j.id === liveIds[0])!.title = `Fixture live job · revision ${writes.jobs}`;
-		atomic(at(L.jobsFile), ledger);
+		atomic(paths.jobs, ledger);
 	}, EVERY.jobs),
 	setInterval(() => {
 		writes.transcript++;
