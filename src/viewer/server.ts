@@ -42,6 +42,7 @@ import { filesView } from "./files-view.ts";
 import { dependencyMap } from "./mandates-map-view.ts";
 import { APP_CSP, appPage, type ViewerApp } from "./app-page.ts";
 import { refreshStream, refreshStreams } from "./refresh-stream.ts";
+import { streamViews, subscribe } from "./view-sources.ts";
 import { awaitingScreen, decidedScreen, decisionsScreen } from "./decision-views.ts";
 import { BOARD_CSP, BOARD_CSS, type BoardWarn, contentType, listBoards, onceWarner, readBoard, resolveBoardFile } from "./boards.ts";
 import { gitView, listOrRead, roots } from "./explorer.ts";
@@ -100,6 +101,8 @@ export interface ViewerOptions extends ViewerState {
 	pushFetch?: PushFetch;
 	/** The boards-only listener a Settings save moves (boards-server.ts); absent in a viewer that runs none. */
 	boards?: BoardsListener;
+	/** The refresh stream's clock for its 30 s bucket (view-sources.ts); default `Date.now`. A test seam. */
+	clock?: () => number;
 }
 
 /** `host:port` as a browser sends it in the Host header (IPv6 bracketed). */
@@ -430,7 +433,8 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		}
 		case "/api/stream": {
-			if (["overview", "awaiting", "decided", "decisions", "sessions", "files", "map", "jobs", "job", "board", "reports", "report", "schedules", "stats"].includes(url.searchParams.get("view") ?? "")) { refreshStream(req, res, streamValidity(req)); return; }
+			const views = streamViews(url.searchParams);
+			if (views) { refreshStream(req, res, views, (wanted, onChange) => subscribe(options, wanted, onChange, options.clock), streamValidity(req)); return; }
 			send(res, 404, "text/plain; charset=utf-8", "no such view\n");
 			return;
 		}

@@ -610,16 +610,18 @@ span the whole row, with `overflow-wrap: anywhere`.
 
 ## Live Data
 
-`/api/stream?view=overview` is an explicit read-only refresh clock: immediate
-named `refresh`, then every two seconds, retry 2000. It is not exact file-change
-notification and has no replay IDs. Backpressure suspends writes until drain;
-close/error clear the interval once. Unknown views fail closed. The old `?id=`
+`/api/stream?views=overview,jobs` (or the legacy `?view=overview`) pushes by change: on open one `refresh` with
+`data: {"views":[…]}` naming every subscribed view, retry 2000, then one naming only the views whose sources changed
+(`src/viewer/view-sources.ts`: one 1 s stat pass per state dir while a stream is open). Every view also changes on a
+30 s clock bucket, so server clocks move and a missed source is at most 30 s stale; an unknown top-level state entry
+changes every view. At idle only a `: hb` comment flows, every 25 s. There are no replay IDs. Backpressure merges
+changes into one frame on drain; close/error clear the timers once. Unknown views fail closed. The old `?id=`
 HTML transcript stream returns 404; Sessions refetches its JSON projection.
 
 Overview and More own one shared resource. GETs coalesce to at most one trailing
 request; generation checks and aborts reject obsolete responses. Hidden tabs
 close/abort and visibility return reconnects/refetches. Live requires an open
-stream and a successful GET within five seconds; a one-shot freshness deadline
+stream and a successful GET within 75 s (two clock buckets); a one-shot freshness deadline
 marks delayed reads stale without adding a polling loop. Failed reads retain
 last data visibly stale. Listeners, aborts and timers are cleaned up on unmount.
 
@@ -856,7 +858,7 @@ Live PR and issue chips (Sessions chat): `GET /api/sessions` carries `pr_chips`,
 `src/viewer/pr-chips.ts` from files the viewer already reads — fleet PR receipts and `bound_pr`, `merge.json`, the
 last 256 KB of `runs/<id>/events.jsonl` (`integration_advanced step:"ready"`, `ci_observed pr_closed`), `ci-watch.json`,
 recorded reviews and `review-<n>/pending.json`, the ledger's `external_ref`, and `data/projects.json` — never a GitHub
-call; chips refresh on the existing 2 s stream. A PR reads `merged`, `closed`, `unknown` (an open receipt on a finished
+call; chips refresh when the Sessions stream names a change (ci-watch, the ledger, a live run) or on its 30 s clock. A PR reads `merged`, `closed`, `unknown` (an open receipt on a finished
 job), `draft` (not readied by `cp_integrate`) or `open`, then `CI pending|green|red|unreadable` and `review
 running|<verdict>` only when recorded; the title names `head <sha7>` only when one is on disk. A `#N` in a registered
 project's message links to its fleet PR, else (GitHub) to the issue URL; an unresolved `#N` stays text. An issue reads

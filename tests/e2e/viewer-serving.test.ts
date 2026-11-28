@@ -225,23 +225,87 @@ test("P21-live-poll: a page served with the poll meta refreshes on a two-second 
 	assert.ok(gets >= 3, "the poll clock asks again with no refresh from a stream");
 });
 
-test("P21-live-stream: a screen stream says refresh at once with a 2 s retry and no ids, ticks again, and frees its clock on close", { timeout: 60_000 }, async (t) => {
-	const view = await serve(t);
+/** A raw `/api/stream` read: the chunks as written, and the `views` of every `refresh` frame so far. */
+async function sse(t: { after(fn: () => unknown): void }, port: number, path: string) {
 	const chunks: string[] = [];
 	const res = await new Promise<IncomingMessage>((done, fail) => {
-		request({ host: "127.0.0.1", port: view.port, path: "/api/stream?view=overview" }, (reply) => {
+		request({ host: "127.0.0.1", port, path }, (reply) => {
 			reply.setEncoding("utf8");
 			reply.on("data", (chunk: string) => chunks.push(chunk));
 			done(reply);
 		}).on("error", fail).end();
 	});
-	await until(() => chunks.length, (n) => n >= 2, "the first tick after the opening refresh");
-	assert.match(chunks[0]!, /^retry: 2000\n\nevent: refresh\ndata: \{\}\n\n$/);
-	assert.equal(chunks[1], "event: refresh\ndata: {}\n\n");
-	assert.doesNotMatch(chunks.join(""), /id:/);
-	assert.equal(pollingStreams(), 1, "one open stream, one clock");
-	res.destroy();
+	t.after(() => res.destroy());
+	const views = () => [...chunks.join("").matchAll(/event: refresh\ndata: (.*)\n\n/g)].map((m) => (JSON.parse(m[1]!) as { views: string[] }).views);
+	/** The next `refresh` frame's views, within `ms` of now. */
+	const next = async (ms: number, what: string) => { const seen = views().length; return (await until(views, (list) => list.length > seen, what, ms))[seen]!; };
+	return { res, chunks, views, next };
+}
+/** A state file replaced as json-store.ts writes it: a temp file renamed over the old inode. */
+const swap = (path: string, value: unknown) => { writeFileSync(`${path}.tmp`, JSON.stringify(value)); renameSync(`${path}.tmp`, path); };
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+test("P21-live-stream: a screen stream names its view at once with a 2 s retry and no ids, names it again on a change, and frees its clock on close", { timeout: 60_000 }, async (t) => {
+	const view = await serve(t);
+	const stream = await sse(t, view.port, "/api/stream?view=overview");
+	await until(() => stream.chunks.length, (n) => n >= 1, "the opening refresh");
+	assert.match(stream.chunks[0]!, /^retry: 2000\n\nevent: refresh\ndata: \{"views":\["overview"\]\}\n\n$/);
+	assert.equal(pollingStreams(), 1, "one open stream");
+	swap(join(view.stateDir, "fleet.json"), { jobs: [] });
+	assert.ok((await stream.next(3_000, "the fleet change's refresh")).includes("overview"));
+	assert.doesNotMatch(stream.chunks.join(""), /id:/);
+	stream.res.destroy();
 	assert.equal(await until(() => pollingStreams(), (n) => n === 0, "the closed stream's clock"), 0);
+});
+
+test("P21-push-idle: at idle a stream carries its opening refresh and only heartbeat comments; a bad views list is a 404", { timeout: 60_000 }, async (t) => {
+	// The 2 s tick wrote `data: {}` forever; with the 30 s clock pinned, an idle home writes no refresh at all.
+	const view = await serve(t, { clock: () => 0 }, (put) => put(LAYOUT.fleetFile, { jobs: [] }));
+	const stream = await sse(t, view.port, "/api/stream?views=jobs,overview,jobs");
+	await sleep(5_000);
+	assert.match(stream.chunks.join(""), /^retry: 2000\n\nevent: refresh\ndata: \{"views":\["overview","jobs"\]\}\n\n(?::[^\n]*\n\n)*$/);
+	for (const path of ["/api/stream?views=", "/api/stream?views=overview,nope"]) assert.equal((await view.get(path, {}, "HEAD")).status, 404, path);
+});
+
+test("P21-push-change: a fleet rewrite names jobs and overview, a transcript append names sessions alone, and both render in a live tab within 2.5 s", { timeout: 180_000 }, async (t) => {
+	const at = new Date().toISOString();
+	const view = await live(t, { requireTailnet: true, clock: () => 0 });
+	const transcript = join(view.home, "operator-chat.jsonl");
+	const line = (text: string) => `${JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", content: [{ type: "text", text }] } })}\n`;
+	const ledger = (title: string) => ({ jobs: [{ id: "cp-live", title, status: "in_progress", labels: ["project:demo", "kind:ship"] }] });
+	view.put(join(LAYOUT.state, "sessions", "operator-sessions.jsonl"), `${JSON.stringify({ at, session_file: transcript })}\n`);
+	view.put("operator-chat.jsonl", line("First operator line"));
+	view.put(".pi-command-post/jobs.json", ledger("Old title"));
+	view.put(LAYOUT.fleetFile, { jobs: [{ job_id: "cp-live", project: "demo", kind: "ship", phase: "waiting", dispatched_at: at }] });
+	const stream = await sse(t, view.port, "/api/stream?views=overview,sessions,jobs");
+	await until(() => stream.views().length, (n) => n >= 1, "the opening refresh");
+	swap(join(view.stateDir, "fleet.json"), { jobs: [{ job_id: "cp-live", project: "demo", kind: "ship", phase: "held", dispatched_at: at }] });
+	const fleet = await stream.next(2_000, "the fleet rewrite's refresh");
+	assert.ok(fleet.includes("jobs") && fleet.includes("overview"), `the fleet rewrite names ${fleet}`);
+	appendFileSync(transcript, line("Second operator line"));
+	assert.deepEqual(await stream.next(2_000, "the transcript append's refresh"), ["sessions"], "a transcript-only change names sessions alone");
+
+	const jobs = await openTab(t, view.port, "#jobs", new Map(), undefined, {}, false, { liveStream: true });
+	await jobs.waitText(/Old title/);
+	swap(join(view.home, ".pi-command-post", "jobs.json"), ledger("New title"));
+	await jobs.waitText(/New title/, 2_500);
+	const chat = await openTab(t, view.port, "#sessions?view=you&transcript=1", new Map(), undefined, {}, false, { liveStream: true });
+	await chat.waitText(/Second operator line/);
+	appendFileSync(transcript, line("Third operator line"));
+	await chat.waitText(/Third operator line/, 2_500);
+});
+
+test("P21-legacy-stream: a pre-push tab's ?view=jobs stream gets a refresh for a fleet or schedules change and none for a board", { timeout: 60_000 }, async (t) => {
+	const view = await serve(t, { clock: () => 0 }, (put) => { put(LAYOUT.fleetFile, { jobs: [] }); put(join(LAYOUT.state, "schedules.json"), { schedules: [] }); put(join(LAYOUT.state, "boards", ".keep"), ""); });
+	const stream = await sse(t, view.port, "/api/stream?view=jobs");
+	await until(() => stream.views().length, (n) => n >= 1, "the opening refresh");
+	swap(join(view.stateDir, "fleet.json"), { jobs: [{ job_id: "cp-a", project: "demo", phase: "waiting", dispatched_at: new Date().toISOString() }] });
+	assert.deepEqual(await stream.next(3_000, "the fleet change's refresh"), ["jobs"]);
+	swap(join(view.stateDir, "schedules.json"), { schedules: [{ id: "nightly" }] });
+	assert.deepEqual(await stream.next(3_000, "the schedules change's refresh"), ["jobs"]);
+	mkdirSync(join(view.stateDir, "boards", "demo"));
+	await sleep(3_000);
+	assert.equal(stream.views().length, 3, "a board change is no jobs refresh");
 });
 
 /** `bin/cp-view` with `tailscale` answered by `script`; returns once the process exits on its own (a refusal). */
