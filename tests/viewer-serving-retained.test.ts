@@ -10,7 +10,7 @@ import { createScratchHome } from "./harness/index.ts";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { refreshStream, refreshStreams } from "../src/viewer/refresh-stream.ts";
-import { activeTicks, subscribe, type ViewName } from "../src/viewer/view-sources.ts";
+import { activeTicks, CLOCK_MS, DERIVED_MAX, derivedReads, revisions, subscribe, type ViewName } from "../src/viewer/view-sources.ts";
 import { createResource, FRESH_MS, POLL_MS, pollStream, type Stream } from "../viewer-app/resource.ts";
 import { applyDelta, diffJson } from "../src/viewer/json-delta.ts";
 import { readObject } from "../src/viewer/sessions.ts";
@@ -148,6 +148,32 @@ test("a throwing first source read ends the stream and leaves no stream, ticker 
  const state = { get home(): string { throw new Error("unreadable"); }, stateDir: "/nonexistent/cp-throwing-state" };
  refreshStream(req as IncomingMessage,res as unknown as ServerResponse,["jobs"],(views,onChange) => subscribe(state,views,onChange));
  assert.deepEqual([ended,refreshStreams(),activeTicks(),req.listenerCount("close"),res.listenerCount("drain")],[true,0,0,0,0]);
+});
+
+// `sources()` derived reads: the parse count is process-local, and no screen shows whether a tick parsed (PR #889).
+// The 30 s bucket used to re-parse fleet and session records every bucket on an idle home.
+test("idle source passes on an unchanged home parse nothing, across clock buckets; a fleet rewrite parses again", t => {
+ const home = createScratchHome(); t.after(() => home.cleanup());
+ const stateDir = join(home.path, LAYOUT.state), at = new Date().toISOString();
+ const put = (file: string, text: string) => { mkdirSync(dirname(join(stateDir, file)), {recursive:true}); writeFileSync(join(stateDir, file), text); };
+ put("fleet.json", JSON.stringify({jobs:[{job_id:"cp-live",phase:"working",dispatched_at:at}]}));
+ put("runs/cp-live/status.json", JSON.stringify({phase:"working"}));
+ put("sessions/operator-sessions.jsonl", `${JSON.stringify({at, session_file: join(home.path, "chat.jsonl")})}\n`);
+ const state = {home: home.path, stateDir};
+ revisions(state, 0);
+ const settled = derivedReads().parses;
+ for (let i = 1; i <= 5; i++) revisions(state, i * CLOCK_MS);
+ assert.equal(derivedReads().parses, settled, "five idle passes in five clock buckets parse nothing");
+ writeFileSync(join(stateDir, "fleet.json.tmp"), JSON.stringify({jobs:[]})); renameSync(join(stateDir, "fleet.json.tmp"), join(stateDir, "fleet.json"));
+ revisions(state, 6 * CLOCK_MS);
+ assert.ok(derivedReads().parses > settled, "a fleet rewrite is parsed");
+});
+
+// `derived` bound: one viewer reads one home, so only a process passing many state dirs can grow it (PR #889).
+test("the derived-read memo holds at most DERIVED_MAX state dirs", t => {
+ const home = createScratchHome(); t.after(() => home.cleanup());
+ for (let i = 0; i < DERIVED_MAX * 2; i++) revisions({home: home.path, stateDir: join(home.path, `state-${i}`)}, 0);
+ assert.equal(derivedReads().homes, DERIVED_MAX);
 });
 
 // `bindHostRefusal` accepts: an accepted host binds, which this runner cannot do for a tailnet, LAN or ULA address.

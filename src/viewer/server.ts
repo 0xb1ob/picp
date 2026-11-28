@@ -171,28 +171,81 @@ function viewKey(req: IncomingMessage): string {
 }
 
 /**
- * A strong ETag for this principal and URL at the current source revisions of `views`, computed without building the
- * view; the process nonce makes a pre-restart tag miss. Undefined when the revision read throws: the view answers untagged.
+ * A strong ETag for this principal and URL at the current source revisions of `views`, computed without building
+ * the view; the process nonce makes a pre-restart tag miss. Undefined when the revision read throws: untagged.
  */
 function viewEtag(req: IncomingMessage, options: ViewerOptions, views: readonly ViewName[]): string | undefined {
 	let revision: Map<ViewName, string>;
-	try { revision = revisions(options, options.clock?.(), views); } catch { return undefined; }
+	try {
+		revision = revisions(options, options.clock?.(), views);
+	} catch (error) {
+		(options.log ?? ((line) => process.stderr.write(line)))(`cp-view: ${views.join("+")} revision read failed (${error instanceof Error ? error.name : "error"}); answering untagged\n`);
+		return undefined;
+	}
 	return `"${processNonce()}.${createHash("sha1").update([viewKey(req), ...views.map((view) => revision.get(view))].join("|")).digest("hex")}"`;
 }
 
-/** A 304 with `etag` and no body when `If-None-Match` lists it (a proxy's `W/` form matches; `*` does not). */
+/** The tag of a keyed-delta body at revision `etag`: a delta is another representation than the full body. */
+const deltaEtag = (etag: string): string => `${etag.slice(0, -1)}.d"`;
+
+/**
+ * A 304 with `etag` and no body when `If-None-Match` lists it (a proxy's `W/` form matches; `*` does not). A delta
+ * tag matches only a request that names a delta base: a full request holding a delta's tag gets the full body.
+ */
 function notModified(req: IncomingMessage, res: ServerResponse, etag: string): boolean {
 	const asked = req.headers["if-none-match"];
-	if (typeof asked !== "string" || !asked.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) return false;
+	const held = typeof req.headers["x-cp-delta-base"] === "string" ? [etag, deltaEtag(etag)] : [etag];
+	if (typeof asked !== "string" || !asked.split(",").some((tag) => held.includes(tag.trim().replace(/^W\//, "")))) return false;
 	send(res, 304, "application/json; charset=utf-8", "", { ...JSON_CSP, etag });
 	return true;
+}
+
+/** Screen builds waiting for their turn, oldest first. */
+const builds: Array<() => void> = [];
+let draining = false;
+
+/**
+ * Runs `build` after the builds queued before it, one per event-loop turn: one change refetches several views at
+ * once, and back to back they held `/healthz` and every other request for their sum. An aborted request is skipped.
+ */
+function queueBuild(res: ServerResponse, build: () => void): void {
+	builds.push(() => {
+		if (res.destroyed || res.writableEnded) return;
+		try { build(); } catch { if (!res.headersSent) sendJson(res, 500, { error: "internal error" }); else res.destroy(); }
+	});
+	// A request that finds the queue idle always builds afresh: only a burst shares builds (see `once`).
+	if (!draining) { draining = true; builtViews.clear(); setImmediate(drainBuilds); }
+}
+
+function drainBuilds(): void {
+	builds.shift()?.();
+	if (builds.length) setImmediate(drainBuilds); else draining = false;
 }
 
 /** `respond` with the ETag header to send on its 200, unless the client already holds this revision of `views`. */
 function conditional(req: IncomingMessage, res: ServerResponse, options: ViewerOptions, views: readonly ViewName[], respond: (tag: { etag?: string }) => void): void {
 	const etag = viewEtag(req, options, views);
-	if (etag === undefined) respond({});
-	else if (!notModified(req, res, etag)) respond({ etag });
+	if (etag === undefined) queueBuild(res, () => respond({}));
+	else if (!notModified(req, res, etag)) queueBuild(res, () => respond({ etag }));
+}
+
+/** Views built since the build queue last left idle, per principal and URL, with the ETag each was built at. */
+const builtViews = new Map<string, { etag: string; value: unknown }>();
+const BUILT_VIEWS_MAX = 64;
+
+/**
+ * `build()`, or the value built in this queue burst for the same principal, URL and ETag: tabs refetching one
+ * change share one build, as a client holding that tag would keep its data (a 304).
+ */
+function once<T>(req: IncomingMessage, tag: { etag?: string }, build: () => T): T {
+	if (!tag.etag) return build();
+	const key = viewKey(req), held = builtViews.get(key);
+	if (held?.etag === tag.etag) return held.value as T;
+	const value = build();
+	builtViews.delete(key);
+	builtViews.set(key, { etag: tag.etag, value });
+	if (builtViews.size > BUILT_VIEWS_MAX) builtViews.delete(builtViews.keys().next().value!);
+	return value;
 }
 
 /**
@@ -207,7 +260,8 @@ function sendView(req: IncomingMessage, res: ServerResponse, value: unknown, ext
 	const version = viewVersions.record(key, json);
 	if (base !== undefined) {
 		const delta = JSON.stringify(diffJson(JSON.parse(base), JSON.parse(json)) ?? {});
-		if (delta.length < json.length / 2) return send(res, 200, "application/json; charset=utf-8", delta, { ...JSON_CSP, ...extra, "x-cp-version": version, "x-cp-delta-base": asked as string });
+		const tagged: Record<string, string> = extra.etag ? { etag: deltaEtag(extra.etag) } : {};
+		if (delta.length < json.length / 2) return send(res, 200, "application/json; charset=utf-8", delta, { ...JSON_CSP, ...extra, ...tagged, "x-cp-version": version, "x-cp-delta-base": asked as string });
 	}
 	send(res, 200, "application/json; charset=utf-8", json, { ...JSON_CSP, ...extra, "x-cp-version": version });
 }
@@ -395,7 +449,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			}));
 			return;
 		case "/api/jobs":
-			conditional(req, res, options, ["jobs"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => jobsView(options)), tag)));
+			conditional(req, res, options, ["jobs"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, once(req, tag, () => statScope(() => jobsView(options))), tag)));
 			return;
 		case "/api/jobs/history": {
 			const out = statScope(() => ledgerHistoryView(options, url.searchParams, Date.now()));
@@ -403,7 +457,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		}
 		case "/api/board":
-			conditional(req, res, options, ["board"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => boardView(options)), tag)));
+			conditional(req, res, options, ["board"], (tag) => afterWarm(res, options, "jobs", () => sendView(req, res, once(req, tag, () => statScope(() => boardView(options))), tag)));
 			return;
 		case "/api/reports":
 			conditional(req, res, options, ["reports"], (tag) => sendView(req, res, reportsView(options, warn), tag));
@@ -417,10 +471,10 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			conditional(req, res, options, ["schedules"], (tag) => sendView(req, res, statScope(() => schedulesView(options, warn)), tag));
 			return;
 		case "/api/overview":
-			conditional(req, res, options, ["overview"], (tag) => sendView(req, res, statScope(() => overview(options)), tag));
+			conditional(req, res, options, ["overview"], (tag) => sendView(req, res, once(req, tag, () => statScope(() => overview(options))), tag));
 			return;
 		case "/api/map":
-			conditional(req, res, options, ["map"], (tag) => afterWarm(res, options, "map", () => sendView(req, res, statScope(() => dependencyMap(options)), tag)));
+			conditional(req, res, options, ["map"], (tag) => afterWarm(res, options, "map", () => sendView(req, res, once(req, tag, () => statScope(() => dependencyMap(options))), tag)));
 			return;
 		case "/api/dashboard":
 			sendJson(res, 200, statScope(() => dashboard(options)));

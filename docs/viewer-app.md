@@ -625,6 +625,17 @@ stream and a successful GET within 75 s (two clock buckets); a one-shot freshnes
 marks delayed reads stale without adding a polling loop. Failed reads retain
 last data visibly stale. Listeners, aborts and timers are cleaned up on unmount.
 
+A page holds one EventSource (`viewer-app/live-stream.ts`) on the sorted union of its resources' views; a resource
+gets `refresh` only for its own views (unparsable data refreshes all). A change in the view set reopens it once
+after 100 ms, and the last resource leaving (every one hidden) closes it. A stream the browser closed for good (a
+proxy's non-200 during a restart) reopens after 1, 2, 4, 8, 16, then 30 s, reset on `open`. A resource holding data
+sends its `etag` as `If-None-Match`; a 304 keeps the data, re-arms freshness and publishes only a status change. A
+keyed-delta reply is tagged `"<etag>.d"`: it revalidates only a request that names a delta base.
+
+One change makes every open tab refetch at once, so screen builds behind an ETag run one per event-loop turn
+(`/healthz` and other requests interleave), and the jobs, board, map and overview builds queued in one such burst
+for the same principal, URL and ETag are built once. A request that finds the queue idle always builds afresh.
+
 Responses (JSON, JS, CSS, HTML, text, manifest; 200 and at least 1 KiB) are Brotli- or gzip-compressed when the
 request accepts it, with `vary: accept-encoding`; the event stream never is. Hashed `/assets/viewer/*` files are
 `public, max-age=31536000, immutable` on the local listener only; the remote listener keeps `no-store`.
